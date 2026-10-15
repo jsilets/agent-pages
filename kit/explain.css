@@ -358,6 +358,9 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 .k-slide .k-stamp { font-size: 28px; margin-top: 40px; }
 .k-slide .k-lede { font-size: 52px; line-height: 1.35; color: var(--s); margin-top: 40px; max-width: 32ch; }
 .k-slide .k-note, .k-slide figcaption { color: var(--s); }
+/* .k-slide p sets margin-top to 0, so a note needs its own gap below an exhibit. A caption sits inside the 2.5x zoom, so 16px draws as 40px. */
+.k-slide > .k-note { margin-top: 40px; }
+.k-slide figure > figcaption { margin-top: 16px; }
 /* Kit exhibits are sized for a 760 px page. On a slide they draw at 2.5 times that size. */
 .k-slide :is(figure, .k-scroll, .k-table, .k-grid, .k-layers, .k-stats, .k-bars, .k-scale, .k-callout, .k-model, .k-steps, .k-flow, pre, .k-chip):not(:is(figure, .k-scroll, .k-table, .k-grid, .k-layers, .k-stats, .k-bars, .k-scale, .k-callout, .k-model, .k-steps, .k-flow, pre) *) { zoom: 2.5; }
 .k-build { transition: opacity 0.2s; }

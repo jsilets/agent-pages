@@ -211,7 +211,14 @@ export type PageKind = 'page' | 'deck';
 
 /** A deck is a page whose HTML has <main class="k-deck">. */
 export function pageKind(html: string): PageKind {
-  return /<main\b[^>]*\bclass\s*=\s*["'][^"']*\bk-deck\b/i.test(html) ? 'deck' : 'page';
+  // Packed kit scripts contain example <main> markup. Only inspect document markup.
+  const markup = html.replace(/<!--[\s\S]*?-->|<(script|style|template|textarea|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const mains = markup.match(/<main\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi) ?? [];
+  return mains.some((tag) => {
+    const attrs = tag.matchAll(/\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g);
+    return [...attrs].some(([, name, double, single, bare]) =>
+      name.toLowerCase() === 'class' && (double ?? single ?? bare ?? '').split(/\s+/).includes('k-deck'));
+  }) ? 'deck' : 'page';
 }
 
 /** One slide in the report that the kit's audit writes to the JSON block with the id k-deck-report. */

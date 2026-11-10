@@ -51,7 +51,7 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `GET /p/<group>/<name>/v/<n>` | Access | The viewer for one version |
 | `GET /raw/<group>/<name>/<n>` | Access | The page HTML, with the sandbox CSP |
 | `GET /t/<group>/<name>/<n>/<light or dark>.webp` | Access | A thumbnail |
-| `GET /pdf/<group>/<name>/<n>` | Access | A deck as a PDF, one page for each slide. The host caches it in R2. |
+| `GET /pdf/<group>/<name>/<n>` | Access | A document or deck as a PDF attachment. The host caches it in R2. |
 | `GET /s/_/favicon.svg`, `favicon.ico`, `apple-touch-icon.png` | None | The site icons, which share links show too |
 | `GET /api/pages` | Access | The page list as JSON |
 | `GET /api/search?q=<words>` | Access | The best match on each page, best page first |
@@ -62,7 +62,7 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
 | `DELETE /api/shares/<token>` | Access | Revoke a share link |
 | `GET /s/<token>` | Token | The shared page |
-| `GET /s/<token>/pdf` | Token | The shared deck as a PDF |
+| `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
 
 ## Deploy the host
 

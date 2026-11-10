@@ -527,11 +527,9 @@ const frameAttrs = (kind: string) => `sandbox="${SANDBOX}"${kind === 'deck' ? ' 
 
 /** The Present button and the ⋯ menu items for a deck. */
 const presentButton = (kind: string) => (kind === 'deck' ? `<button type="button" class="v-present" id="present" aria-label="Present">${icon('play')}<span class="v-lbl">Present</span></button>` : '');
-const deckItems = (kind: string, pdf: string) =>
-  kind === 'deck'
-    ? `<a class="v-item" href="${pdf}" target="_blank" rel="noopener">${icon('download')}Download PDF</a>
-    <div class="v-hr"></div>`
-    : '';
+const pdfItem = (pdf: string) =>
+  `<button type="button" class="v-item" data-pdf="${pdf}">${icon('download')}<span>Download PDF</span></button>
+    <div class="v-hr"></div>`;
 
 /** The Appearance control and the ⋯ menu items that both viewers share. */
 function appearance() {
@@ -594,12 +592,40 @@ document.addEventListener('scroll', () => { if (open && open.pop.hasAttribute('d
 
 const toastEl = $('#toast');
 let toastTimer;
-function toast(text) {
+function toast(text, duration = 1800) {
   toastEl.textContent = text;
   toastEl.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toastEl.hidden = true), 1800);
+  if (duration) toastTimer = setTimeout(() => (toastEl.hidden = true), duration);
 }
+
+// Fetch in the viewer's authenticated session. Never open a second tab or browser profile.
+$$('[data-pdf]').forEach((button) => button.addEventListener('click', async () => {
+  button.disabled = true;
+  button.querySelector('span').textContent = 'Preparing PDF…';
+  closePop();
+  toast('Preparing PDF…', 0);
+  try {
+    const response = await fetch(button.dataset.pdf, { signal: AbortSignal.timeout(60000) });
+    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Please try again.');
+    if (!(response.headers.get('content-type') || '').includes('application/pdf')) throw new Error('Reload this page to sign in, then try again.');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = (response.headers.get('content-disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'page.pdf';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast('PDF downloaded');
+  } catch (err) {
+    toast('PDF download failed: ' + (err.name === 'TimeoutError' ? 'The request timed out. Please try again.' : err.message), 0);
+  } finally {
+    button.disabled = false;
+    button.querySelector('span').textContent = 'Download PDF';
+  }
+}));
 
 // Publish times, in the reader's time zone: "Today, 9:41 PM" or "Oct 9, 9:41 PM".
 $$('time[datetime]').forEach((t) => {
@@ -684,7 +710,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   <div class="v-pop" id="pop-more" hidden>
     ${appearance()}
     <div class="v-hr"></div>
-    ${deckItems(input.kind, `/pdf/${esc(slug)}/${n}`)}
+    ${pdfItem(`/pdf/${esc(slug)}/${n}`)}
     <a class="v-item" href="/raw/${esc(slug)}/${n}?k=${KIT}" target="_blank" rel="noopener">${icon('open')}Open in new tab</a>
     <a class="v-item" href="/raw/${esc(slug)}/${n}?k=${KIT}" download="${esc(slug.replace('/', '-'))}-v${n}.html">${icon('download')}Download HTML</a>
     <div class="v-hr"></div>
@@ -781,7 +807,7 @@ export function sharedHtml(input: { token: string; title: string; repo: string |
   <div class="v-pop" id="pop-more" hidden>
     ${appearance()}
     <div class="v-hr"></div>
-    ${deckItems(input.kind, `/s/${esc(input.token)}/pdf`)}
+    ${pdfItem(`/s/${esc(input.token)}/pdf`)}
     <a class="v-item" href="${raw}" target="_blank" rel="noopener">${icon('open')}Open in new tab</a>
     <a class="v-item" href="${raw}" download="${esc(input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'page')}.html">${icon('download')}Download HTML</a>
   </div>

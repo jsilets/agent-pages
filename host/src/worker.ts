@@ -160,8 +160,8 @@ async function auditDeck(env: Env, html: string): Promise<DeckAudit | { error: s
   }
 }
 
-/** A deck's PDF: one 1920×1080 page for each slide. R2 keeps it for each version and kit. */
-async function deckPdf(env: Env, slug: string, version: number, filename: string) {
+/** Export the requested version using its document or slide print layout. */
+async function pagePdf(env: Env, slug: string, version: number, filename: string) {
   const key = pdfKey(slug, version, KIT);
   let pdf: ArrayBuffer | null = null;
   const cached = await env.PAGES.get(key);
@@ -169,11 +169,14 @@ async function deckPdf(env: Env, slug: string, version: number, filename: string
   else {
     const obj = await env.PAGES.get(blobKey(slug, version));
     if (!obj) return fail(404, 'no such version');
+    const html = await obj.text();
+    const deck = pageKind(html) === 'deck';
     const res = await env.BROWSER.quickAction('pdf', {
-      html: withTheme(withKit(await obj.text(), kitCss, kitJs), 'light'),
-      viewport: { width: 1920, height: 1080 },
+      html: withTheme(withKit(html, kitCss, kitJs), 'light'),
+      viewport: deck ? { width: 1920, height: 1080 } : { width: 816, height: 1056 },
       emulateMediaType: 'print',
-      waitForSelector: { selector: 'html[data-k-deck="ready"]', timeout: 20000 },
+      ...(deck ? { waitForSelector: { selector: 'html[data-k-deck="ready"]', timeout: 20000 } } : {}),
+      addStyleTag: [{ content: '*, *::before, *::after { animation: none !important; transition: none !important; }' }],
       gotoOptions: { waitUntil: 'networkidle0', timeout: 20000 },
       pdfOptions: { preferCSSPageSize: true, printBackground: true },
       cacheTTL: 0,
@@ -183,7 +186,7 @@ async function deckPdf(env: Env, slug: string, version: number, filename: string
     await env.PAGES.put(key, pdf, { httpMetadata: { contentType: 'application/pdf' } });
   }
   return new Response(pdf, {
-    headers: { ...BASE_HEADERS, 'content-type': 'application/pdf', 'content-disposition': `inline; filename="${filename}.pdf"`, 'cache-control': 'private, max-age=300' },
+    headers: { ...BASE_HEADERS, 'content-type': 'application/pdf', 'content-disposition': `attachment; filename="${filename}.pdf"`, 'cache-control': 'private, max-age=300' },
   });
 }
 
@@ -329,7 +332,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const hit = await resolveShare(env, r.token);
     if (!hit) return page(messageHtml('Link not found', 'This share link does not exist or was revoked.', nonce, '/s/_/explain.css'), nonce, 404);
     if (r.kind === 'share-view') return page(sharedHtml({ token: r.token, title: hit.page.title, repo: hit.page.repo, kind: hit.page.kind, version: hit.version }, nonce), nonce);
-    if (r.kind === 'share-pdf') return hit.page.kind === 'deck' ? deckPdf(env, hit.page.slug, hit.version.version, pdfName(hit.page.title, hit.version.version)) : fail(404, 'only decks have a PDF');
+    if (r.kind === 'share-pdf') return pagePdf(env, hit.page.slug, hit.version.version, pdfName(hit.page.title, hit.version.version));
     const obj = await env.PAGES.get(blobKey(hit.page.slug, hit.version.version));
     return obj ? rawPage(obj, false, theme) : fail(404, 'no such version');
   }
@@ -363,9 +366,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     }
     case 'pdf': {
       const p = await getPage(env, r.slug);
-      if (!p || p.kind !== 'deck') return fail(404, 'only decks have a PDF');
+      if (!p) return fail(404, 'no such page');
       if (!(await getVersion(env, r.slug, r.version))) return fail(404, 'no such version');
-      return deckPdf(env, r.slug, r.version, pdfName(p.title, r.version));
+      return pagePdf(env, r.slug, r.version, pdfName(p.title, r.version));
     }
     case 'api-list':
       if (method !== 'GET') return fail(405, 'method not allowed');

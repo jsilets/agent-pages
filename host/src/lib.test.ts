@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { auditFromHtml, auditLines, blobKey, ftsQuery, isSlug, isToken, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseTheme, pdfKey, plainText, route, thumbKey, withKit, withTheme } from './lib';
 
@@ -163,6 +165,17 @@ describe('decks', () => {
     expect(pageKind('<html><body><main class="k-deck"><section class="k-claim k-slide">')).toBe('deck');
     expect(pageKind('<html><body><main class="k-page">')).toBe('page');
     expect(pageKind('<p>k-deck is a word here</p>')).toBe('page');
+  });
+  it('ignores the deck example inside the real bundled kit', () => {
+    const kit = readFileSync(new URL('../../kit/explain.js', import.meta.url), 'utf8');
+    const html = `<html><body><main class="k-page"><h1>POC</h1></main><script>${kit}</script></body></html>`;
+    expect(pageKind(html)).toBe('page');
+    expect(pageKind(html.replace('class="k-page"', 'class="k-deck"'))).toBe('deck');
+  });
+  it('ignores inert examples and matches an exact class token', () => {
+    expect(pageKind(`<style>/* <main class="k-deck"> */</style><!-- <main class="k-deck"> --><main data-class="k-deck" class="k-deck-notes">`)).toBe('page');
+    expect(pageKind(`<template><main class="k-deck"></main></template><main class="k-page">`)).toBe('page');
+    expect(pageKind(`<main title="not > the end" class='wide k-deck'>`)).toBe('deck');
   });
   it('routes deck PDFs', () => {
     expect(route('/pdf/a/b/3')).toEqual({ kind: 'pdf', slug: 'a/b', version: 3 });

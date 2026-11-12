@@ -11,13 +11,6 @@ import driveJs from './drive.js?raw';
 import frameCss from './review-frame.css?raw';
 import frameJs from './review-frame.js?raw';
 
-/**
- * The layout study. `classic` is the library as it was. `rooms` and `ledger` are two answers to one question:
- * where does the work of the assistants show? `?layout=<name>` picks one, and the More menu changes it.
- */
-export const LAYOUTS = ['classic', 'rooms', 'ledger'] as const;
-export type Layout = (typeof LAYOUTS)[number];
-export const parseLayout = (v: string | null): Layout => ((LAYOUTS as readonly string[]).includes(v ?? '') ? (v as Layout) : 'classic');
 
 export interface FolderRow {
   id: string;
@@ -87,7 +80,8 @@ body:has(> .l) { height: 100%; overflow: hidden; }
 /* The one row has the height of the window. An automatic row grows with the pages, and then the main area cannot scroll in Chrome. */
 .l { display: grid; grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
 .l-main { display: flex; flex-direction: column; min-width: 0; height: 100%; }
-.h-scroll { flex: 1; min-height: 0; overflow: auto; }
+/* The gutter of the scrollbar is always there, so the page keeps its width when a list grows past the window or shrinks into it. */
+.h-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 
 /* The sidebar. Its top row lines up with the bar. */
 .l-side { --side: color-mix(in oklab, var(--bg2) 55%, var(--bg)); display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow: auto; padding: 0 10px 16px; border-right: 0.5px solid var(--b); background: var(--side); box-sizing: border-box; }
@@ -322,42 +316,32 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
 export interface LibraryInput {
   pages: PageRow[];
   folders: FolderRow[];
-  /** What happened to the pages, newest first. Only the study layouts draw it. */
+  /** What happened to the pages, newest first. Activity draws it. */
   activity: Item[];
-  layout: Layout;
   /** The identity of the reader. A comment by this author shows as "You". */
   me: string;
 }
 
-/** The sidebar of the library as it was: four lists, then the folder tree. */
-const CLASSIC_SIDE = `
+/**
+ * The sidebar: doors, not lists. Home and Activity, then Recent and Shared by link, then the pinned pages themselves
+ * and the folders. Recent and Shared by link are lists that Home can make with its filters, one click away.
+ * The script fills the pins, the tree and the counts.
+ */
+const SIDE = `
     <a class="l-brand" href="/">${MARK}Pages</a>
     <a class="l-nav" href="/" data-nav="home">${lu('home')}Home</a>
+    <a class="l-nav" href="/?v=activity" data-nav="activity">${lu('activity')}Activity<span class="s-count" id="n-activity"></span></a>
     <a class="l-nav" href="/?v=recent" data-nav="recent">${lu('clock')}Recent</a>
-    <a class="l-nav" href="/?v=pinned" data-nav="pinned">${icon('pin')}Pinned<span class="l-n" id="n-pinned"></span></a>
-    <a class="l-nav" href="/?v=shared" data-nav="shared">${lu('users')}Shared by link<span class="l-n" id="n-shared"></span></a>
+    <a class="l-nav" href="/?v=shared" data-nav="shared">${lu('link2')}Shared by link<span class="s-count" id="n-shared"></span></a>
+    <div id="pins"></div>
     <div class="l-sec">Folders<button type="button" class="v-icon" id="new-folder" aria-label="New folder" data-tip="New folder" data-tip-end>${lu('plus')}</button></div>
     <nav class="l-tree" id="tree" aria-label="Folders"></nav>`;
 
-/**
- * The sidebar of a study layout: doors, not lists. Home, then Activity in `rooms`, then the pinned pages themselves,
- * then the folders, and the pages with a share link at the foot. The script fills the pins, the tree and the counts.
- */
-const studySide = (layout: Layout) => `
-    <a class="l-brand" href="/?layout=${layout}">${MARK}Pages</a>
-    <a class="l-nav" href="/?layout=${layout}" data-nav="home">${lu('home')}Home</a>
-    ${layout === 'rooms' ? `<a class="l-nav" href="/?layout=${layout}&v=activity" data-nav="activity">${lu('activity')}Activity<span class="s-count" id="n-activity"></span></a>` : ''}
-    <div id="pins"></div>
-    <div class="l-sec">Folders<button type="button" class="v-icon" id="new-folder" aria-label="New folder" data-tip="New folder" data-tip-end>${lu('plus')}</button></div>
-    <nav class="l-tree" id="tree" aria-label="Folders"></nav>
-    <div class="s-foot"><a class="l-nav" href="/?layout=${layout}&v=shared" data-nav="shared">${lu('link2')}Shared by link<span class="s-count" id="n-shared"></span></a></div>`;
-
 export function libraryHtml(input: LibraryInput, nonce: string) {
-  const { pages, folders, activity, layout, me } = input;
-  const study = layout !== 'classic';
-  const body = `<style>${LIB_CSS}${study ? studyCss : ''}</style>
-<div class="l${study ? ' is-study' : ''}" id="app" data-layout="${layout}">
-  <aside class="l-side" id="side" aria-label="Library">${study ? studySide(layout) : CLASSIC_SIDE}
+  const { pages, folders, activity, me } = input;
+  const body = `<style>${LIB_CSS}${studyCss}</style>
+<div class="l is-study" id="app" data-layout="rooms">
+  <aside class="l-side" id="side" aria-label="Library">${SIDE}
   </aside>
   <div class="l-scrim" id="scrim"></div>
   <div class="l-main">
@@ -366,18 +350,10 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
       <div class="l-crumb" id="crumb"></div>
       <label class="h-search">${icon('search')}<input id="q" type="search" placeholder="Search pages" autocomplete="off" spellcheck="false" aria-label="Search pages"><kbd>/</kbd></label>
       <div class="h-tools">
-        <div class="v-seg" role="group" aria-label="Layout">
-          <button type="button" data-view="grid" aria-label="Grid" data-tip="Grid">${icon('grid')}</button>
-          <button type="button" data-view="list" aria-label="List" data-tip="List">${icon('list')}</button>
-        </div>
         <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" data-tip-end aria-label="More">${icon('more')}</button>
       </div>
       <div class="v-pop" id="pop-more" hidden>
         ${appearance()}
-        <div class="v-label">Layout</div>
-        <div class="v-seg" role="group" aria-label="Layout">
-          ${LAYOUTS.map((l) => `<button type="button" data-layout-set="${l}" aria-pressed="${l === layout}">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}
-        </div>
         <div class="v-hr"></div>
         <div class="v-label">Keyboard</div>
         <dl class="h-keys">
@@ -385,7 +361,11 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
           <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous page</dd>
           <dt><kbd>o</kbd></dt><dd>Open</dd>
           <dt><kbd>c</kbd></dt><dd>Copy link</dd>
-          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>f</kbd></dt><dd>Filter the pages</dd>\n          <dt><kbd>v</kbd></dt><dd>Grid or list</dd>\n          <dt><kbd>n</kbd><kbd>N</kbd></dt><dd>Next and previous change, in Activity</dd>\n          <dt><kbd>s</kbd></dt><dd>Show or hide the changes</dd>' : ''}
+          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>
+          <dt><kbd>f</kbd></dt><dd>Filter the pages</dd>
+          <dt><kbd>v</kbd></dt><dd>Grid or list</dd>
+          <dt><kbd>n</kbd><kbd>N</kbd></dt><dd>Next and previous change, in Activity</dd>
+          <dt><kbd>s</kbd></dt><dd>Show or hide the changes</dd>
         </dl>
       </div>
     </header>
@@ -405,13 +385,15 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
   <div class="l-edit-row"><button type="button" class="v-create" id="fsave">Create folder</button></div>
   <button type="button" class="v-item is-danger" id="fdelete" hidden>${icon('trash')}Delete folder, keep its pages</button>
 </div>
-${layout === 'rooms' ? '<div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>\n<div class="v-pop d-menu" id="pop-filter" data-anchor role="menu" hidden></div>\n' : ''}<div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, ...(layout === 'rooms' ? { frame: { css: frameCss, js: frameJs } } : {}), icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } : {}) } })}</script>`;
+<div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>
+<div class="v-pop d-menu" id="pop-filter" data-anchor role="menu" hidden></div>
+<div class="v-toast" id="toast" role="status" hidden></div>
+<script type="application/json" id="data">${data({ pages, folders, activity, me, kit: KIT, frame: { css: frameCss, js: frameJs }, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
     // The rules of the page list come first: the script reads the view from the address before it draws.
-    (layout === 'rooms' ? inlineDrive(driveJs) : 'const Drive = null;\n') +
+    inlineDrive(driveJs) +
     `
 const D = JSON.parse($('#data').textContent);
 const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
@@ -419,14 +401,6 @@ const h = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '
 const pages = D.pages, folders = D.folders;
 const COLORS = ['blue', 'teal', 'green', 'amber', 'coral', 'pink', 'purple', 'red', 'gray'];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
-// A study layout draws its own sidebar and views. The functions for it are in study.js, in this same script.
-const STUDY = D.layout !== 'classic';
-// The browser keeps the layout of the study, so the link back from a page opens the same layout.
-// An address that names a layout sets it. An address with no layout follows the layout that the browser keeps.
-try {
-  if (new URLSearchParams(location.search).has('layout')) localStorage.setItem('library-layout', D.layout);
-  else { const kept = localStorage.getItem('library-layout'); if (kept && kept !== 'classic') location.replace('/?layout=' + kept + (location.search ? '&' + location.search.slice(1) : '')); }
-} catch {}
 
 let view = 'grid';
 try { if (localStorage.getItem('library-view') === 'list') view = 'list'; } catch {}
@@ -440,23 +414,21 @@ try { JSON.parse(localStorage.getItem('library-open') || '[]').forEach((id) => e
 function placeFromUrl() {
   const u = new URLSearchParams(location.search);
   const f = u.get('f'), v = u.get('v');
-  const lists = STUDY ? ['recent', 'pinned', 'shared', 'activity', 'unfiled'] : ['recent', 'pinned', 'shared'];
+  const lists = ['recent', 'pinned', 'shared', 'activity', 'unfiled'];
   const p = f && folders.some((x) => x.id === f) ? { folder: f } : { list: lists.includes(v) ? v : 'home' };
-  return STUDY ? studyPlace(p, u) : p;
+  return studyPlace(p, u);
 }
 let place = placeFromUrl();
-// The address keeps the layout, and in a study layout the lens, the filters and the open item too.
-// In Rooms it keeps the view of the page list: the filters of the place, the sort, the list layout,
+// The address keeps the place, the filters of Activity and its open item.
+// For a list of pages it keeps the view of the page list: the filters of the place, the sort, the list layout,
 // and the search text when the address is for the view on the screen.
 const urlOf = (p, withSearch) => {
   const q = new URLSearchParams();
-  if (STUDY) q.set('layout', D.layout);
   if (p.folder) q.set('f', p.folder); else if (p.list !== 'home') q.set('v', p.list);
-  if (p.lens === 'activity') q.set('lens', 'activity');
   if (p.af) q.set('af', p.af);
   if (p.only) q.set('only', p.only);
   if (p.ev) q.set('e', p.ev);
-  if (Drive && p.list !== 'activity') {
+  if (p.list !== 'activity') {
     for (const [k, v] of Drive.viewQuery({ type: p.type, mod: p.mod, in: p.in, acc: p.acc, ...order })) q.set(k, v);
     if (view === 'list') q.set('view', 'list');
     const find = withSearch && hits ? $('#q').value.trim() : '';
@@ -487,25 +459,7 @@ function pagesUnder(id) {
 }
 const ramp = (f) => 'c-' + (f && f.color ? f.color : 'gray');
 
-function renderTree() {
-  if (STUDY) return studySide();
-  const here = place.folder;
-  pathOf(here).forEach((f) => f.id !== here && expanded.add(f.id));
-  const row = (f, d) => {
-    const kids = childrenOf(f.id), open = expanded.has(f.id);
-    return '<a class="l-nav ' + ramp(f) + '" href="' + urlOf({ folder: f.id }) + '" data-go-folder="' + f.id + '" style="--d:' + d + '"' + (here === f.id ? ' aria-current="page"' : '') + '>'
-      + '<span class="l-caret' + (kids.length ? (open ? ' is-open' : '') : ' is-none') + '" data-caret="' + f.id + '">' + svg('right') + '</span>'
-      + '<svg class="l-glyph fo" viewBox="0 0 24 24" aria-hidden="true">' + D.icons.folder + '</svg>' + h(f.name)
-      + '<span class="l-n">' + pagesUnder(f.id).length + '</span></a>'
-      + (open ? kids.map((k) => row(k, d + 1)).join('') : '');
-  };
-  const top = childrenOf(null);
-  $('#tree').innerHTML = top.length ? top.map((f) => row(f, 0)).join('') : '<p class="l-empty-tree">No folders yet.</p>';
-  $$('[data-nav]').forEach((a) => { if (!here && a.dataset.nav === place.list) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
-  const pinned = pages.filter((p) => p.pinned_at).length, shared = pages.filter((p) => p.shared).length;
-  $('#n-pinned').textContent = pinned || '';
-  $('#n-shared').textContent = shared || '';
-}
+const renderTree = () => studySide();
 $('#tree').addEventListener('click', (e) => {
   const caret = e.target.closest('[data-caret]');
   if (caret && !caret.classList.contains('is-none')) {
@@ -538,14 +492,6 @@ const access = (p) => '<span class="h-acc" title="' + (p.shared ? 'Shared by lin
 const menu = (p) => '<button type="button" class="v-icon h-menu" aria-label="More for ' + h(p.title) + '" data-tip="More" data-tip-end aria-expanded="false">' + svg('more') + '</button>';
 const kind = (p) => p.kind === 'deck' ? '<span class="h-kind">Deck</span>' : '';
 const where = (p) => { const f = folderOf(p.folder_id); return f ? f.name : 'Not in a folder'; };
-// Outside a folder, a card says which folder holds the page. Inside one, it says when it was published.
-const subText = (p) => place.folder ? 'Published ' + ago(p.updated_at) : where(p) + ', ' + ago(p.updated_at);
-const card = (p) => '<article class="h-card" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="/p/' + p.slug + '" draggable="false">'
-  + thumb(p, Math.min(2, p.latest - 1)) + '<span class="h-title">' + h(p.title) + '</span>'
-  + '<span class="h-sub">' + access(p) + kind(p) + '<span>' + h(subText(p)) + '</span><span class="h-v">v' + p.latest + '</span></span></a>' + menu(p) + '</article>';
-const row = (p) => '<article class="h-row" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="/p/' + p.slug + '" draggable="false">'
-  + thumb(p, 0) + '<span class="h-title">' + h(p.title) + ' ' + kind(p) + '</span><span class="h-where">' + svg('folder') + '<span>' + h(where(p)) + '</span></span>'
-  + '<span class="h-when">Published ' + ago(p.updated_at) + '</span><span class="h-v">v' + p.latest + '</span>' + access(p) + '</a>' + menu(p) + '</article>';
 
 // The fan: the back page leans left, the middle one right, the newest stands in front.
 // Open, the pages rise out of the folder at full size and spread a little. They stay inside the back panel's width, so its edges and tab still show.
@@ -560,8 +506,7 @@ function folderCard(f) {
     return '<span class="fo-sheet' + (i === 2 ? ' is-front' : '') + (p && p.thumb ? '' : ' is-blank') + '" style="--i:' + i + ';--x:' + fan.x + ';--y:' + fan.y + ';--r:' + fan.r + ';--s:' + fan.s + '"' + (p ? ' data-sheet="' + p.slug + '"' : '') + '>' + (p && p.thumb ? imgs(p, '') : '') + '</span>';
   }).join('');
   const bits = [inside.length + (inside.length === 1 ? ' page' : ' pages')];
-  // In Rooms a folder is narrow. Its line has the number of pages and the age, and the folders show when it opens.
-  if (kids && !Drive) bits.push(kids + (kids === 1 ? ' folder' : ' folders'));
+  // A folder is narrow. Its line has the number of pages and the age, and the folders show when it opens.
   const when = inside[0] ? ago(inside[0].updated_at) : '';
   return '<a class="fo ' + ramp(f) + '" href="' + urlOf({ folder: f.id }) + '" data-folder="' + f.id + '">'
     + '<span class="fo-obj">' + FOLDER_BACK + sheets + '<span class="fo-front"></span></span>'
@@ -580,9 +525,7 @@ function hit(x) {
     + (inTitle || !x.snippet || unmark(x.snippet) === x.heading ? '' : '<span class="h-hit-snip">' + mark(x.snippet) + '</span>') + '</a>';
 }
 
-const block = (title, list, more) => '<section class="l-block"><div class="l-head"><h2>' + title + '</h2>' + (more || '') + '</div><div class="h-' + view + '">' + list.map(view === 'grid' ? card : row).join('') + '</div></section>';
 const folderBlock = (list, title) => '<section class="l-block"><div class="l-head"><h2>' + title + '</h2></div><div class="l-folders">' + list.map(folderCard).join('') + '</div></section>';
-const byNew = (a, b) => b.updated_at.localeCompare(a.updated_at);
 
 function renderCrumb() {
   const c = $('#crumb');
@@ -602,38 +545,11 @@ $('#crumb').addEventListener('click', (e) => {
 
 function render() {
   const main = $('#main');
-  $$('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   renderTree();
   renderCrumb();
-  if (hits && !Drive) {
-    main.innerHTML = hits.length
-      ? '<div class="l-head"><h2>' + hits.length + (hits.length === 1 ? ' page matches' : ' pages match') + '</h2></div><div class="h-hits">' + hits.map(hit).join('') + '</div>'
-      : '<p class="h-none">No page has text that matches \\u201c' + h($('#q').value.trim()) + '\\u201d.</p>';
-  } else if (!pages.length && !folders.length) {
+  if (!pages.length && !folders.length) {
     main.innerHTML = '<div class="l-empty"><b>No pages yet</b><span>Publish one with <code>agent-pages publish &lt;page&gt;</code>.</span></div>';
-  } else if (STUDY) {
-    studyMain(main);
-  } else if (place.folder) {
-    const f = folderOf(place.folder), kids = childrenOf(f.id), here = pages.filter((p) => p.folder_id === f.id).sort(byNew);
-    const all = pagesUnder(f.id);
-    document.title = f.name + ' \\u2013 Pages';
-    main.innerHTML = '<div class="l-title"><h1>' + h(f.name) + '</h1><button type="button" class="v-icon" data-edit="' + f.id + '" aria-label="Edit folder" data-tip="Edit folder" aria-expanded="false">' + svg('pencil') + '</button><p>' + all.length + (all.length === 1 ? ' page' : ' pages') + (all[0] ? ', last published ' + ago(all[0].updated_at) : '') + '</p></div>'
-      + (kids.length ? folderBlock(kids, 'Folders') : '')
-      + (here.length ? block('Pages', here) : (kids.length ? '' : '<div class="l-empty"><b>This folder is empty</b><span>Drag a page here, or choose Move to folder from a page\\u2019s menu.</span></div>'));
-  } else {
-    document.title = 'Pages';
-    const pinned = pages.filter((p) => p.pinned_at).sort((a, b) => b.pinned_at.localeCompare(a.pinned_at));
-    const recent = [...pages].sort(byNew);
-    if (place.list === 'recent') main.innerHTML = block('Recent', recent);
-    else if (place.list === 'pinned') main.innerHTML = pinned.length ? block('Pinned', pinned) : '<div class="l-empty"><b>No pinned pages</b><span>Pin a page from its menu, or press p.</span></div>';
-    else if (place.list === 'shared') { const s = recent.filter((p) => p.shared); main.innerHTML = s.length ? block('Shared by link', s) : '<div class="l-empty"><b>No shared pages</b><span>A page shows here once it has a share link.</span></div>'; }
-    else {
-      const top = childrenOf(null);
-      main.innerHTML = (top.length ? folderBlock(top, 'Folders') : '')
-        + (pinned.length ? block(svg('pin') + 'Pinned', pinned) : '')
-        + block('Recent', recent.slice(0, 12), recent.length > 12 ? '<button type="button" class="l-more" data-see="recent">See all ' + recent.length + '</button>' : '');
-    }
-  }
+  } else studyMain(main);
   select(Math.min(sel, entries().length - 1), false);
 }
 const entries = () => $$('#main [data-slug]');
@@ -641,7 +557,7 @@ function select(i, scroll = true) {
   sel = i;
   entries().forEach((el, j) => el.classList.toggle('is-sel', j === i));
   if (scroll && i >= 0) entries()[i].scrollIntoView({ block: 'nearest' });
-  if (STUDY && scroll && i >= 0) studySelected(entries()[i]);
+  if (scroll && i >= 0) studySelected(entries()[i]);
 }
 const current = () => entries()[sel];
 const pageOf = (slug) => pages.find((p) => p.slug === slug);
@@ -676,8 +592,6 @@ addEventListener('pointerup', () => setTimeout(() => $$('.fo.is-press').forEach(
 addEventListener('pointercancel', () => $$('.fo.is-press').forEach((f) => f.classList.remove('is-press')));
 
 $('#main').addEventListener('click', (e) => {
-  const see = e.target.closest('[data-see]');
-  if (see) { go({ list: see.dataset.see }); return; }
   const edit = e.target.closest('[data-edit]');
   if (edit) { e.preventDefault(); e.stopPropagation(); openEditor(edit, edit.dataset.edit, e.detail === 0); return; }
   const fo = e.target.closest('.fo');
@@ -834,21 +748,6 @@ const closeDrawer = () => $('#app').classList.remove('is-drawer');
 $('#menu').addEventListener('click', (e) => { e.stopPropagation(); $('#app').classList.toggle('is-drawer'); });
 $('#scrim').addEventListener('click', closeDrawer);
 
-$$('[data-view]').forEach((b) => b.addEventListener('click', () => {
-  view = b.dataset.view;
-  try { localStorage.setItem('library-view', view); } catch {}
-  render();
-}));
-// The layout switch loads the library again, in the same folder.
-$$('[data-layout-set]').forEach((b) => b.addEventListener('click', () => {
-  const q = new URLSearchParams(location.search);
-  try { localStorage.setItem('library-layout', b.dataset.layoutSet); } catch {}
-  if (b.dataset.layoutSet === 'classic') q.delete('layout'); else q.set('layout', b.dataset.layoutSet);
-  ['lens', 'af', 'only', 'e', 'type', 'mod', 'in', 'acc', 'sort', 'dir', 'view', 'q'].forEach((k) => q.delete(k));
-  if (!['recent', 'pinned', 'shared'].includes(q.get('v'))) q.delete('v');
-  const text = q.toString();
-  location.href = text ? '/?' + text : '/';
-}));
 
 // Search: the host ranks matches with FTS5. A newer request cancels the one before it.
 const q = $('#q');
@@ -858,7 +757,7 @@ async function runSearch() {
   q.parentElement.classList.toggle('has-q', !!q.value);
   if (ctl) ctl.abort();
   // Rooms keeps the search in the address, with the filters of the list.
-  const keep = () => { if (Drive) history.replaceState(history.state, '', urlOf(place, true)); };
+  const keep = () => history.replaceState(history.state, '', urlOf(place, true));
   if (!text) { hits = null; sel = -1; render(); keep(); return; }
   ctl = new AbortController();
   try {
@@ -893,10 +792,9 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'p' && slug && !hits) togglePin(slug);
 });
 ` +
-    // The study functions and their state must exist before the first draw. Activity in Rooms compares versions with the diff core.
-    // Ledger has no Activity room, so it gets the name with no core behind it.
-    (layout === 'rooms' ? inlineDiff(diffJs) : study ? 'const Diff = null;\n' : '') +
-    (study ? studyJs : '') +
+    // The functions of the views and their state must exist before the first draw. Activity compares versions with the diff core.
+    inlineDiff(diffJs) +
+    studyJs +
     `
 render();
 `;

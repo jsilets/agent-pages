@@ -8,7 +8,7 @@ import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { KIT, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
-import { libraryHtml, parseLayout, type FolderRow } from './library';
+import { libraryHtml, type FolderRow } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
 interface Env {
@@ -450,9 +450,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'kit-css':
       return css();
     case 'library': {
-      // The classic layout does not draw the activity, so it does not load it.
-      const layout = parseLayout(url.searchParams.get('layout'));
-      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: layout === 'classic' ? [] : await listActivity(env), layout, me: who.who }, nonce), nonce);
+      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: await listActivity(env), me: who.who }, nonce), nonce);
     }
     case 'api-activity':
       if (method !== 'GET') return fail(405, 'method not allowed');

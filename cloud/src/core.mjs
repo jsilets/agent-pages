@@ -39,6 +39,16 @@ const randomB64url = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
 export async function userKey(user) {
   return hex(await crypto.subtle.digest('SHA-256', enc.encode(`agent-pages-user:v1:${String(user ?? '')}`)));
 }
+/**
+ * The key of the Durable Object for one assistant of one person. Each assistant has its own object, and so its own
+ * container. One object for both needed a stop of one container and a start of the other for each change of assistant,
+ * and Cloudflare then took 34 to 38 seconds to start the second container (measured in production, 2026-11-12).
+ * Claude keeps the key of the person, so the sign-ins from before this change stay.
+ */
+export async function objectKey(user, engine) {
+  if (engine !== 'codex') return userKey(user);
+  return hex(await crypto.subtle.digest('SHA-256', enc.encode(`agent-pages-user-codex:v1:${String(user ?? '')}`)));
+}
 export const archiveKey = (key, engine) => `cred/v1/${key}/${engine}`;
 export const aadOf = (key, engine) => `agent-pages/cred/v1/${key}/${engine}`;
 /** A sign-in id carries the user key, so /connect/code and /connect/status (which have no user) reach the right object. */
@@ -480,10 +490,16 @@ export async function handle(req, env, stubFor) {
   if (method === 'connectCode' || method === 'connectStatus') {
     key = keyOfFlow(body.id);
     if (!key) return json(404, { error: 'no such sign-in' });
-    if (body.user !== undefined && key !== (await userKey(body.user))) return json(404, { error: 'no such sign-in' });
+    if (body.user !== undefined && key !== (await objectKey(body.user, 'claude')) && key !== (await objectKey(body.user, 'codex'))) return json(404, { error: 'no such sign-in' });
   } else {
     if (typeof body.user !== 'string' || !body.user) return json(400, { error: 'user must be the identity of the person' });
-    key = await userKey(body.user);
+    if (method === 'status') {
+      // The state of each assistant comes from its own object.
+      const [a, b] = await Promise.all([stubFor(await objectKey(body.user, 'claude')).status(body), stubFor(await objectKey(body.user, 'codex')).status(body)]);
+      if (a[0] !== 200 || b[0] !== 200) return json(a[0] !== 200 ? a[0] : b[0], a[0] !== 200 ? a[1] : b[1]);
+      return json(200, { assistants: { claude: a[1].assistants.claude, chatgpt: b[1].assistants.chatgpt } });
+    }
+    key = await objectKey(body.user, body.engine === 'codex' ? 'codex' : 'claude');
   }
   const stub = stubFor(key);
   const t_received = Date.now();

@@ -74,6 +74,12 @@ describe('GET /api/assistants', () => {
     expect(out.runner).toBe(false);
     expect(out.assistants.claude).toMatchObject({ handled: true, connected: null, models: [] });
   });
+  it('says that the runner could not check one sign-in, with the text of the host and never the text of the runner', async () => {
+    const h = host({ '/status': { assistants: { claude: { connected: true, models: MODELS }, chatgpt: { connected: false, error: 'docker: /var/run/docker.sock refused' } } } });
+    const { assistants } = (await h.call('GET', '/api/assistants')).body;
+    expect(assistants.chatgpt).toEqual({ handled: true, connected: false, models: [], default_model: null, model: null, error: 'the sandbox runner could not check the sign-in' });
+    expect(assistants.claude.error).toBeUndefined();
+  });
 });
 
 describe('PUT /api/assistants/<name>', () => {

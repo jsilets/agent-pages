@@ -34,6 +34,8 @@ export interface AssistantState {
   default_model: string | null;
   /** The model that the person chose, or null for the default. */
   model: string | null;
+  /** Set when the runner answered but could not check this sign-in. The host gives its own text, never the text of the runner. */
+  error?: string;
 }
 
 export interface ConnectStart {
@@ -119,7 +121,8 @@ export async function assistantStates(env: Env, user: string, handled: string[])
     const s = status ? obj(status[a]) : {};
     const { models, default_model } = readModels(s);
     const model = saved[a] && models.some((m) => m.id === saved[a]) ? saved[a] : null;
-    return [a, { handled: handled.includes(a), connected: status ? s.connected === true : null, models, default_model, model }];
+    const failed = status && str(s.error, 200) ? { error: 'the sandbox runner could not check the sign-in' } : {};
+    return [a, { handled: handled.includes(a), connected: status ? s.connected === true : null, models, default_model, model, ...failed }];
   })) as Record<Assistant, AssistantState>;
   return { runner: !!status, ...(error ? { error } : {}), assistants };
 }

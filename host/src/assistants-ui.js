@@ -1,63 +1,6 @@
-// The parts of the viewer around the comments: a small menu for one comment, a dialog that asks the person to confirm,
-// and the Assistants dialog with the sign-in and the model of each assistant. views.ts puts this file into the viewer
-// script after the helpers ($, $$, el, api, toast, say, tone, closePop) and before margin.js.
-
-// ─── A small menu for one comment, and a dialog that asks the person to confirm ───
-const Menu = (() => {
-  let pop = null, from = null;
-  function close(focus) {
-    if (!pop) return;
-    pop.remove(); pop = null;
-    from.setAttribute('aria-expanded', 'false');
-    if (focus) from.focus();
-    from = null;
-  }
-  function open(btn, list) {
-    if (from === btn) return close();
-    close();
-    from = btn;
-    pop = el('div', 'cm-mpop'); pop.setAttribute('role', 'menu');
-    list.forEach((it) => {
-      const b = el('button', 'v-item' + (it.danger ? ' is-danger c-red' : ''), it.label);
-      b.type = 'button'; b.setAttribute('role', 'menuitem');
-      b.addEventListener('click', (e) => { e.stopPropagation(); close(); it.run(); });
-      pop.append(b);
-    });
-    pop.addEventListener('keydown', (e) => {
-      const all = $$('button', pop), i = all.indexOf(document.activeElement);
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length].focus(); }
-      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); }
-      else if (e.key === 'Tab') close();
-    });
-    document.body.append(pop);
-    place();
-    btn.setAttribute('aria-expanded', 'true');
-    $('button', pop).focus();
-  }
-  /** The menu sits under its button. It follows the button when the view scrolls, and it closes when the button leaves the view. */
-  function place() {
-    const r = from.getBoundingClientRect(), v = $('#scroll').getBoundingClientRect();
-    if (!from.isConnected || r.bottom < v.top || r.top > v.bottom) return close();
-    pop.style.top = Math.min(innerHeight - pop.offsetHeight - 8, r.bottom + 4) + 'px';
-    pop.style.left = Math.max(8, Math.min(innerWidth - pop.offsetWidth - 8, r.right - pop.offsetWidth)) + 'px';
-  }
-  document.addEventListener('click', () => close());
-  $('#scroll').addEventListener('scroll', () => { if (pop) place(); }, { passive: true });
-  addEventListener('blur', () => close());
-  return { open, close, isOpen: () => !!pop };
-})();
-/** Asks the person to confirm. Resolves true for the main button, false for Cancel and Esc. */
-function confirmBox({ title, text, ok }) {
-  const d = $('#cm-confirm');
-  $('#cm-confirm-h').textContent = title; $('#cm-confirm-p').textContent = text; $('#cm-confirm-ok').textContent = ok;
-  return new Promise((done) => {
-    d.returnValue = '';
-    d.addEventListener('close', () => done(d.returnValue === 'ok'), { once: true });
-    d.showModal();
-    $('#cm-confirm-no').focus();
-  });
-}
-$$('#cm-confirm button').forEach((b) => b.addEventListener('click', () => $('#cm-confirm').close(b.value)));
+// The Assistants dialog, with the sign-in and the model of each assistant, and the status chip in the bar that opens it.
+// views.ts puts this file into the script of the library and of the viewer, after the helpers ($, $$, el, api, toast,
+// say, tone, closePop). In the viewer, it comes before margin.js.
 
 // ─── Assistants: the sign-in and the model of each assistant ───
 // The sandbox runner holds each sign-in. The person signs in on the page of the provider, in a new tab, and the work uses
@@ -66,15 +9,31 @@ $$('#cm-confirm button').forEach((b) => b.addEventListener('click', () => $('#cm
 const Assistants = (() => {
   const dlg = $('#assist'), box = $('#assist-body'), back = $('#assist-back'), title = $('#assist-h');
   const PROVIDER = { claude: { name: 'Claude', site: "Claude's page", plan: 'Claude' }, chatgpt: { name: 'ChatGPT', site: "OpenAI's page", plan: 'ChatGPT' } };
-  let data = null, loading = null, flow = null, poll = 0, after = null;
+  // failed: the last request for the states got no answer. seq: only the answer of the newest request counts.
+  let data = null, loading = null, flow = null, poll = 0, after = null, failed = false, seq = 0, loadedAt = 0;
   const listeners = [];
   const changed = () => listeners.forEach((f) => f());
   function load(force) {
     if (loading && !force) return loading;
-    loading = api('/api/assistants').then((d) => { data = d; changed(); if (dlg.open && !flow) list(); return d; }, () => { loading = null; return null; });
+    const n = ++seq;
+    loadedAt = Date.now();
+    loading = api('/api/assistants').then((d) => {
+      if (n !== seq) return d;
+      data = d; failed = false; changed(); if (dlg.open && !flow) list(); return d;
+    }, () => {
+      if (n !== seq) return null;
+      loading = null; failed = true; changed(); if (dlg.open && !flow && !data) list(); return null;
+    });
     return loading;
   }
   const state = (a) => (data && data.assistants && data.assistants[a]) || null;
+  /** The label of the model that the assistant uses now, or ''. */
+  const modelOf = (s) => (s.models.find((m) => m.id === (s.model || s.default_model)) || {}).label || '';
+  /** The state of one assistant in words, for the list of the dialog. */
+  const words = (s) => !s.handled ? 'Not set up on this host'
+    : s.error ? 'Could not check the sign-in'
+    : s.connected === true ? 'Connected' + (modelOf(s) ? ' · Model: ' + modelOf(s) : '')
+    : s.connected === false ? 'Not connected' : 'Not available now';
   const stop = () => { clearTimeout(poll); poll = 0; };
   const svgOpen = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></svg>';
 
@@ -83,13 +42,15 @@ const Assistants = (() => {
   function list() {
     stop(); flow = null; back.hidden = true; frameOf('Assistants');
     const lede = el('p', 'a-lede', 'Ask an assistant in a comment with @claude or @chatgpt. Each one works with your own plan.');
-    if (!data) { box.replaceChildren(lede, el('p', '', 'Loading…')); load(); return; }
+    if (!data) { box.replaceChildren(lede, el('p', failed ? 'a-note' : '', failed ? 'Pages could not load the assistants. Try again in a minute.' : 'Loading…')); if (!failed) load(); return; }
+    // With no runner, no assistant can work. One line says why, in place of a state on each row.
+    const note = data.runner ? null : el('p', 'a-note', data.error === 'no sandbox runner' ? 'Assistants are not set up on this host.' : 'Pages cannot reach the assistants right now. Try again in a minute.');
     const rows = Object.keys(PROVIDER).map((a) => {
       const s = state(a) || { handled: false, connected: null, models: [], default_model: null, model: null };
       const row = el('section', 'a-row ' + tone(a)), top = el('div', 'a-top'), whoEl = el('div', 'a-who');
       const ava = el('span', 'cm-ava is-agent', PROVIDER[a].name[0]); ava.setAttribute('aria-hidden', 'true');
-      const st = !s.handled ? 'Not set up on this host' : s.connected === true ? 'Connected' : s.connected === false ? 'Not connected' : 'The sandbox runner did not answer';
-      whoEl.append(el('b', '', PROVIDER[a].name), el('span', 'a-state' + (s.connected === true ? ' is-on' : ''), st));
+      const stEl = el('span', 'a-state' + (s.error ? ' is-warn' : s.connected === true ? ' is-on' : ''), words(s));
+      whoEl.append(el('b', '', PROVIDER[a].name), stEl);
       top.append(ava, whoEl);
       if (s.handled && s.connected === false) {
         const b = el('button', 'v-create', 'Connect'); b.type = 'button';
@@ -119,7 +80,7 @@ const Assistants = (() => {
           if (m.id === s.default_model) b.append(el('span', 'v-tag', 'Default'));
           lab.append(r, b, ...(m.note ? [el('span', '', m.note)] : []));
           r.addEventListener('change', async () => {
-            try { await api('/api/assistants/' + a, { method: 'PUT', body: JSON.stringify({ model: m.id === s.default_model ? null : m.id }) }); s.model = m.id === s.default_model ? null : m.id; toast(PROVIDER[a].name + ' uses ' + m.label); }
+            try { await api('/api/assistants/' + a, { method: 'PUT', body: JSON.stringify({ model: m.id === s.default_model ? null : m.id }) }); s.model = m.id === s.default_model ? null : m.id; stEl.textContent = words(s); toast(PROVIDER[a].name + ' uses ' + m.label); }
             catch (err) { toast('Could not save the model: ' + err.message); load(true); }
           });
           set.append(lab);
@@ -128,7 +89,7 @@ const Assistants = (() => {
       }
       return row;
     });
-    box.replaceChildren(lede, ...rows);
+    box.replaceChildren(lede, ...(note ? [note] : []), ...rows);
   }
   /** One sign-in. The main button opens the page of the provider in a new tab. */
   async function connect(a, then) {
@@ -227,7 +188,85 @@ const Assistants = (() => {
   function open() { load(true); list(); if (!dlg.open) dlg.showModal(); }
   back.addEventListener('click', () => { load(true); list(); });
   $('#assist-x').addEventListener('click', () => dlg.close());
-  dlg.addEventListener('close', () => { stop(); flow = null; after = null; });
+  // A close loads the states again, so the chip in the bar shows what the person did in the dialog.
+  dlg.addEventListener('close', () => { stop(); flow = null; after = null; load(true); });
   $('#assistants')?.addEventListener('click', () => { closePop(); open(); });
-  return { load, state, open, connect, onChange: (f) => listeners.push(f) };
+  // The states load once with the page, and again when the window gets the focus, at most once each 30 seconds.
+  load(true);
+  addEventListener('focus', () => { if (!dlg.open && Date.now() - loadedAt >= 30000) load(true); });
+  const summary = () => ({ data, failed });
+  return { load, state, open, connect, summary, PROVIDER, onChange: (f) => listeners.push(f) };
+})();
+
+// ─── The status chip: which assistants are connected, on every screen ───
+// One button in the bar. It shows a mark for each assistant that the host offers, with a dot: solid green for connected,
+// hollow grey for not connected, amber when the runner could not check the sign-in. With no assistant connected, it says
+// "Connect an assistant". With no runner, it says "Assistants" and has no dots. A click opens the Assistants dialog.
+(() => {
+  const chip = $('#assist-chip');
+  if (!chip) return;
+  const marks = $('.a-chip-marks', chip), lbl = $('.a-chip-lbl', chip);
+  const P = Assistants.PROVIDER;
+  // The shape of the last answer, so the chip keeps its width until the first answer of this page comes.
+  const SHAPE = 'assistants-chip';
+  let shown = null;
+  const mark = (a, dot) => {
+    const m = el('span', 'a-mark ' + tone(a), P[a].name[0]);
+    if (dot) { m.dataset.state = dot; m.append(el('i', 'a-dot is-' + dot)); }
+    return m;
+  };
+  function draw(shape, states, tip) {
+    chip.className = 'v-icon a-chip is-' + shape;
+    if (shape === 'list') {
+      marks.replaceChildren(...Object.keys(states).map((a) => {
+        const m = mark(a, states[a]);
+        // A dot that changes its state fades in.
+        if (shown && shown[a] && shown[a] !== states[a]) m.lastChild.classList.add('is-new');
+        return m;
+      }));
+      lbl.textContent = '';
+    } else if (shape === 'wait') {
+      marks.replaceChildren(...Object.keys(P).map((a) => mark(a, '')));
+      lbl.textContent = '';
+    } else {
+      // One icon. With no connection it has one hollow dot, which shows when the label does not.
+      const one = el('span', 'a-mark is-icon');
+      one.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c.6 3.9 2.6 5.9 6.5 6.5-3.9.6-5.9 2.6-6.5 6.5-.6-3.9-2.6-5.9-6.5-6.5 3.9-.6 5.9-2.6 6.5-6.5Z"/></svg>';
+      if (shape === 'none') one.append(el('i', 'a-dot is-off'));
+      marks.replaceChildren(one);
+      lbl.textContent = shape === 'none' ? 'Connect an assistant' : 'Assistants';
+    }
+    chip.setAttribute('aria-label', tip);
+    chip.dataset.tip = tip;
+  }
+  function update() {
+    const { data, failed } = Assistants.summary();
+    if (!data && !failed) return;
+    const offered = data && data.runner ? Object.keys(P).filter((a) => Assistants.state(a)?.handled) : [];
+    if (!offered.length) {
+      shown = null;
+      draw('off', {}, !data ? 'Assistants: Pages could not load them' : data.error === 'no sandbox runner' ? 'Assistants: not set up on this host' : 'Assistants: off now. Pages cannot reach them');
+      try { localStorage.setItem(SHAPE, 'off'); } catch {}
+      return;
+    }
+    const states = {}, parts = [];
+    offered.forEach((a) => {
+      const s = Assistants.state(a);
+      states[a] = s.error ? 'warn' : s.connected ? 'on' : 'off';
+      parts.push(P[a].name + (s.error ? ': sign-in check failed' : s.connected ? ' connected' : ' not connected'));
+    });
+    const any = offered.some((a) => states[a] !== 'off');
+    const tip = 'Assistants: ' + parts.join(', ');
+    draw(any ? 'list' : 'none', states, any ? tip : 'Connect an assistant. ' + tip);
+    shown = states;
+    try { localStorage.setItem(SHAPE, any ? 'list' : 'none'); } catch {}
+  }
+  // Until the first answer: a neutral chip in the shape of the last answer, so nothing in the bar moves.
+  let last = 'list';
+  try { last = localStorage.getItem(SHAPE) || 'list'; } catch {}
+  if (last === 'list') draw('wait', {}, 'Assistants: checking');
+  else { draw(last, {}, 'Assistants: checking'); chip.classList.add('is-wait'); }
+  Assistants.onChange(update);
+  update();
+  chip.addEventListener('click', (e) => { e.stopPropagation(); closePop(); Assistants.open(); });
 })();

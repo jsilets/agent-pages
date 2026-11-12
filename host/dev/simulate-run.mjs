@@ -4,7 +4,7 @@
 // real run, and it calls the real MCP connector of the job (list_comments, get_page, edit_page, reply_to_comment).
 // So the page gets a real new version and the thread gets a real reply. It has no dependencies.
 //
-//   node host/dev/simulate-run.mjs [--port 8812] [--speed 1] [--no-progress] [--connected claude,codex] [--auto-approve]
+//   node host/dev/simulate-run.mjs [--port 8812] [--speed 1] [--no-progress] [--connected claude,codex] [--auto-approve] [--check-error codex]
 //   cd host && SANDBOX_RUNNER_URL=http://localhost:8812/run bunx vite --port 8787
 //
 // What it edits: the quote of the comment, or the first paragraph of the page when the comment has no quote.
@@ -20,6 +20,7 @@
 // --connected is the comma list of the engines that each person starts with (default: claude,codex; '' for none).
 // Claude: the sign-in page at /fake/claude/<id> shows a code after "Approve", and the viewer sends that code.
 // ChatGPT: the page at /fake/device takes the short code that the viewer shows. --auto-approve connects it after 3 seconds.
+// --check-error is the comma list of the engines whose sign-in check fails: /status gives them an error, as the real runner does.
 // A job for an engine that the person did not connect ends as not_signed_in.
 import { createServer } from 'node:http';
 
@@ -30,6 +31,7 @@ const PROGRESS = !process.argv.includes('--no-progress');
 const SECRET = process.env.SANDBOX_RUNNER_SECRET || '';
 const START = (arg('connected', 'claude,codex') || '').split(',').map((e) => e.trim()).filter(Boolean);
 const AUTO = process.argv.includes('--auto-approve');
+const CHECK_ERROR = (arg('check-error', '') || '').split(',').map((e) => e.trim()).filter(Boolean);
 const MODELS = {
   claude: { models: [{ id: 'sim-claude-fast', label: 'Faster', note: 'Good for most comments.' }, { id: 'sim-claude-careful', label: 'More careful', note: 'Slower. For long or hard edits.' }], default_model: 'sim-claude-fast' },
   codex: { models: [{ id: 'sim-codex-fast', label: 'Faster', note: 'Good for most comments.' }, { id: 'sim-codex-careful', label: 'More careful', note: 'Slower. For long or hard edits.' }], default_model: 'sim-codex-fast' },
@@ -166,7 +168,8 @@ createServer((req, res) => {
     if (url.pathname === '/warm') { log('warm', body.user || ''); return answer(202, { warm: true }); }
     if (url.pathname === '/status') {
       const on = engines(String(body.user || ''));
-      return answer(200, { assistants: { claude: { connected: on.has('claude'), ...MODELS.claude }, chatgpt: { connected: on.has('codex'), ...MODELS.codex } } });
+      const one = (e) => (CHECK_ERROR.includes(e) ? { connected: false, error: 'a simulated failure of the sign-in check', ...MODELS[e] } : { connected: on.has(e), ...MODELS[e] });
+      return answer(200, { assistants: { claude: one('claude'), chatgpt: one('codex') } });
     }
     if (url.pathname === '/connect') {
       const engine = body.engine === 'codex' ? 'codex' : 'claude', id = 'sim-' + rand(16), port = req.socket.localPort;

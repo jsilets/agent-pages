@@ -162,6 +162,26 @@ async function disconnected(page, name) {
   await until(() => con.isVisible(), name + ' shows Connect');
   return con;
 }
+/** Sets the sign-ins through the host, as the dialog does: { claude: true, chatgpt: false }. A sign-in of Claude uses the code of the fake page. */
+async function signIns(want) {
+  const now = (await api('/api/assistants')).assistants;
+  for (const a of Object.keys(want)) {
+    if (now[a].connected === want[a]) continue;
+    if (!want[a]) { await api('/api/assistants/' + a + '/connection', { method: 'DELETE' }); continue; }
+    ok(a === 'claude', 'the tests connect only Claude through the host');
+    const f = await api('/api/assistants/claude/connect', { method: 'POST' });
+    const code = (await (await fetch(f.url)).text()).match(/<code id="code">([^<]+)<\/code>/)[1];
+    await api('/api/assistants/connect/' + f.id + '/code', { method: 'POST', body: JSON.stringify({ code }) });
+  }
+}
+/** What a person sees on the status chip: its name, its tooltip, its text, and the color of each dot. */
+const chipSeen = (page) => page.evaluate(() => {
+  const c = document.querySelector('#assist-chip');
+  return { name: c.getAttribute('aria-label'), tip: c.dataset.tip, text: c.innerText.trim(), width: c.getBoundingClientRect().width,
+    dots: [...c.querySelectorAll('.a-mark')].filter((m) => m.getClientRects().length).map((m) => { const d = m.querySelector('.a-dot'); if (!d || !d.getClientRects().length) return null; const s = getComputedStyle(d); return { bg: s.backgroundColor, border: s.borderTopWidth }; }) };
+});
+const CLAUDE_ONLY = 'Assistants: Claude connected, ChatGPT not connected';
+const NONE = 'Connect an assistant. Assistants: Claude not connected, ChatGPT not connected';
 /** The left and right edges of the column of the page in the window, and the width of the view. */
 async function docEdges(page) {
   const o = await rect(page, '.v-stage > iframe:not(.is-in)');
@@ -866,6 +886,76 @@ const TESTS = {
     await page.click('#cm-close');
     await until(() => page.evaluate(() => document.querySelector('#cm-sheet').hidden), 'Close closes the sheet');
     await oneScroller(page);
+  },
+
+  async 'the assistant status chip: the state on the library and the viewer, the dialog, and a disconnect'(page) {
+    await signIns({ claude: true, chatgpt: false });
+    const slug = SLUGS.doc || await fresh('doc');
+    try {
+      for (const path of ['/', '/p/' + slug]) {
+        await page.goto(BASE + path);
+        const chip = page.getByRole('button', { name: CLAUDE_ONLY, exact: true });
+        await until(() => chip.isVisible(), `${path}: the chip says "${CLAUDE_ONLY}"`);
+        const seen = await chipSeen(page);
+        ok(seen.tip === CLAUDE_ONLY, `${path}: the tooltip has the same text (${seen.tip})`);
+        ok(seen.text === 'C\nC' || seen.text.replace(/\s/g, '') === 'CC', `${path}: the chip shows two marks and no long text (${JSON.stringify(seen.text)})`);
+        ok(seen.dots.length === 2 && seen.dots[0].bg === 'rgb(59, 155, 84)', `${path}: Claude has a solid green dot (${JSON.stringify(seen.dots)})`);
+        ok(seen.dots[1].bg !== 'rgb(59, 155, 84)' && parseFloat(seen.dots[1].border) > 0, `${path}: ChatGPT has a hollow dot (${JSON.stringify(seen.dots)})`);
+        await shot(page, 'chip-' + (path === '/' ? 'library' : 'viewer'));
+        await chip.click();
+        await until(() => page.isVisible('#assist'), `${path}: a click on the chip opens the Assistants dialog`);
+        await until(() => page.locator('.a-row.a-claude .a-state').textContent().then((t) => t === 'Connected · Model: Faster'), `${path}: the dialog says that Claude is connected, with its model`);
+        ok(await page.locator('.a-row.a-chatgpt .a-state').textContent() === 'Not connected', `${path}: the dialog says that ChatGPT is not connected`);
+        await page.click('#assist-x');
+        await until(() => page.isHidden('#assist'), `${path}: Close closes the dialog`);
+      }
+      // A disconnect in the dialog changes the chip: no assistant is connected, so it asks the person to connect one.
+      await page.getByRole('button', { name: CLAUDE_ONLY, exact: true }).click();
+      const dis = page.getByRole('button', { name: 'Disconnect Claude', exact: true });
+      await until(() => dis.isVisible(), 'the dialog shows Disconnect Claude');
+      await dis.click(); await dis.click();
+      await until(() => page.getByRole('button', { name: 'Connect Claude', exact: true }).isVisible(), 'the dialog shows Connect Claude');
+      await page.click('#assist-x');
+      const none = page.getByRole('button', { name: NONE, exact: true });
+      await until(() => none.isVisible(), `after the disconnect the chip says "${NONE}"`);
+      ok((await chipSeen(page)).text === 'Connect an assistant', 'the chip shows the text "Connect an assistant"');
+      await shot(page, 'chip-none');
+    } finally {
+      await signIns({ claude: true, chatgpt: false });
+    }
+  },
+
+  async 'the assistant status chip: the bar does not wrap or overflow at 1280, 900 and 390 px'(page) {
+    const slug = SLUGS.doc || await fresh('doc');
+    try {
+      for (const want of [{ claude: true, chatgpt: false }, { claude: false, chatgpt: false }]) {
+        await signIns(want);
+        for (const w of [1280, 900, 390]) {
+          await page.setViewportSize({ width: w, height: 800 });
+          for (const path of ['/', '/p/' + slug]) {
+            await page.goto(BASE + path);
+            await until(() => page.evaluate(() => !document.querySelector('#assist-chip').classList.contains('is-wait')), `${path} at ${w} px: the chip gets its state`);
+            const m = await page.evaluate(() => {
+              const bar = document.querySelector('header'), b = bar.getBoundingClientRect();
+              const kids = [...bar.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== 'absolute').map((e) => e.getBoundingClientRect());
+              const more = document.querySelector('header [data-pop="pop-more"]').getBoundingClientRect(), chip = document.querySelector('#assist-chip').getBoundingClientRect();
+              return { h: b.height, overflow: bar.scrollWidth - bar.clientWidth, page: document.documentElement.scrollWidth - innerWidth, out: kids.filter((r) => r.right > b.right + 0.5 || r.left < b.left - 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5).length, chipRight: chip.right, chipLeft: chip.left, chipH: chip.height, moreLeft: more.left };
+            });
+            const where = `${path} at ${w} px (${want.claude ? 'Claude connected' : 'none connected'})`;
+            ok(m.h === 44 && m.out === 0, `${where}: the bar keeps one row of 44 px (${m.h} px, ${m.out} items outside)`);
+            ok(m.overflow <= 0 && m.page <= 0, `${where}: nothing overflows (bar ${m.overflow} px, page ${m.page} px)`);
+            ok(m.chipH === 32 && m.chipLeft >= 0, `${where}: the chip has the height of the other controls (${m.chipH} px)`);
+            ok(path === '/' || m.chipRight <= m.moreLeft, `${where}: the chip is before More`);
+            const seen = await chipSeen(page);
+            if (w < 1000) ok(seen.width <= 64 && seen.text.replace(/\s/g, '').length <= 2, `${where}: the chip shows marks and dots only (${seen.width} px, ${JSON.stringify(seen.text)})`);
+            if (w < 1000 && !want.claude) ok(seen.dots.length === 1 && parseFloat(seen.dots[0].border) > 0, `${where}: one icon with one hollow dot`);
+            await shot(page, `chip-bar-${path === '/' ? 'library' : 'viewer'}-${want.claude ? 'claude' : 'none'}-${w}`);
+          }
+        }
+      }
+    } finally {
+      await signIns({ claude: true, chatgpt: false });
+    }
   },
 
   async 'Connect ChatGPT: the code, the provider page, then Connected'(page, context) {

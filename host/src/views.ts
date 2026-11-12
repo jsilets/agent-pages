@@ -5,6 +5,7 @@ import kitCss from '../../kit/explain.css?raw';
 import kitJs from '../../kit/explain.js?raw';
 import assistantsJs from './assistants-ui.js?raw';
 import marginJs from './margin.js?raw';
+import menuJs from './menu-ui.js?raw';
 
 /**
  * A short hash of the kit. Pages and thumbnails are cached for a year, and the host builds both
@@ -58,9 +59,9 @@ const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${IC
 const HOST_CSS = `
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--p); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 :focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
-:root { --press: #000; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --press: #fff; } }
-:root[data-theme="dark"] { --press: #fff; }
+:root { --press: #000; --ok: #3B9B54; --warn: #B87600; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --press: #fff; --warn: #EF9F27; } }
+:root[data-theme="dark"] { --press: #fff; --warn: #EF9F27; }
 button { font-family: var(--sans); }
 
 /* ─── The bar ───────────────────────────────────────────── */
@@ -430,6 +431,33 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-fine { margin-top: 14px !important; font-size: 12px !important; color: var(--t) !important; }
 .v-create.is-danger { background: #A32D2D; color: #fff; }
 .v-create.is-danger:hover { background: #8A2424; }
+.a-state.is-warn::before { background: var(--warn); }
+.a-note { margin: 10px 0 2px !important; padding: 9px 12px; border-radius: 10px; background: var(--bg2); color: var(--p) !important; font-size: 12.5px !important; }
+
+/* The status chip in the bar of the library and of the viewer: a mark for each assistant, with a dot for its state.
+   With no connection it says "Connect an assistant". The chip keeps its width until the first answer. */
+.v-icon.a-chip { display: inline-flex; align-items: center; gap: 7px; width: auto; min-width: 32px; padding: 0 7px; box-sizing: border-box; color: var(--p); font: 500 12.5px/1 var(--sans); white-space: nowrap; }
+.a-chip-marks { display: inline-flex; align-items: center; gap: 5px; }
+.a-chip-lbl:empty { display: none; }
+.a-mark { position: relative; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--a); color: var(--a-on); font: 600 10px/1 var(--sans); }
+.a-mark[data-state="off"] { background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--a); }
+.a-mark.is-icon { width: 16px; height: 16px; background: none; color: var(--s); }
+.a-dot { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+.a-chip:hover .a-dot { box-shadow: 0 0 0 2px var(--bg2); }
+.a-dot.is-on { background: var(--ok); }
+.a-dot.is-off { border: 1.5px solid var(--s); background: var(--bg); }
+.a-chip:hover .a-dot.is-off { background: var(--bg2); }
+.a-dot.is-warn { background: var(--warn); }
+.a-dot.is-new { animation: a-dot 0.14s ease-out; }
+@keyframes a-dot { from { opacity: 0; } }
+.a-mark.is-icon .a-dot { right: -2px; bottom: -2px; }
+.a-chip.is-wait .a-mark:not(.is-icon) { background: var(--bg3); color: var(--t); }
+.a-chip.is-wait .a-dot { visibility: hidden; }
+.a-chip.is-wait, .a-chip.is-off { color: var(--t); }
+.a-chip.is-off .a-mark.is-icon { color: var(--t); }
+.a-chip.is-none { padding: 0 12px 0 9px; border-radius: 999px; box-shadow: inset 0 0 0 0.5px var(--b2); font-weight: 600; }
+.a-chip.is-none .a-dot { display: none; }
+.a-chip[data-tip]:hover::after, .a-chip[data-tip]:focus-visible::after { width: max-content; max-width: 240px; white-space: normal; text-align: left; line-height: 1.35; }
 
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
 .v-toast[hidden] { display: none; }
@@ -445,7 +473,19 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-who { margin-right: 4px; }
   .v-whochip { padding: 0 4px; }
 }
+/* At the medium and narrow widths the chip shows its marks and dots only. With no connection: one icon with one dot. */
+@media (max-width: 999px) {
+  .a-chip-lbl { display: none; }
+  .v-icon.a-chip.is-none { padding: 0 7px; border-radius: 8px; box-shadow: none; }
+  .a-chip.is-none .a-dot { display: block; }
+}
+@media (max-width: 1180px) {
+  .h-tools .a-chip-lbl { display: none; }
+  .h-tools .v-icon.a-chip.is-none { padding: 0 7px; border-radius: 8px; box-shadow: none; }
+  .h-tools .a-chip.is-none .a-dot { display: block; }
+}
 @media (prefers-reduced-motion: reduce) {
+  .a-dot.is-new { animation: none; }
   .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump, .cm-c.is-new, .cm-more.is-new, .cm-pick, .cm-sheet, .cm-add, .cm-mpop { animation: none; }
   .v-stage > .v-frame.is-in.is-on, .cm-rail > .cm-card, .cm-rail > .cm-dot, .cm-dot, .cm-card { transition: none; }
   .a-live.is-wait::before { animation: none; }
@@ -588,6 +628,26 @@ export interface PageRow {
   kind: string;
 }
 
+/** The Assistants dialog, for the library and the viewer. assistants-ui.js fills it. */
+const assistDialog = () => `<div class="v-sr" id="live" role="status" aria-live="polite"></div>
+<dialog class="v-dlg a-dlg" id="assist" aria-labelledby="assist-h">
+  <div class="a-head"><button type="button" class="v-icon a-back" id="assist-back" aria-label="Back to all assistants" hidden>${icon('left')}</button><h2 id="assist-h">Assistants</h2><button type="button" class="v-icon" id="assist-x" aria-label="Close">${icon('x')}</button></div>
+  <div class="a-body" id="assist-body"></div>
+</dialog>`;
+
+/** The status chip of the assistants. It starts neutral, with the width of its usual form. assistants-ui.js draws its state. */
+const assistChip = () =>
+  `<button type="button" class="v-icon a-chip is-wait" id="assist-chip" aria-label="Assistants: checking" data-tip="Assistants: checking" data-tip-end><span class="a-chip-marks" aria-hidden="true"><span class="a-mark a-claude">C</span><span class="a-mark a-chatgpt">C</span></span><span class="a-chip-lbl"></span></button>`;
+
+/** The helpers that the Assistants dialog needs, in the library and in the viewer. Every text goes in with textContent. */
+const UI_HELPERS = `
+const api = (path, init = {}) => fetch(path, { ...init, headers: { 'content-type': 'application/json', ...(init.headers || {}) } })
+  .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.status === 204 ? null : r.json(); });
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const tone = (a) => 'a-' + (a === 'chatgpt' ? 'chatgpt' : 'claude');
+const say = (text) => { $('#live').textContent = text; };
+`;
+
 /**
  * The library. The script draws it from the JSON block, so the grid or list choice,
  * the repo filter, pins and search results all redraw without a reload.
@@ -601,6 +661,7 @@ export function libraryHtml(pages: PageRow[], nonce: string) {
   </svg>Pages</span>
   <label class="h-search">${icon('search')}<input id="q" type="search" placeholder="Search pages" autocomplete="off" spellcheck="false" aria-label="Search pages"><kbd>/</kbd></label>
   <div class="h-tools">
+    ${assistChip()}
     <div class="v-seg" role="group" aria-label="Layout">
       <button type="button" data-view="grid" aria-label="Grid" data-tip="Grid">${icon('grid')}</button>
       <button type="button" data-view="list" aria-label="List" data-tip="List">${icon('list')}</button>
@@ -627,10 +688,13 @@ export function libraryHtml(pages: PageRow[], nonce: string) {
   <a class="v-item" data-act="tab" target="_blank" rel="noopener">${icon('open')}Open in new tab</a>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
+${assistDialog()}
 <script type="application/json" id="data">${data({ pages, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
+    UI_HELPERS +
+    assistantsJs +
     `
 const D = JSON.parse($('#data').textContent);
 const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
@@ -771,6 +835,8 @@ function move(d) {
   if (n) select(sel < 0 ? (d > 0 ? 0 : n - 1) : Math.max(0, Math.min(n - 1, sel + d)));
 }
 document.addEventListener('keydown', (e) => {
+  // The keys of the library do not reach the page under the Assistants dialog.
+  if ($('dialog[open]')) return;
   if (e.metaKey || e.ctrlKey || e.altKey) { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); q.focus(); q.select(); } return; }
   if (open || e.target.closest('input, textarea, select, [contenteditable]')) return;
   const el = current(), slug = el && el.dataset.slug;
@@ -993,6 +1059,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   <button type="button" class="v-icon v-count" id="cres" data-pop="pop-res" data-tip="Resolved threads" aria-label="Resolved threads" hidden>${icon('check')}<span><b>0</b><span class="v-lbl"> resolved</span></span></button>
   <button type="button" class="v-icon" id="cnew" data-tip="Comment on the page" aria-label="Comment on the page" aria-keyshortcuts="Control+Alt+M Meta+Alt+M"${old ? ' hidden' : ''}>${icon('comment')}</button>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
+  ${assistChip()}
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
   ${presentButton(input.kind)}
   <button type="button" class="v-share" data-pop="pop-share" aria-label="Share">${icon('share')}<span class="v-lbl">Share</span></button>
@@ -1046,11 +1113,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   <div class="cm-slot" id="cm-slot"></div>
 </section>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<div class="v-sr" id="live" role="status" aria-live="polite"></div>
-<dialog class="v-dlg a-dlg" id="assist" aria-labelledby="assist-h">
-  <div class="a-head"><button type="button" class="v-icon a-back" id="assist-back" aria-label="Back to all assistants" hidden>${icon('left')}</button><h2 id="assist-h">Assistants</h2><button type="button" class="v-icon" id="assist-x" aria-label="Close">${icon('x')}</button></div>
-  <div class="a-body" id="assist-body"></div>
-</dialog>
+${assistDialog()}
 <dialog class="v-dlg" id="cm-confirm" aria-labelledby="cm-confirm-h" aria-describedby="cm-confirm-p">
   <h2 id="cm-confirm-h"></h2>
   <p id="cm-confirm-p"></p>
@@ -1060,11 +1123,10 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
 
   const script =
     COMMON_SCRIPT +
+    UI_HELPERS +
     `
 const D = JSON.parse($('#data').textContent);
 const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
-const api = (path, init = {}) => fetch(path, { ...init, headers: { 'content-type': 'application/json', ...(init.headers || {}) } })
-  .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.status === 204 ? null : r.json(); });
 const copyText = (text) => navigator.clipboard.writeText(text);
 
 // Copy link: the icon turns into a check for a moment.
@@ -1121,13 +1183,10 @@ $('#create').addEventListener('click', async (e) => {
 });
 
 // Comments: the helpers that margin.js and the activity code share. Every text goes in with textContent, so a comment never becomes markup.
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const when = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 // The assistants. A name from the API is text for a label and never markup.
 const AGENTS = { claude: 'Claude', chatgpt: 'ChatGPT' };
 const nameOf = (a) => AGENTS[a] || 'Assistant';
-const tone = (a) => 'a-' + (a === 'chatgpt' ? 'chatgpt' : 'claude');
-const say = (text) => { $('#live').textContent = text; };
 // The reactions that the reader has seen. A new one pops in one time, and a refresh of the list draws it still.
 const reacted = new Set();
 // What the assistant did with the comment: a reaction while it works and after it answered, or one quiet line when it did not finish.
@@ -1159,6 +1218,7 @@ async function retry(id, b) {
 }
 
 ` +
+    menuJs +
     assistantsJs +
     marginJs +
     `

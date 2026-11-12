@@ -1,0 +1,127 @@
+# Host patch: the service binding to the runner
+
+This patch connects the host Worker to the runner Worker of `cloud/`. It changes four host files and adds about 10 lines.
+
+- The HTTP contract between the host and the runner stays the same. The paths and bodies of `/run`, `/warm`, `/status`, `/connect`, `/connect/code`, `/connect/status` and `/disconnect` do not change. The header `x-runner-secret` also stays.
+- Development does not change. With no `SANDBOX_RUNNER` binding, `runnerFetch` calls `fetch`, as the host does now with `sandbox/local-runner.mjs`.
+- Production gets three bindings:
+  - `SANDBOX_RUNNER`: a service binding to the Worker `agent-pages-runner`.
+  - `SANDBOX_RUNNER_URL`: the text `https://runner.internal/run`. The runner has no public URL. The service binding ignores the host part of the URL, and the runner reads only the path.
+  - `SANDBOX_RUNNER_SECRET`: a secret. It holds the same value as `RUNNER_SECRET` of the runner.
+- The job keeps `mcp_url` and `callback_url` with the public origin of the host. The runner does not call these URLs over the internet. It sends the MCP calls and the callbacks back through its own service binding `HOST`. A service binding does not go through Cloudflare Access, so the `/s/_mcp/<token>` and `/s/_run/<id>` routes of the host must accept a request with no Access header. They do this now, because the local runner also calls them without Access.
+- The connector token is in `mcp_url`. It stays in the host and in the Durable Object of the runner. It never goes into the container (see `cloud/README.md`).
+
+## How to apply it
+
+```sh
+git apply --check cloud/host.patch
+git apply cloud/host.patch
+cd host && npx tsc --noEmit && npx vitest run src/sandbox.test.ts
+```
+
+On 2026-11-12, `git apply --check` passed on the branch `comment-agent-triggers`. The type check passed on a patched copy, and `src/sandbox.test.ts` passed (14 tests). The two other engineers edit `host/src/*`. If the check fails later, apply the four changes by hand. Each change is one line.
+
+The same diff is in `cloud/host.patch`, so `git apply` can read it.
+
+## The diff
+
+```diff
+diff --git a/host/cloudflare.config.ts b/host/cloudflare.config.ts
+index 3ba143e..fe12035 100644
+--- a/host/cloudflare.config.ts
++++ b/host/cloudflare.config.ts
+@@ -59,8 +59,10 @@ export default defineConfig(({ mode }: ConfigContext) => {
+         ENVIRONMENT: bindings.text(production ? 'production' : 'development'),
+         ACCESS_TEAM: bindings.text(profile.accessTeam),
+         ACCESS_AUD: bindings.text(profile.accessAud),
+-        // Development only: sandbox/local-runner.mjs. Production has no runner until a person decides where it runs.
++        // Development: sandbox/local-runner.mjs at SANDBOX_RUNNER_URL. Production: the runner Worker of cloud/, through the
++        // service binding SANDBOX_RUNNER. The runner has no public URL, so the host of the URL is a placeholder.
+         ...(!production && process.env.SANDBOX_RUNNER_URL ? { SANDBOX_RUNNER_URL: bindings.text(process.env.SANDBOX_RUNNER_URL) } : {}),
++        ...(production ? { SANDBOX_RUNNER: bindings.worker({ worker: 'agent-pages-runner' }), SANDBOX_RUNNER_URL: bindings.text('https://runner.internal/run'), SANDBOX_RUNNER_SECRET: bindings.secret() } : {}),
+         // Development only: the shared secret of the runner. The host sends it as the header x-runner-secret with each job.
+         ...(!production && process.env.SANDBOX_RUNNER_SECRET ? { SANDBOX_RUNNER_SECRET: bindings.text(process.env.SANDBOX_RUNNER_SECRET) } : {}),
+         // Development only: the mentions that the runner handles. Default: claude,chatgpt. Example: SANDBOX_AGENTS=claude.
+diff --git a/host/src/assistants.ts b/host/src/assistants.ts
+index bd19f98..d83d2c4 100644
+--- a/host/src/assistants.ts
++++ b/host/src/assistants.ts
+@@ -2,7 +2,7 @@
+ // The sandbox runner holds the sign-ins. The host only passes each request on, with the person's identity and the
+ // shared secret, and it checks each answer of the runner before the viewer gets it. The host never stores, logs or
+ // returns the code that a person pastes from Claude: it goes straight to the runner.
+-import { readJson } from './lib';
++import { readJson, runnerFetch } from './lib';
+ import type { Assistant, Env } from './types';
+ 
+ export const ASSISTANTS: readonly Assistant[] = ['claude', 'chatgpt'];
+@@ -60,7 +60,7 @@ export async function callRunner(env: Env, path: string, body: Record<string, un
+   if (!env.SANDBOX_RUNNER_URL) throw new RunnerError('no sandbox runner');
+   let res: Response;
+   try {
+-    res = await fetch(new URL(path, env.SANDBOX_RUNNER_URL).href, {
++    res = await runnerFetch(env, new URL(path, env.SANDBOX_RUNNER_URL).href, {
+       method: 'POST',
+       headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) },
+       body: JSON.stringify(body),
+diff --git a/host/src/lib.ts b/host/src/lib.ts
+index a7dee6b..d45093a 100644
+--- a/host/src/lib.ts
++++ b/host/src/lib.ts
+@@ -6,6 +6,12 @@ export type Theme = 'light' | 'dark';
+ const PART = '[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?';
+ const SLUG_RE = new RegExp(`^${PART}/${PART}$`);
+ 
++/**
++ * Sends one request to the sandbox runner: through the service binding SANDBOX_RUNNER when the host has one (the runner
++ * Worker of cloud/ in production), else with fetch (sandbox/local-runner.mjs in development). The URL is the same in both cases.
++ */
++export const runnerFetch = (env: { SANDBOX_RUNNER?: Fetcher }, url: string, init: RequestInit): Promise<Response> => (env.SANDBOX_RUNNER ? env.SANDBOX_RUNNER.fetch(url, init) : fetch(url, init));
++
+ export function isSlug(s: string): boolean {
+   return SLUG_RE.test(s);
+ }
+diff --git a/host/src/sandbox.ts b/host/src/sandbox.ts
+index 46d559d..bca55b6 100644
+--- a/host/src/sandbox.ts
++++ b/host/src/sandbox.ts
+@@ -3,7 +3,7 @@
+ // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
+ import { noteActivity, pruneActivity } from './activity';
+ import { ENGINES, modelFor } from './assistants';
+-import { newToken, newTokenId, readJson, type Mention } from './lib';
++import { newToken, newTokenId, readJson, runnerFetch, type Mention } from './lib';
+ import type { Comment, Env, Refusal, Thread } from './types';
+ 
+ /** The connector token of a run ends after this time. The runner stops a run after 180 seconds, and runs of one person wait in a queue. */
+@@ -93,7 +93,7 @@ export async function runSandboxAgent(env: Env, comment: Comment, origin: string
+   await noteActivity(env, id, 'started');
+   try {
+     const job: Job = { mcp_url: `${origin}/s/_mcp/${token}`, comment_id: comment.id, slug: comment.slug, agent_label: agent, engine: ENGINES[agent], user: comment.author, callback_url: `${origin}/s/_run/${id}`, model: await modelFor(env, comment.author, agent) };
+-    const res = await fetch(env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
++    const res = await runnerFetch(env, env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
+     if (res.status !== 202) throw new Error(`it answered ${res.status}`);
+   } catch (e) {
+     await finishRun(env, id, 'failed', `runner: ${e instanceof Error ? e.message : String(e)}`.slice(0, MAX_DETAIL));
+@@ -183,6 +183,6 @@ export async function warmRunner(env: Env, user: string, now = Date.now()): Prom
+   const url = new URL('/warm', env.SANDBOX_RUNNER_URL).href;
+   const secret = env.SANDBOX_RUNNER_SECRET;
+   return async () => {
+-    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-runner-secret': secret } : {}) }, body: JSON.stringify({ user }), signal: AbortSignal.timeout(10_000) });
++    await runnerFetch(env, url, { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-runner-secret': secret } : {}) }, body: JSON.stringify({ user }), signal: AbortSignal.timeout(10_000) });
+   };
+ }
+diff --git a/host/src/types.ts b/host/src/types.ts
+index 28a9a51..c02df29 100644
+--- a/host/src/types.ts
++++ b/host/src/types.ts
+@@ -14,6 +14,8 @@ export interface Env {
+   SANDBOX_AGENTS?: string;
+   /** Development only: the shared secret of the sandbox runner. The host sends it as the header x-runner-secret with each job. */
+   SANDBOX_RUNNER_SECRET?: string;
++  /** Production: the service binding to the runner Worker of cloud/. With it, each request to the runner goes through the binding, and SANDBOX_RUNNER_URL gives only the paths. */
++  SANDBOX_RUNNER?: Fetcher;
+ }
+ 
+ /** The two assistants of the viewer. The runner calls the program for ChatGPT 'codex'. */
+```

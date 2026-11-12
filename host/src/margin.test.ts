@@ -14,7 +14,9 @@ const { describeSelection, anchorQuote } = (globalThis as unknown as {
 const M = new Function(`${marginJs}\nreturn Margin;`)() as {
   layoutCards: (items: { id: string; y: number; h: number }[], opt?: { gap?: number; min?: number; active?: string }) => Record<string, number>;
   readSelect: (d: unknown) => unknown;
-  readAnchors: (d: unknown) => { y: number; vh: number; dh: number; deck: unknown; list: { id: string; state: string; top: number | null; slide: number; hidden: boolean }[] };
+  readAnchors: (d: unknown) => { deck: unknown; list: { id: string; state: string; top: number | null; slide: number; hidden: boolean }[] };
+  frameHeight: (v: { h: unknown; was: number }, view: number, now: number, grows?: number[]) => { h: number | null; grows: number[] };
+  person: (author: string, agents?: Record<string, string>) => { name: string; initials: string };
   mentionAt: (value: string, caret: number) => { from: number; query: string } | null;
   assistantStates: (threads: unknown[], handled: string[]) => Record<string, string>;
 };
@@ -131,8 +133,36 @@ describe('messages from the frame', () => {
     expect(M.readSelect({ on: true, quote: 'q', rects: [] })).toBeNull();
   });
   it('readAnchors keeps only valid entries and turns an unknown state into lost', () => {
-    const a = M.readAnchors({ y: 5, vh: 700, dh: 3000, deck: null, list: [{ id: 'x', state: 'exact', top: 10, slide: 0 }, { id: 'y', state: '<b>', top: 'no' }, { id: 7 }, { id: 'z'.repeat(65) }] });
-    expect(a).toEqual({ y: 5, vh: 700, dh: 3000, deck: null, list: [{ id: 'x', state: 'exact', top: 10, slide: 0, hidden: false }, { id: 'y', state: 'lost', top: null, slide: 0, hidden: false }] });
+    const a = M.readAnchors({ deck: null, list: [{ id: 'x', state: 'exact', top: 10, slide: 0 }, { id: 'y', state: '<b>', top: 'no' }, { id: 7 }, { id: 'z'.repeat(65) }] });
+    expect(a).toEqual({ deck: null, list: [{ id: 'x', state: 'exact', top: 10, slide: 0, hidden: false }, { id: 'y', state: 'lost', top: null, slide: 0, hidden: false }] });
+    expect(M.readAnchors({ deck: { n: 4, cur: '2', paged: 'yes' } }).deck).toEqual({ n: 4, cur: 0, paged: false });
+  });
+  it('frameHeight gives the frame the height of the page, at least the view, and at most 200,000 px', () => {
+    expect(M.frameHeight({ h: 1840.2, was: 860 }, 860, 0)).toEqual({ h: 1841, grows: [0] });
+    expect(M.frameHeight({ h: 300, was: 1841 }, 860, 10)).toEqual({ h: 860, grows: [] });
+    expect(M.frameHeight({ h: 9e9, was: 860 }, 860, 0).h).toBe(200000);
+    expect(M.frameHeight({ h: 'tall', was: 860 }, 860, 0).h).toBeNull();
+  });
+  it('frameHeight stops a page that grows with its frame after 6 growths in 2 seconds, and lets it shrink', () => {
+    let grows: number[] = [], was = 860;
+    for (let i = 0; i < 6; i++) { const out = M.frameHeight({ h: was + 100, was }, 860, i * 100, grows); grows = out.grows; was = out.h!; }
+    expect(was).toBe(1460);
+    expect(M.frameHeight({ h: was + 100, was }, 860, 700, grows).h).toBeNull();
+    expect(M.frameHeight({ h: 1000, was }, 860, 700, grows).h).toBe(1000);
+    expect(M.frameHeight({ h: was + 100, was }, 860, 2700, grows).h).toBe(1560);
+  });
+});
+
+describe('person', () => {
+  it('turns an Access email into a name and two initials', () => {
+    expect(M.person('ann.lee@example.com')).toEqual({ name: 'Ann Lee', initials: 'AL' });
+    expect(M.person('josh@example.com')).toEqual({ name: 'Josh', initials: 'J' });
+    expect(M.person('mary-jo.van_dyk@example.com')).toEqual({ name: 'Mary Jo Van Dyk', initials: 'MD' });
+  });
+  it('keeps a plain name, names an assistant, and has a fallback for no author', () => {
+    expect(M.person('local')).toEqual({ name: 'local', initials: 'L' });
+    expect(M.person('agent:claude', { 'agent:claude': 'Claude' })).toEqual({ name: 'Claude', initials: 'C' });
+    expect(M.person('')).toEqual({ name: 'Someone', initials: '?' });
   });
 });
 

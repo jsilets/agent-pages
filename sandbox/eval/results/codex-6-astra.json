@@ -1,0 +1,56 @@
+{
+  "label": "codex-6-astra",
+  "agent": "chatgpt",
+  "host": "http://localhost:8804",
+  "at": "2026-11-12T16:20:14.034Z",
+  "runs": [
+    {
+      "task": "typo",
+      "expect": "edit",
+      "comment": "fix the typo in the heading",
+      "slug": "eval-codex-6-astra/typo-1-mwdr75l0",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,edit_page",
+      "turns": 1,
+      "ms_reply": 11184,
+      "ms_first_tool": 4836,
+      "edited": true,
+      "versions": 1,
+      "thread_status": "resolved",
+      "reply": "I changed “pmups” to “pumps” in the heading.",
+      "replies": 1,
+      "words_before": 4,
+      "words_after": 4,
+      "removed": [
+        "<h1>How heat pmups work</h1>"
+      ],
+      "added": [
+        "<h1>How heat pumps work</h1>"
+      ]
+    },
+    {
+      "task": "better",
+      "expect": "ask",
+      "comment": "make it better",
+      "slug": "eval-codex-6-astra/better-1-mwdr7ef1",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,reply_to_comment",
+      "turns": 1,
+      "ms_reply": 13747,
+      "ms_first_tool": 5494,
+      "edited": false,
+      "versions": 0,
+      "thread_status": "open",
+      "reply": "Would you like me to fix the heading typo, shorten the winter explanation, or clarify the running costs?",
+      "replies": 1,
+      "words_before": 0,
+      "words_after": 0,
+      "removed": [],
+      "added": []
+    }
+  ]
+}

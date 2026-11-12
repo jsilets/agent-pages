@@ -237,7 +237,8 @@ describe('comment routes', () => {
     expect(route('/s/_run/short')).toEqual({ kind: 'not-found' });
   });
   it('refuses bad ids, bad tokens and longer paths', () => {
-    for (const p of ['/api/comments/xyz/resolve', `/api/comments/${id}`, `/api/comments/${id}/reopen`, '/api/connector-tokens/short', '/api/pages/A/b/comments', '/s/_mcp', `/s/_mcp/${t}/x`])
+    expect(route(`/api/comments/${id}`)).toEqual({ kind: 'api-comment', id });
+    for (const p of ['/api/comments/xyz/resolve', '/api/comments/xyz', `/api/comments/${id}/reopen`, '/api/connector-tokens/short', '/api/pages/A/b/comments', '/s/_mcp', `/s/_mcp/${t}/x`])
       expect(route(p).kind).toBe('not-found');
   });
   it('makes 24-character hex ids, each one new', () => {

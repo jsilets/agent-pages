@@ -7,10 +7,12 @@ import { readFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { codexVolumeOf, DISCOVER_REQUESTS, discover, forDocker, hostEnv, IMAGES, originAllowed, sameSecret, sandboxArgs, userQueue, volumeOf } from '../sandbox/local-runner.mjs';
-import { childEnv, claudeArgs, claudeInput, claudeLine, codexArgs, codexLine, defaults, editProgress, ENGINE_ENV, jobError, mcpConfig, partialEdits, progressSender, prompt, replyStored, runJob, saysNotSignedIn } from '../sandbox/run-comment.mjs';
-import { connectTarget, DEFAULT_ALLOW, hostAllowed, startProxy } from '../sandbox/egress-proxy.mjs';
+import { codexVolumeOf, DISCOVER_REQUESTS, discover, forDocker, hostEnv, IMAGES, inputsHash, originAllowed, sameSecret, sandboxArgs, sendCode, sessions, statusArgs, userQueue, volumeOf } from '../sandbox/local-runner.mjs';
+import { childEnv, claudeArgs, claudeInput, claudeLine, codexArgs, codexLine, defaults, editProgress, ENGINE_ENV, jobError, mayKill, mcpConfig, MODELS, partialEdits, progressSender, prompt, replyStored, runJob, saysNotSignedIn, stopGently, waitBeforeStop } from '../sandbox/run-comment.mjs';
+import { connectTarget, DEFAULT_ALLOW, hostAllowed, RUN_ALLOW, SIGNIN_ALLOW, startProxy } from '../sandbox/egress-proxy.mjs';
+import { codeError, failureDetail, parseClaudeLogin, parseClaudeStatus, parseCodexLogin, parseCodexStatus, scrub, SIGNIN } from '../sandbox/signin.mjs';
 import { fakeSequence } from '../sandbox/fake-progress.mjs';
+import { changedLines } from '../sandbox/eval/run.mjs';
 
 const job = { mcp_url: 'http://localhost:8802/s/_mcp/' + 'A'.repeat(43), comment_id: 'ab12'.repeat(6), slug: 'g/n', agent_label: 'claude' };
 const path = (p) => fileURLToPath(new URL(p, import.meta.url));
@@ -52,6 +54,10 @@ test('the prompt has the ids of the job and no other text of the job', () => {
   assert.match(p, /one edit_page call that has slug "g\/n", comment_id "ab12ab12ab12ab12ab12ab12", the edits, and reply/);
   assert.match(p, /Do not call reply_to_comment after an edit_page call that stored its reply/);
   assert.match(p, /do not call edit_page\. Call reply_to_comment with comment_id "ab12ab12ab12ab12ab12ab12" and resolve false/);
+  // An unclear request gets a question, never an edit: the eval of sandbox/eval found "make it better" edited and resolved.
+  for (const phrase of ['"make it better"', '"fix this" with no quote', '"thoughts?"', 'do not choose for the owner', 'A thread with a question stays open']) assert.ok(p.includes(phrase), phrase);
+  // "this slide" and "this" have a meaning: the quote or the slide of the thread.
+  assert.match(p, /When the thread has a quote or a slide, the request is about that text or that slide/);
 });
 
 test('the arguments give Claude Code the four connector tools and no built-in tool, and they hold no prompt and no token', () => {
@@ -113,8 +119,14 @@ test('the child gets HOME, USER, PATH and the folder of its own sign-in, and no 
 });
 
 test('the model and the effort of a job come from the job, then from the environment of the runner', () => {
-  assert.deepEqual(defaults({}), { claude: { model: 'sonnet', effort: undefined }, codex: { model: undefined, effort: undefined } });
+  assert.deepEqual(defaults({}), { claude: { model: 'sonnet', effort: undefined }, codex: { model: 'gpt-6.1-sol', effort: undefined } });
   assert.equal(defaults({ SANDBOX_CLAUDE_MODEL: '' }).claude.model, undefined);
+  assert.equal(defaults({ SANDBOX_CODEX_MODEL: '' }).codex.model, undefined);
+  // The default of each engine is one of the options that /status offers, and each option has a plain label and a note.
+  for (const e of ['claude', 'codex']) {
+    assert.ok(MODELS[e].models.some((m) => m.id === MODELS[e].default_model), e);
+    for (const m of MODELS[e].models) assert.ok(m.label && m.note && jobError({ ...job, model: m.id }) === null, m.id);
+  }
   assert.deepEqual(defaults({ SANDBOX_CLAUDE_MODEL: 'opus', SANDBOX_CLAUDE_EFFORT: 'low', SANDBOX_CODEX_MODEL: 'gpt-6.1-sol', SANDBOX_CODEX_EFFORT: 'medium' }), { claude: { model: 'opus', effort: 'low' }, codex: { model: 'gpt-6.1-sol', effort: 'medium' } });
 });
 
@@ -438,6 +450,16 @@ test('a user has one run at a time, and a full queue refuses the next job', asyn
   for (let i = 0; i < 4; i++) { gates[i](); await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r)); }
   assert.deepEqual(await Promise.all([a, b, c, other]), ['a1', 'a2', 'a3', 'b1']);
   assert.deepEqual(order.filter((o) => / a\d/.test(o)), ['start a1', 'end a1', 'start a2', 'end a2', 'start a3', 'end a3']);
+  // pending counts the job that runs and the jobs that wait, and it is 0 again when the queue is empty.
+  assert.equal(add.pending('ann'), 0);
+  const gate = [];
+  const d1 = add('ann', () => new Promise((r) => gate.push(r))), d2 = add('ann', async () => 'd2');
+  assert.equal(add.pending('ann'), 2);
+  await new Promise((r) => setImmediate(r));
+  gate[0]('d1');
+  assert.deepEqual(await Promise.all([d1, d2]), ['d1', 'd2']);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(add.pending('ann'), 0);
   assert.equal(most, 2);
   // A job that fails does not stop the queue, and an empty queue takes jobs again.
   await assert.rejects(add('ann', async () => { throw new Error('boom'); }));
@@ -468,10 +490,19 @@ test('the runner refuses a job with no secret or a wrong secret, and it refuses 
     assert.equal(status, 400);
     assert.match(body.error, /SANDBOX_CONNECTOR_ORIGINS/);
     assert.deepEqual(await post({ 'x-runner-secret': 'the-secret-of-the-test' }, { ...job, slug: 'bad slug' }), [400, { error: 'slug must be <group>/<name>' }]);
+    // Each route of the sign-in needs the secret too. A code with no secret never reaches a program.
+    const route = (r, headers, body) => fetch(`http://127.0.0.1:${port}${r}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }).then(async (x) => [x.status, await x.json()]);
+    for (const r of ['/status', '/connect', '/connect/code', '/connect/status', '/connect/cancel', '/disconnect', '/warm']) assert.equal((await route(r, {}, { user: 'local', engine: 'claude', id: 'x', code: 'code-of-the-test' }))[0], 401, r);
+    const ok = { 'x-runner-secret': 'the-secret-of-the-test' };
+    // A sign-in from the web app needs docker mode. This runner is in host mode.
+    assert.deepEqual(await route('/connect', ok, { user: 'local', engine: 'claude' }), [400, { error: 'a sign-in from the web app needs docker mode' }]);
+    assert.deepEqual(await route('/connect', ok, { user: 'local', engine: 'gemini' }), [400, { error: 'engine must be claude or codex' }]);
+    assert.deepEqual(await route('/connect/code', ok, { id: 'no-such-id', code: 'code-of-the-test' }), [404, { error: 'no such sign-in' }]);
+    assert.deepEqual(await route('/warm', ok, { engine: 'claude', model: 'bad model!' }), [400, { error: jobError({ ...job, model: 'bad model!' }) }]);
     // The log has one JSON object on each line, and it has no secret and no connector URL.
     for (const l of logText.split('\n').filter(Boolean)) assert.equal(typeof JSON.parse(l).at, 'string');
     assert.ok(logText.includes('"ev":"refused"'));
-    assert.ok(!logText.includes('the-secret-of-the-test') && !logText.includes('/s/_mcp/'));
+    assert.ok(!logText.includes('the-secret-of-the-test') && !logText.includes('/s/_mcp/') && !logText.includes('code-of-the-test'));
   } finally {
     runner.kill();
   }
@@ -574,7 +605,7 @@ test('the proxy refuses other hosts, keeps the connector token away from the con
     assert.equal((await rpc(7, 'tools/call'))[0], 503);
     assert.equal(seen.length, 2);
     // The log has the method and the tool of each request, and never the token.
-    assert.ok(logs.some((l) => l.ev === 'deny' && l.target === 'example.com:443'));
+    assert.ok(logs.some((l) => l.ev === 'deny' && l.host === 'example.com' && l.port === 443 && l.profile === 'none'));
     assert.ok(logs.some((l) => l.ev === 'mcp' && l.method === 'tools/list' && l.cached));
     assert.ok(!JSON.stringify(logs).includes(TOKEN) && !JSON.stringify(logs).includes('_mcp'));
   } finally {
@@ -583,11 +614,180 @@ test('the proxy refuses other hosts, keeps the connector token away from the con
   }
 });
 
+test('the proxy lets each container reach the hosts of its own profile only, and an unregistered container reaches no host', async () => {
+  const logs = [];
+  const p = startProxy({ secret: 's-of-the-test', port: 0, controlPort: 0, log: (o) => logs.push(o) });
+  await new Promise((r) => setTimeout(r, 50));
+  const port = p.proxy.address().port, controlPort = p.control.address().port;
+  const http = (opts, body) => new Promise((resolve, reject) => { const r = request({ host: '127.0.0.1', port: controlPort, agent: false, ...opts }, (res) => { let t = ''; res.on('data', (d) => { t += d; }).on('end', () => resolve([res.statusCode, t])); }); r.on('error', reject); r.end(body); });
+  // A host under .invalid has no address, so an allowed tunnel fails after the list (502) and never leaves this machine.
+  const tunnel = (target) => new Promise((resolve) => { const s = connect(port, '127.0.0.1', () => s.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n\r\n`)); s.once('data', (d) => { resolve(String(d).split('\r\n')[0]); s.destroy(); }); s.once('end', () => resolve('closed')); });
+  const secret = { 'x-control-secret': 's-of-the-test' };
+  try {
+    assert.equal(await tunnel('allowed.invalid:443'), 'HTTP/1.1 403 Forbidden');
+    assert.equal((await http({ path: '/allow/127.0.0.1', method: 'PUT' }, '{"hosts":["allowed.invalid"],"profile":"claude"}'))[0], 401);
+    assert.equal((await http({ path: '/allow/127.0.0.1', method: 'PUT', headers: secret }, '{"hosts":["bad host"],"profile":"claude"}'))[0], 400);
+    assert.equal((await http({ path: '/allow/127.0.0.1', method: 'PUT', headers: secret }, '{"hosts":["allowed.invalid"],"profile":"claude"}'))[0], 200);
+    assert.notEqual(await tunnel('allowed.invalid:443'), 'HTTP/1.1 403 Forbidden');
+    assert.equal(await tunnel('other.invalid:443'), 'HTTP/1.1 403 Forbidden');
+    assert.equal(JSON.parse((await http({ path: '/health', method: 'GET', headers: secret }))[1]).containers, 1);
+    assert.equal((await http({ path: '/allow/127.0.0.1', method: 'DELETE', headers: secret }))[0], 200);
+    assert.equal(await tunnel('allowed.invalid:443'), 'HTTP/1.1 403 Forbidden');
+    assert.ok(logs.some((l) => l.ev === 'deny' && l.host === 'other.invalid' && l.profile === 'claude'));
+    assert.ok(logs.some((l) => l.ev === 'deny' && l.host === 'allowed.invalid' && l.profile === 'none'));
+  } finally {
+    p.close();
+  }
+  // A run reaches the model and the token refresh of its engine. Only a sign-in reaches the sign-in pages of Claude.
+  assert.deepEqual(RUN_ALLOW, { claude: ['api.anthropic.com', 'platform.claude.com'], codex: ['chatgpt.com', 'auth.openai.com', 'api.openai.com'] });
+  assert.deepEqual(SIGNIN_ALLOW.claude, ['api.anthropic.com', 'platform.claude.com', 'claude.ai', 'claude.com']);
+  assert.ok(!DEFAULT_ALLOW.includes('claude.ai') && !DEFAULT_ALLOW.includes('claude.com'));
+});
+
+test('the sign-in readers take the recorded output of Claude Code and Codex', () => {
+  const claude = readFileSync(path('../sandbox/samples/claude-login-wrong-code.txt'), 'utf8');
+  const c = parseClaudeLogin(claude);
+  assert.match(c.url, /^https:\/\/claude\.com\/cai\/oauth\/authorize\?code=true&client_id=[0-9a-f-]+&/);
+  assert.ok(c.url.endsWith('state=<cut>'));
+  assert.equal(c.waiting, true);
+  // The URL is complete only at its line end, and the prompt comes after it.
+  assert.deepEqual(parseClaudeLogin(claude.slice(0, claude.indexOf('&state'))), { url: null, waiting: false });
+  const codex = readFileSync(path('../sandbox/samples/codex-login-device.txt'), 'utf8');
+  assert.deepEqual(parseCodexLogin(codex), { url: 'https://auth.openai.com/codex/device', user_code: 'K7QD-8WMRT', expires_min: 15 });
+  assert.deepEqual(parseCodexLogin(codex.slice(0, codex.indexOf('2. Enter'))), { url: 'https://auth.openai.com/codex/device', user_code: null, expires_min: null });
+  assert.equal(parseClaudeStatus('{"loggedIn": true, "authMethod": "claude.ai"}'), true);
+  assert.equal(parseClaudeStatus('{"loggedIn": false}'), false);
+  assert.equal(parseClaudeStatus('Error: no config'), false);
+  assert.equal(parseCodexStatus('Logged in using ChatGPT\n'), true);
+  assert.equal(parseCodexStatus('Not logged in\n'), false);
+  assert.deepEqual(SIGNIN.claude.login, ['claude', 'auth', 'login', '--claudeai']);
+  assert.deepEqual(SIGNIN.codex.login, ['codex', 'login', '--device-auth']);
+});
+
+test('a failed sign-in gets one plain sentence and the last line of the program, with no code and no URL query', () => {
+  const claude = readFileSync(path('../sandbox/samples/claude-login-wrong-code.txt'), 'utf8');
+  assert.equal(failureDetail('claude', claude, { code: 'abc123-the-pasted-code', exitCode: 1 }), 'Anthropic did not accept the code. Start the sign-in again, and paste the newest code from the Anthropic page. The program said: "Login failed: That code wasn\'t accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code."');
+  assert.equal(failureDetail('codex', 'Error: device code expired'), 'The one-time code expired. Start the sign-in again. The program said: "Error: device code expired"');
+  assert.equal(failureDetail('codex', ''), 'The sign-in of ChatGPT did not finish.');
+  assert.equal(failureDetail('claude', 'boom code-of-the-person-1234', { code: 'code-of-the-person-1234', exitCode: 2 }), 'The sign-in of Claude did not finish (exit code 2). The program said: "boom <cut>"');
+  // scrub keeps the host and the path of a URL, and cuts its query and each long token.
+  assert.equal(scrub(`see https://claude.com/cai/oauth/authorize?state=${'s'.repeat(40)} and ${'k'.repeat(40)}`), 'see https://claude.com/cai/oauth/authorize?<cut> and <cut>');
+  assert.equal(scrub('x'.repeat(10), [], 4), 'xxxx');
+  assert.equal(codeError('a'.repeat(8)), null);
+  assert.equal(codeError('short'), 'code must have 8 to 512 characters');
+  assert.equal(codeError('has a space'), 'code must be one line of printable characters with no space');
+  assert.equal(codeError('line\nbreak!'), 'code must be one line of printable characters with no space');
+  assert.equal(codeError(12345678), 'code must be a string');
+});
+
+test('the pasted code goes to the waiting program one time, and only to a sign-in that takes a code', () => {
+  const written = [];
+  const fake = (over) => ({ id: over.id, key: 'claude:x', user: 'x', engine: 'claude', status: 'pending', needs_code: true, codeSent: false, child: { stdin: { write: (b) => written.push(Buffer.from(b).toString('utf8')) } }, ...over });
+  sessions.set('s1', fake({ id: 's1' }));
+  sessions.set('s2', fake({ id: 's2', engine: 'codex', needs_code: false }));
+  sessions.set('s3', fake({ id: 's3', status: 'failed' }));
+  try {
+    assert.deepEqual(sendCode('s1', 'bad code'), { status: 400, body: { error: 'code must be one line of printable characters with no space' } });
+    assert.deepEqual(sendCode('s1', 'the-code-of-the-test#1'), { status: 200, body: { status: 'pending' } });
+    assert.deepEqual(sendCode('s1', 'the-code-of-the-test#2'), { status: 409, body: { error: 'the code was sent already', status: 'pending' } });
+    assert.deepEqual(written, ['the-code-of-the-test#1\n']);
+    assert.deepEqual(sendCode('s2', 'the-code-of-the-test'), { status: 400, body: { error: 'this sign-in takes no code' } });
+    assert.deepEqual(sendCode('s3', 'the-code-of-the-test'), { status: 409, body: { status: 'failed' } });
+    assert.deepEqual(sendCode('nope', 'the-code-of-the-test'), { status: 404, body: { error: 'no such sign-in' } });
+  } finally {
+    for (const k of ['s1', 's2', 's3']) sessions.delete(k);
+  }
+});
+
+test('a status check has no network and a read-only volume, and an image changes when its build inputs change', () => {
+  const a = statusArgs({ user: 'ann', engine: 'claude', limits: { memory: '1g', cpus: '2', pids: '256' } });
+  assert.deepEqual(a.slice(a.indexOf('--network'), a.indexOf('--network') + 2), ['--network', 'none']);
+  assert.ok(a.includes(`${volumeOf('ann')}:/claude-config:ro`));
+  assert.deepEqual(a.slice(-4), ['claude', 'auth', 'status', '--json']);
+  const c = statusArgs({ user: 'ann', engine: 'codex', limits: { memory: '1g', cpus: '2', pids: '256' } });
+  assert.ok(c.includes(`${codexVolumeOf('ann')}:/codex-home:ro`) && c.includes('none'));
+  const files = { Dockerfile: 'FROM x', 'egress-proxy.mjs': 'a' };
+  const read = (f) => files[f];
+  const egress = inputsHash('egress', read), claude = inputsHash('claude', read);
+  assert.match(egress, /^[0-9a-f]{16}$/);
+  assert.notEqual(egress, claude);
+  files['egress-proxy.mjs'] = 'b';
+  assert.notEqual(inputsHash('egress', read), egress);
+  assert.equal(inputsHash('claude', read), claude);
+  files.Dockerfile = 'FROM y';
+  assert.notEqual(inputsHash('claude', read), claude);
+});
+
+test('the runner sends no SIGKILL to a young Claude process, except on the hard time limit', async () => {
+  assert.equal(mayKill({ engine: 'claude', ageMs: 29_999, minAgeMs: 30_000 }), false);
+  assert.equal(mayKill({ engine: 'claude', ageMs: 30_000, minAgeMs: 30_000 }), true);
+  assert.equal(mayKill({ engine: 'claude', ageMs: 10, hard: true, minAgeMs: 30_000 }), true);
+  assert.equal(mayKill({ engine: 'codex', ageMs: 10, minAgeMs: 30_000 }), true);
+  assert.equal(waitBeforeStop({ engine: 'claude', ageMs: 12_000, minAgeMs: 30_000 }), 18_000);
+  assert.equal(waitBeforeStop({ engine: 'claude', ageMs: 12_000, hard: true, minAgeMs: 30_000 }), 0);
+  // A program that ignores its input and SIGINT: each step and its time are recorded.
+  const fakeProc = ({ endOn = null } = {}) => {
+    let end;
+    const p = { t_spawn: Date.now(), steps: [], closed: new Promise((r) => { end = r; }) };
+    const at = (s) => { p.steps.push([s, Date.now() - p.t_spawn]); if (s === endOn || s === 'SIGKILL') end(); };
+    p.child = { stdin: { end: () => at('eof') }, kill: (sig) => at(sig) };
+    return p;
+  };
+  const young = fakeProc();
+  assert.equal(await stopGently(young, { engine: 'claude', minAgeMs: 300, graceMs: 20 }), 'sigkill');
+  assert.deepEqual(young.steps.map(([s]) => s), ['eof', 'SIGINT', 'SIGKILL']);
+  for (const [, ms] of young.steps) assert.ok(ms >= 290, `a step at ${ms} ms, before the minimum age`);
+  // The grace of each step is longer than the minimum age, so the program is old enough at SIGKILL with no wait.
+  const longGrace = fakeProc();
+  assert.equal(await stopGently(longGrace, { engine: 'claude', minAgeMs: 100, graceMs: 60 }), 'sigkill');
+  assert.ok(longGrace.steps[0][1] >= 95);
+  // A Claude process that is still young after the gentle steps is left to end by itself.
+  // Here the clock stays at the start, so the wait of the minimum age passes and the program is still young after it.
+  const left = fakeProc();
+  assert.equal(await stopGently(left, { engine: 'claude', minAgeMs: 200, graceMs: 10, now: () => left.t_spawn }), 'left');
+  assert.deepEqual(left.steps.map(([s]) => s), ['eof', 'SIGINT']);
+  // The hard time limit does not wait.
+  const hard = fakeProc();
+  assert.equal(await stopGently(hard, { engine: 'claude', hard: true, minAgeMs: 30_000, graceMs: 20 }), 'sigkill');
+  assert.ok(hard.steps[0][1] < 100);
+  // A program that ends at the end of its input gets no signal.
+  const eof = fakeProc({ endOn: 'eof' });
+  assert.equal(await stopGently(eof, { engine: 'claude', minAgeMs: 50, graceMs: 1000 }), 'eof');
+  assert.deepEqual(eof.steps.map(([s]) => s), ['eof']);
+  // Codex has no minimum age.
+  const codex = fakeProc();
+  assert.equal(await stopGently(codex, { engine: 'codex', minAgeMs: 30_000, graceMs: 20 }), 'sigkill');
+  assert.ok(codex.steps[0][1] < 100);
+});
+
+test('a waiting Claude program that gets no job ends at the end of its input, and not before its minimum age', () => {
+  // CLAUDE_MIN_AGE_MS comes from the environment when the module loads, so this check runs in its own process.
+  const code = `
+    import { spawn } from 'node:child_process';
+    import { warmClaude } from ${JSON.stringify(new URL('../sandbox/run-comment.mjs', import.meta.url).href)};
+    const exec = () => spawn(process.execPath, ['-e', 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0)); process.on("SIGINT", () => {})'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const w = warmClaude({ exec, mcp: {}, model: 'sonnet' });
+    const step = await w.discard();
+    console.log(JSON.stringify({ step, ms: Date.now() - w.t_spawn, same: w.discard() === w.discard() }));`;
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', env: { PATH: process.env.PATH, SANDBOX_CLAUDE_MIN_AGE_MS: '400' }, timeout: 20_000 });
+  const o = JSON.parse(r.stdout.trim().split('\n').pop());
+  assert.equal(o.step, 'eof', r.stderr);
+  assert.ok(o.ms >= 400, `ended at ${o.ms} ms`);
+  assert.equal(o.same, true);
+});
+
+test('changedLines of the evaluation finds the lines that an edit removed and added, in the body only', () => {
+  const page = (body) => `<html><head><title>t</title></head><body>\n${body}\n</body></html>`;
+  assert.deepEqual(changedLines(page('<h1>How heat pmups work</h1>\n<p>One.</p>\n<p>Two.</p>'), page('<h1>How heat pumps work</h1>\n<p>One.</p>\n<p>Two.</p>')), { removed: ['<h1>How heat pmups work</h1>'], added: ['<h1>How heat pumps work</h1>'] });
+  assert.deepEqual(changedLines(page('<p>One.</p>\n<p>Two.</p>'), page('<p>One.</p>\n<p>New.</p>\n<p>Two.</p>')), { removed: [], added: ['<p>New.</p>'] });
+  assert.deepEqual(changedLines(page('  <p>Same.</p>'), page('<p>Same.</p>')), { removed: [], added: [] });
+});
+
 test('each control holds in a real container (SANDBOX_DOCKER_TESTS=1)', { skip: process.env.SANDBOX_DOCKER_TESTS !== '1' && 'set SANDBOX_DOCKER_TESTS=1 to run verify-controls.mjs' }, () => {
   const r = spawnSync(process.execPath, [path('../sandbox/verify-controls.mjs')], { encoding: 'utf8', timeout: 300_000 });
   assert.equal(r.status, 0, r.stdout);
   assert.ok(!/^FAIL/m.test(r.stdout), r.stdout);
-  assert.equal((r.stdout.match(/^PASS/gm) ?? []).length, 38);
+  assert.equal((r.stdout.match(/^PASS/gm) ?? []).length, 44);
 });
 
 // ---------------------------------------------------------------------------------------------------------------------

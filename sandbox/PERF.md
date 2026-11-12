@@ -6,6 +6,43 @@ The page of each test is `page.html` below: 1 KB, three paragraphs, a typo in th
 
 All times are from the comment POST unless a column says something else.
 
+## 2026-11-12, later: 1/4 vCPU, the first job, two users, a queue, and the models
+
+Same Mac, model `claude-sonnet-5-5` unless a row says something else, docker mode, the runner of this code on port 8811.
+
+### Claude at 1/4 vCPU (the `basic` instance)
+
+The question: can a warm policy make the `basic` instance (1/4 vCPU) fast enough for Claude? Each row is one run with `SANDBOX_CPUS` set, and a program that waited for the job.
+
+| CPU limit | Program start | Wait before the job | Reply stored, from the job | CPU of the run |
+|---|---|---|---|---|
+| 2 | 0.75 to 1.2 s, about 0.9 vCPU-s | 3 s | 3.2 s | about 0.9 vCPU-s |
+| 1/2 | about 2.5 s | 3 s | 3.5 s | about 0.8 vCPU-s |
+| 1/4 | about 15 s, 3.6 vCPU-s, throttled | 50 s | 10.6 s (`init` 2.1 s, first token 6.3 s) | 3.6 vCPU-s |
+
+- At 1/4 vCPU the program start takes about 15 s, so a warm program on intent is not ready when the person posts.
+- A program that waited 50 s was ready, and the run still took 10.6 s. The run itself needs about 3.6 vCPU-s at this limit, against about 0.9 at 2 vCPU. Claude Code is CPU-bound in its own work between the model turns, not only at its start.
+- So no warm policy makes `basic` fast for Claude. Use `standard-1` (1/2 vCPU) for Claude. `COST.md` has the price.
+- The Codex stand-in (`STANDIN_CPUS=0.25 node sandbox/codex-standin.mjs`) took 1.07 to 1.47 s at 1/4 vCPU, against 0.85 s at 2 vCPU. Codex is a native binary and has no waiting program, so `basic` is enough for Codex.
+
+### The first job after a runner start, two users, and a queue
+
+`runner-check.mjs` and the runner log gave these times. Times are from the POST of the job to the runner.
+
+| Case | Result |
+|---|---|
+| The first job, 0.3 s after the start of the runner | Done, reply at 9.5 s: 2.6 s for the network and the proxy, 0.8 s for the container, about 3 s for the cold program start. |
+| Three users at the same moment | A (Claude, docker): reply 4.25 s, cold container 0.48 s, `ms_queue` 0. B (Codex, host): done in 11.9 s, `ms_queue` 0. C (a volume with no sign-in): `not_signed_in` in 2.0 s. |
+| User A alone, next | Reply 3.6 s, with a waiting program. |
+| Three comments of one user at the same moment, one page | One after the other: `ms_queue` 1, 4445 and 9322 ms. Each reply 3.2 to 3.8 s. Version 4 has all three edits, and all three threads are resolved. |
+
+- In the queue, jobs 2 and 3 got no waiting program (`warm: false`, about 120 ms more), because the program before was still young.
+- The queue waits about 1.1 s for the last turn of the program before. The runner does not end a Claude process younger than 30 s (`README.md`, "The minimum age of a Claude process").
+
+### Models
+
+`MODELS.md` has the evaluation: 43 Claude runs and 6 Codex runs on 11 tasks. Sonnet stays the default for Claude, with a median of 5.1 s to the reply against 10.9 s for Opus and the same results. The new prompt fixed the edit of "make it better": 0 of 6 unclear requests got an edit, against 1 of 6 before.
+
 ## 2026-11-12: the reply in edit_page, warm on intent, one image for each engine
 
 Same Mac, same page, model `claude-sonnet-5-5`, docker mode. "Before" is commit e2e241e (its host on port 8805, its runner and its image `agent-pages-sandbox`). "After" is this code. Each cell is one run on a new page. Times are from the comment POST to the reply in the comments API.
@@ -21,7 +58,7 @@ Same Mac, same page, model `claude-sonnet-5-5`, docker mode. "Before" is commit 
 
 - A run with an edit has 4 model turns in place of 5, and it makes 3 tool calls in place of 4. The reply comes 0.5 to 1.4 s earlier.
 - The replies were as good as before: one sentence that says what changed, and the thread resolved.
-- **A quality change to watch.** In one of two runs of "make it better", Claude fixed the typo and split the long sentence, and resolved the thread. Before, and in the other run, it asked one question with choices and made no edit. Two runs cannot show if the new step 4 of the prompt causes this. Test more runs of unclear comments before a release.
+- **A quality change to watch.** In one of two runs of "make it better", Claude fixed the typo and split the long sentence, and resolved the thread. Before, and in the other run, it asked one question with choices and made no edit. Two runs cannot show if the new step 4 of the prompt causes this. Test more runs of unclear comments before a release. (Fixed later on 2026-11-12. See `MODELS.md`.)
 - A failed edit stores no reply, and the model gets the error (unit tests in `host/src/mcp.test.ts`). No real run had a failed edit in this test.
 - Codex in host mode, "fix the typo in the title": 3 tool calls, the reply in `edit_page`, reply stored after 11.3 s (1 run). The runs of the old code with 4 tool calls took 13.7 to 14.7 s on another comment.
 
@@ -187,7 +224,8 @@ Host mode, Codex 0.167.2, the default model of the signed-in account, the commen
 - Codex makes one tool call in each model turn, and each turn takes 2 to 5 s. No setting in these tests made it faster.
 - The run through the proxy proves that Codex works with `HTTPS_PROXY` and with the connector behind the proxy. Codex needed only `chatgpt.com`. The proxy refused `ab.chatgpt.com`, and the run was correct.
 - `codex exec --json` prints a tool call when its arguments are complete. So an edit gives one `focus` event and one `typing` event, at the same moment as the `tool` event.
-- No Codex run was in a container, because the container has no ChatGPT sign-in.
+- No Codex run was in a container, because the container has no ChatGPT sign-in. `codex-path.mjs` runs the full docker path with a stand-in model, and it passes.
+- 2026-11-12, `SANDBOX_HOST_EGRESS=1`, the comment "fix the typo in the heading": `gpt-6.1-sol` 9.9 s, `gpt-6-astra` 11.2 s, `gpt-6-luna` 8.8 s to the reply (1 run each).
 
 ## Fewer turns: what the connector could do
 

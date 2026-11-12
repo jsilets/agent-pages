@@ -8,7 +8,8 @@ import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { handleRunProgress, pageActivity } from './activity';
 import { onCommentCreated } from './agents';
-import { addComment, getComment, listThreads, reopenThread, resolveThread } from './comments';
+import { assistantStates, chooseModel, connectStatus, disconnect, RunnerError, sendCode, startConnect } from './assistants';
+import { addComment, deleteComment, editComment, getComment, listThreads, reopenThread, resolveThread } from './comments';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, newToken, newTokenId, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, readJson, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { handleMcp } from './mcp';
 import { handleRunResult, rerunComment, sandboxAgents, warmRunner, withRuns } from './sandbox';
@@ -361,6 +362,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     const o = req.headers.get('origin');
     if (o && o !== url.origin) return fail(403, 'cross-origin write refused');
   }
+  // The assistant routes pass a sign-in on to the runner. They take requests from the viewer of this host only.
+  if (r.kind === 'api-assistants' || r.kind === 'api-assistant' || r.kind === 'api-assistant-connect' || r.kind === 'api-assistant-connection' || r.kind === 'api-connect' || r.kind === 'api-connect-code') {
+    const site = req.headers.get('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') return fail(403, 'the assistant routes take requests from this host only');
+    try {
+      return await assistantRoute(req, env, r, who.who);
+    } catch (e) {
+      if (e instanceof RunnerError) return fail(503, e.message);
+      throw e;
+    }
+  }
 
   switch (r.kind) {
     case 'kit-css':
@@ -440,6 +452,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       // PUT resolves the thread and DELETE opens it again, like the pin route.
       if (method !== 'PUT' && method !== 'DELETE') return fail(405, 'method not allowed');
       return (await (method === 'PUT' ? resolveThread : reopenThread)(env, r.id)) ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such thread');
+    case 'api-comment': {
+      // A person changes or deletes a comment of their own. Deleting the first comment of a thread deletes the thread.
+      if (method === 'PATCH') {
+        const body = (await readJson(req, MAX_JSON_BYTES)) as { body?: unknown } | null | undefined;
+        if (!body || typeof body !== 'object') return fail(400, 'send { "body": "..." } as JSON of at most 64 KB');
+        const c = await editComment(env, r.id, who.who, body.body);
+        return 'error' in c ? fail(c.status, c.error) : json(c);
+      }
+      if (method === 'DELETE') {
+        const out = await deleteComment(env, r.id, who.who);
+        return 'error' in out ? fail(out.status, out.error) : json(out);
+      }
+      return fail(405, 'method not allowed');
+    }
     case 'api-comment-run': {
       if (method !== 'POST') return fail(405, 'method not allowed');
       const c = await getComment(env, r.id);
@@ -486,6 +512,45 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     }
     default:
       return url.pathname.startsWith('/api/') ? fail(404, 'no such route') : page(messageHtml('Not found', 'No page is at this address.', nonce), nonce, 404);
+  }
+}
+
+type AssistantRoute = Extract<ReturnType<typeof route>, { kind: 'api-assistants' | 'api-assistant' | 'api-assistant-connect' | 'api-assistant-connection' | 'api-connect' | 'api-connect-code' }>;
+
+/** The assistant settings and the sign-in. See assistants.ts. A runner that does not answer gives 503. */
+async function assistantRoute(req: Request, env: Env, r: AssistantRoute, user: string): Promise<Response> {
+  const method = req.method;
+  const handled = env.SANDBOX_RUNNER_URL ? sandboxAgents(env) : [];
+  const refused = (out: object) => ('error' in out && 'status' in out ? fail((out as Refusal).status, (out as Refusal).error) : null);
+  switch (r.kind) {
+    case 'api-assistants':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      return json(await assistantStates(env, user, handled));
+    case 'api-assistant': {
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      const out = await chooseModel(env, user, r.name, req);
+      return refused(out) ?? json(out);
+    }
+    case 'api-assistant-connect': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      if (!handled.includes(r.name)) return fail(503, `no sandbox runner handles @${r.name}`);
+      const out = await startConnect(env, user, r.name);
+      return refused(out) ?? json(out, 201);
+    }
+    case 'api-assistant-connection':
+      if (method !== 'DELETE') return fail(405, 'method not allowed');
+      return json(await disconnect(env, user, r.name));
+    case 'api-connect': {
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      const out = await connectStatus(env, user, r.id);
+      return out ? json(out) : fail(404, 'no such sign-in');
+    }
+    case 'api-connect-code': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const out = await sendCode(env, user, r.id, req);
+      if (!out) return fail(404, 'no such sign-in');
+      return (typeof out.status === 'number' ? refused(out) : null) ?? json(out);
+    }
   }
 }
 

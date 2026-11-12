@@ -709,11 +709,14 @@ function runDeck(deck) {
     if (document.fullscreenEnabled) (document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen()).catch(() => {});
   }
   addEventListener('fullscreenchange', () => { S.present = !!document.fullscreenElement; show(); });
+  // In the host viewer, the comments sit beside the slide, so the deck stays in the slide view.
+  let locked = false;
+  addEventListener('k-host-deck', () => { locked = true; autoView = false; if (S.view !== 'slide') setView('slide'); });
   addEventListener('message', (e) => {
     const d = e.data; if (!d || d.ns !== 'k-deck' || d.v !== 1 || parent === window || e.source !== parent) return;
     // The host makes the frame full screen itself, so it tells the deck when that starts and ends.
     if (d.type === 'present') { S.present = !!d.on; if (S.present && S.view !== 'slide') { S.view = 'slide'; autoView = false; } show(); }
-    if (d.type === 'view' && ['slide', 'scroll'].includes(d.view)) setView(d.view);
+    if (d.type === 'view' && ['slide', 'scroll'].includes(d.view) && !(locked && d.view === 'scroll')) setView(d.view);
     if (d.type === 'audit') parent.postMessage({ ns: 'k-deck', v: 1, type: 'audit', report: window.kDeck?.report || null }, '*');
   });
 
@@ -726,7 +729,7 @@ function runDeck(deck) {
     else if (paged && k === 'Home') go(0);
     else if (paged && k === 'End') go(N - 1, builds(N - 1));
     else if (k === 't' || k === 'T') toggleThumbs();
-    else if (k === 'd' || k === 'D') setView(S.view === 'scroll' ? 'slide' : 'scroll');
+    else if ((k === 'd' || k === 'D') && !locked) setView(S.view === 'scroll' ? 'slide' : 'scroll');
     else if (k === 'f' || k === 'F') present();
     else return;
     e.preventDefault();
@@ -758,7 +761,7 @@ function runDeck(deck) {
   deck.addEventListener('touchend', (e) => { if (tx === null || S.view !== 'slide') return; const dx = e.changedTouches[0].clientX - tx; tx = null; if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1); });
   let idle;
   addEventListener('pointermove', () => { root.classList.add('k-awake'); clearTimeout(idle); idle = setTimeout(() => root.classList.remove('k-awake'), 2000); });
-  addEventListener('hashchange', () => { const h = parseHash(); if (h.view && h.view !== S.view) { S.view = h.view; autoView = false; } S.thumbs = h.thumbs; go(h.i, h.b); });
+  addEventListener('hashchange', () => { const h = parseHash(); if (h.view && h.view !== S.view && !(locked && h.view === 'scroll')) { S.view = h.view; autoView = false; } S.thumbs = h.thumbs; go(h.i, h.b); });
   new ResizeObserver(() => requestAnimationFrame(() => {
     if (autoView && widthView() !== S.view) return setView(widthView(), true);
     const rl = 'kRail' in root.dataset; layout(); if (rl !== railOn()) show();
@@ -860,17 +863,35 @@ function lines(g) {
   return out;
 }
 
+/* ─── The host viewer scrolls the page ───────────
+   In the viewer, the frame of a page is as tall as the page, and the viewer scrolls it together with the comments
+   beside it. The page does not scroll itself then. The viewer turns this on with { type: 'hello', host: true } and tells
+   the page which part of it shows with { type: 'view', top, h }. The page asks the viewer to scroll with
+   { type: 'goto', y, smooth } and reports its height with { type: 'size', h }. A deck keeps its own fixed view. */
+const HOST = { on: false, top: 0, h: 0 };
+const viewTop = () => (HOST.on ? HOST.top : scrollY);
+const viewH = () => (HOST.on ? HOST.h || innerHeight : innerHeight);
+/** Scrolls the page so that y, in pixels from the top of the document, is at the top of the view. */
+function scrollToY(y, smooth) {
+  if (HOST.on) parent.postMessage({ ns: 'k-cm', v: 1, type: 'goto', y: Math.max(0, Math.round(y)), smooth: !!smooth }, '*');
+  else scrollTo({ top: y, behavior: smooth ? 'smooth' : 'instant' });
+}
+/** The original text of each text node that a preview changed. Comments and presence search this text, not the preview. */
+const ORIG = new WeakMap();
+const textOf = (n) => ORIG.get(n) ?? n.data;
+
 /* ─── Presence: the cursor of an assistant that edits the page ───────────
    The host viewer sends the state of each run with postMessage. Nothing here runs, and the page gets no
    element, until the first message from the parent window. Each text from the viewer is text from an
    assistant: it goes into the page with textContent only.
    Messages from the viewer, all { ns: 'k-presence', v: 1, type }:
-     state    runs: [{ id, agent, name, phase, quote, text, final, before, anchor, hint }]. A run that is not in the list leaves.
+     state    runs: [{ id, agent, name, phase, quote, text, final, before, anchor, hint, steps }]. A run that is not in the list
+              leaves. steps: [{ quote, text, before, anchor }] are the edits of one edit_page call. The cursor shows each one in turn.
      reveal   id. Scroll to the cursor of that run, also when the reader scrolls.
-     where    The page answers { type: 'at', x, y }: its scroll position.
-     restore  x, y, flash: [{ id, agent, name, quote, before, anchor, cursor }]. Scroll there with no animation, mark the
-              new text for a moment, and answer { type: 'restored' }.
-   The page tells the viewer { type: 'busy', on } while a cursor moves or types. */
+     restore  flash: [{ id, agent, name, quote, before, anchor, cursor }]. Mark the new text for a moment, and answer { type: 'restored' }.
+   The page tells the viewer { type: 'busy', on } while a cursor moves or types.
+   The preview of an edit replaces the old text in place: the new text types in where the old text starts, and the old text
+   fades and gives up its room at the same pace. The stored page does not change. */
 function runPresence() {
   if (parent === window) return;
   let P = null;
@@ -880,7 +901,6 @@ function runPresence() {
     if (!P) P = startPresence();
     if (d.type === 'state' && Array.isArray(d.runs)) P.state(d.runs);
     else if (d.type === 'reveal') P.reveal(d.id);
-    else if (d.type === 'where') parent.postMessage({ ns: 'k-presence', v: 1, type: 'at', x: scrollX, y: scrollY }, '*');
     else if (d.type === 'restore') P.restore(d);
   });
 }
@@ -901,16 +921,18 @@ function startPresence() {
   // The reader moved the page a moment ago: do not scroll it away.
   let userAt = 0;
   ['wheel', 'touchstart', 'touchmove', 'keydown', 'pointerdown'].forEach((t) => addEventListener(t, (e) => { if (e.isTrusted) userAt = Date.now(); }, { passive: true, capture: true }));
+  addEventListener('k-userscroll', () => { userAt = Date.now(); });
 
-  /** The range of a quote in the page, or null. */
+  /** The range of a quote in the original text of the page, or null. */
   function rangeOf(quote, hint, anchor) {
     if (!quote) return null;
     const nodes = textNodes(SKIP), el = anchor ? document.getElementById(anchor) : null;
     const from = el ? nodes.findIndex((n) => el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) : -1;
-    const hit = findQuote(nodes.map((n) => n.data), quote, hint, from < 0 ? undefined : from);
+    const hit = findQuote(nodes.map(textOf), quote, hint, from < 0 ? undefined : from);
     if (!hit) return null;
     const g = document.createRange();
-    g.setStart(nodes[hit.a[0]], hit.a[1]); g.setEnd(nodes[hit.b[0]], hit.b[1]);
+    const at = (p) => [nodes[p[0]], Math.min(p[1], nodes[p[0]].length)];
+    g.setStart(...at(hit.a)); g.setEnd(...at(hit.b));
     return g;
   }
   function paint(box, list, cls) {
@@ -924,12 +946,6 @@ function startPresence() {
       return i;
     }));
   }
-  /** Marks the old text of each run as replaced, where the browser has the CSS Custom Highlight API. */
-  function strike() {
-    if (!globalThis.Highlight || !CSS.highlights) return;
-    const old = [...runs.values()].filter((r) => r.ins && r.range).map((r) => r.range);
-    if (old.length) CSS.highlights.set('k-pr-old', new Highlight(...old)); else CSS.highlights.delete('k-pr-old');
-  }
 
   function make(id, agent, name) {
     const cur = mk('div', 'k-pr-cur'), hl = mk('div', 'k-pr-box');
@@ -937,34 +953,99 @@ function startPresence() {
     cur.innerHTML = '<i class="k-pr-bar"></i><span class="k-pr-flag">' + POINTER + '<b></b><span class="k-pr-verb"></span></span>';
     cur.querySelector('b').textContent = str(name, 24) || NAMES[agent] || 'Assistant';
     layer.append(hl);
-    return { id, cur, hl, quote: '', key: '', range: null, landed: false, ins: null, target: '', done: 0, note: '', verb: '' };
+    // parts: one preview for each edit. at: the part that the cursor is at.
+    return { id, cur, hl, key: '', parts: [], at: null, steps: [], step: 0, landed: null, spot: null, note: '', verb: '', nextAt: 0 };
   }
-  function unpreview(r) {
-    if (!r.ins) return;
-    const p = r.ins.parentNode;
-    r.ins.remove(); r.ins = null; r.target = ''; r.done = 0;
-    if (p) p.normalize();
+
+  // ─── One edit: the old text, and the preview of the new text in its place ───
+  const spotKey = (s) => s.quote + '\n' + (s.anchor || '') + '\n' + (s.before || '');
+  const same = (a, b) => !!a && !!b && (a.startsWith(b) || b.startsWith(a));
+  function part(s) {
+    return { key: spotKey(s), quote: s.quote, range: rangeOf(s.quote, s.before || s.hint, s.anchor), ins: null, wraps: [], old: 0, target: '', done: 0 };
+  }
+  /** Puts the new text where the old text starts, and wraps each piece of the old text, so it can fade and give up its room. */
+  function open(p, agent) {
+    const g = p.range, end = g.endContainer, host = end.nodeType === 1 ? end : end.parentElement;
+    if (!host || host.closest('svg, textarea, select, option, button')) return false;
+    const pieces = textNodes(SKIP).filter((n) => g.intersectsNode(n)).map((n) => [n, n === g.startContainer ? g.startOffset : 0, n === g.endContainer ? g.endOffset : n.length]).filter(([n, a, b]) => b > a && n.data.slice(a, b).trim());
+    if (!pieces.length) return false;
+    p.wraps = pieces.map(([n, a, b]) => {
+      let t = n;
+      if (b < t.length) t.splitText(b);
+      if (a > 0) t = t.splitText(a);
+      const span = mk('span', 'k-pr-was');
+      t.before(span); span.append(t);
+      ORIG.set(t, t.data);
+      return { span, node: t, text: t.data };
+    });
+    p.old = p.wraps.reduce((n, w) => n + w.text.length, 0);
+    p.ins = mk('ins', 'k-pr-new'); p.ins.dataset.agent = agent; p.ins.setAttribute('aria-hidden', 'true');
+    p.wraps[0].span.before(p.ins);
+    // The wraps moved the text nodes, so the range of the old text starts again at the preview and ends after the last wrap.
+    p.range = document.createRange(); p.range.setStartBefore(p.ins); p.range.setEndAfter(p.wraps[p.wraps.length - 1].span);
+    return true;
+  }
+  /** The old text gives up the same share of its room as the new text has typed. */
+  function consume(p) {
+    let cut = p.target.length ? Math.round((p.old * p.done) / p.target.length) : p.old;
+    for (const w of p.wraps) { const k = Math.min(cut, w.text.length); w.node.data = w.text.slice(k); cut -= k; }
+  }
+  /** Takes the preview away: the old text comes back, as it was. */
+  function close(p) {
+    if (!p.ins) return;
+    const parents = new Set();
+    p.wraps.forEach((w) => { w.node.data = w.text; ORIG.delete(w.node); if (w.span.parentNode) { parents.add(w.span.parentNode); w.span.replaceWith(w.node); } });
+    if (p.ins.parentNode) parents.add(p.ins.parentNode);
+    p.ins.remove(); p.ins = null; p.wraps = []; p.done = 0; p.target = '';
+    parents.forEach((n) => n.normalize());
+  }
+  function preview(r, p, text) {
+    if (!p.range) return;
+    const deck = !!hostOf(p.range).closest('.k-slide'), max = deck ? 280 : 700;
+    const target = text.length > max ? text.slice(0, max) + '…' : text;
+    if (!p.ins && !open(p, r.cur.dataset.agent)) return;
+    if (target === p.target) return;
+    // The assistant changed text that the preview has: keep the part that is the same.
+    let k = 0; while (k < p.done && k < target.length && target[k] === p.target[k]) k++;
+    p.target = target; p.done = k; p.ins.textContent = target.slice(0, k); consume(p);
+    if (!typeTimer) typeTimer = setInterval(type, 32);
+  }
+  const typing = (p) => !!p && !!p.ins && p.done < p.target.length;
+
+  /** The place of the cursor: the end of the new text while it types, else the start or the end of the old text. */
+  function caret(r) {
+    const p = r.at;
+    if (p && p.ins && p.ins.isConnected) {
+      const b = [...p.ins.getClientRects()].filter((x) => x.height > 0.5).pop();
+      if (b) return { x: b.right, y: b.top, h: b.height };
+      const w = p.wraps.find((x) => x.node.length);
+      const z = w && document.createRange(); if (z) { z.setStart(w.node, 0); z.collapse(true); const c = z.getClientRects()[0]; if (c) return { x: c.left, y: c.top, h: c.height }; }
+    }
+    const g = r.landed || (p && p.range && p.range.startContainer.isConnected ? p.range : null);
+    const list = g ? lines(g) : [];
+    if (!list.length) return null;
+    const l = r.landed ? list[list.length - 1] : list[0];
+    return { x: r.landed ? l.right : l.left, y: l.top, h: l.height };
   }
   /** Puts the cursor in the text, or in the dock. A change of place glides: first, last, invert, play. */
   function place(r, glide) {
     const first = r.cur.isConnected && glide && !still.matches ? r.cur.getBoundingClientRect() : null;
-    const list = r.range ? lines(r.range) : [];
-    let at = null;
-    if (r.ins) { const b = [...r.ins.getClientRects()].filter((x) => x.height > 0.5).pop(); if (b) at = { x: b.right, y: b.top, h: b.height }; }
-    if (!at && list.length) { const l = r.landed || r.ins ? list[list.length - 1] : list[0]; at = { x: r.landed || r.ins ? l.right : l.left, y: l.top, h: l.height }; }
+    const at = caret(r);
     if (at) {
       const o = layer.getBoundingClientRect();
       if (r.cur.parentNode !== layer) layer.append(r.cur);
       r.cur.dataset.mode = 'caret';
       r.cur.style.cssText = `transform:translate(${Math.round(at.x - o.left)}px,${Math.round(at.y - o.top)}px);height:${Math.round(at.h)}px`;
-      // The flag sits under the caret at the top edge of the window, and while the caret writes, so it does not cover the new text.
-      r.cur.classList.toggle('k-pr-low', at.y < 26 || !!r.ins);
+      // The flag sits under the caret at the top edge of the view, and while the caret writes, so it does not cover the new text.
+      r.cur.classList.toggle('k-pr-low', at.y - (HOST.on ? viewTop() : 0) < 26 || !!(r.at && r.at.ins));
     } else {
       if (r.cur.parentNode !== dock) dock.append(r.cur);
       r.cur.dataset.mode = 'dock'; r.cur.style.cssText = '';
     }
     r.cur.querySelector('.k-pr-verb').textContent = at ? '' : r.verb + (r.note ? ' ' + r.note : '');
-    paint(r.hl, r.landed ? [] : list, r.ins ? 'k-pr-old' : '');
+    // Before the new text types, the old text has a mark: the assistant selected it.
+    const p = r.at;
+    paint(r.hl, !r.landed && p && p.range && !p.ins && p.range.startContainer.isConnected ? lines(p.range) : [], '');
     if (first) {
       const last = r.cur.getBoundingClientRect(), dx = first.left - last.left, dy = first.top - last.top;
       if (Math.abs(dx) + Math.abs(dy) > 2) { r.cur.animate([{ transform: (r.cur.style.transform || '') + ` translate(${dx}px,${dy}px)` }, { transform: r.cur.style.transform || 'none' }], { duration: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }); movedAt = Date.now(); }
@@ -972,71 +1053,96 @@ function startPresence() {
   }
   /** Shows the slide and scrolls to the place, unless the reader moved the page in the last seconds. */
   function show(r, force) {
-    const el = r.range ? hostOf(r.range) : r.spot;
+    const g = r.landed || (r.at && r.at.range), el = g ? hostOf(g) : r.spot;
     if (!el || (!force && Date.now() - userAt < 2500)) return;
     el.closest('.k-slide')?.dispatchEvent(new CustomEvent('k-show'));
-    const b = r.range ? r.range.getBoundingClientRect() : el.getBoundingClientRect();
+    const b = g ? g.getBoundingClientRect() : el.getBoundingClientRect();
     if (!b.width && !b.height) return;
-    if (b.top < 72 || b.bottom > innerHeight - 96) scrollBy({ top: b.top - innerHeight * 0.32, behavior: still.matches ? 'auto' : 'smooth' });
+    const top = b.top + scrollY, vt = viewTop(), vh = viewH();
+    if (top - vt < 72 || top + b.height - vt > vh - 96) scrollToY(top - vh * 0.32, !still.matches);
   }
-  /** Finds the place of the run again: the old text, or the new text after the page has the new version. */
-  function find(r, s) {
-    unpreview(r);
-    r.range = rangeOf(s.quote, s.before || s.hint, s.anchor); r.landed = false;
-    if (!r.range && s.final && s.text) { r.range = rangeOf(s.text, s.before, s.anchor); r.landed = !!r.range; }
-    r.spot = r.range ? null : (s.anchor && document.getElementById(s.anchor)) || null;
+  /** The edits that the run shows: the steps of its edit_page call, or the one place that the runner reports. */
+  function stepsOf(s) {
+    if (s.final && s.steps.length) return s.steps;
+    return s.quote ? [{ quote: s.quote, text: s.text, before: s.before, anchor: s.anchor, hint: s.hint }] : [];
+  }
+  /** Sets the part of each step that the cursor reached, and moves the cursor to the current step. */
+  function update(r, s) {
+    const steps = stepsOf(s), was = r.at;
+    r.steps = steps;
+    r.step = Math.min(r.step, Math.max(0, steps.length - 1));
+    // A step keeps the preview of a part with the same old text. The other parts go.
+    const keepParts = [];
+    steps.forEach((st, i) => {
+      if (i > r.step) return;
+      let p = r.parts.find((x) => x.key === spotKey(st)) || r.parts.find((x) => !keepParts.includes(x) && same(x.quote, st.quote));
+      if (!p || (!p.range && !p.ins) || (p.range && !p.ins && !p.range.startContainer.isConnected)) p = part(st);
+      keepParts.push(p);
+    });
+    r.parts.forEach((p) => { if (!keepParts.includes(p)) close(p); });
+    r.parts = keepParts;
+    r.at = r.parts[r.step] || null;
+    // The page has the new version: the old text is gone. The cursor goes to the end of the new text of the last step.
+    r.landed = null;
+    const last = steps[steps.length - 1];
+    if (s.final && last && last.text && !r.parts.some((p) => p.range || p.ins)) r.landed = rangeOf(last.text, last.before, last.anchor);
+    r.spot = r.at && r.at.range ? null : (s.anchor && document.getElementById(s.anchor)) || null;
     // A place on a slide that the deck does not show: the dock names the slide.
-    const slide = (r.range ? hostOf(r.range) : r.spot)?.closest('.k-slide');
+    const g = r.landed || (r.at && r.at.range), slide = (g ? hostOf(g) : r.spot)?.closest('.k-slide');
     r.note = slide ? 'slide ' + ([...document.querySelectorAll('main.k-deck > .k-frame > .k-slide')].indexOf(slide) + 1) : '';
+    if (!r.landed) r.parts.forEach((p, i) => {
+      const st = steps[i];
+      if (!p.range || !st.text) return;
+      preview(r, p, st.text);
+      // A step before the current one shows its whole new text.
+      if (i < r.step && p.ins) { p.done = p.target.length; p.ins.textContent = p.target; consume(p); }
+    });
+    return r.at !== was;
   }
-  let typeTimer = 0, movedAt = 0, busy = false, tick = 0;
-  let typedAt = 0;
+  let typeTimer = 0, movedAt = 0, busy = false, tick = 0, typedAt = 0;
   function type() {
     // A browser slows the timers of a tab in the background. The text keeps its speed: one step for each 32 ms that passed.
     const now = Date.now(), steps = Math.max(1, Math.min(60, Math.round((now - (typedAt || now)) / 32)));
     typedAt = now;
     let more = false;
     runs.forEach((r) => {
-      if (!r.ins || r.done >= r.target.length) return;
-      for (let k = 0; k < steps; k++) r.done = still.matches ? r.target.length : Math.min(r.target.length, r.done + Math.max(1, Math.ceil((r.target.length - r.done) / 12)));
-      r.ins.textContent = r.target.slice(0, r.done);
+      const p = r.at;
+      if (!typing(p)) return;
+      for (let k = 0; k < steps; k++) p.done = still.matches ? p.target.length : Math.min(p.target.length, p.done + Math.max(1, Math.ceil((p.target.length - p.done) / 12)));
+      p.ins.textContent = p.target.slice(0, p.done);
+      consume(p);
       place(r);
-      more = more || r.done < r.target.length;
+      more = more || typing(p);
     });
     if (!more) { clearInterval(typeTimer); typeTimer = 0; typedAt = 0; movedAt = Date.now(); }
   }
-  /** Writes the new text after the old text, as a preview. The stored page does not change. */
-  function preview(r, text) {
-    if (!r.range || r.landed) return;
-    const deck = !!hostOf(r.range).closest('.k-slide'), max = deck ? 280 : 700;
-    const target = text.length > max ? text.slice(0, max) + '…' : text;
-    if (!r.ins) {
-      const end = r.range.endContainer, host = end.nodeType === 1 ? end : end.parentElement;
-      if (!host || host.closest('svg, textarea, select, option, button')) return;
-      r.ins = mk('ins', 'k-pr-new'); r.ins.dataset.agent = r.cur.dataset.agent; r.ins.setAttribute('aria-hidden', 'true');
-      const at = r.range.cloneRange(); at.collapse(false); at.insertNode(r.ins);
-      strike();
-    }
-    if (target === r.target) return;
-    // The assistant changed text that the preview has: keep the part that is the same.
-    let same = 0; while (same < r.done && same < target.length && target[same] === r.target[same]) same++;
-    r.target = target; r.done = same; r.ins.textContent = target.slice(0, same);
-    if (!typeTimer) typeTimer = setInterval(type, 32);
+  /** The next step of an edit_page call starts a moment after the step before it finished typing. */
+  function advance() {
+    runs.forEach((r) => {
+      if (r.step >= r.steps.length - 1 || typing(r.at) || !r.at || !r.at.ins) { r.nextAt = 0; return; }
+      if (!r.nextAt) { r.nextAt = Date.now() + (still.matches ? 0 : 450); return; }
+      if (Date.now() < r.nextAt) return;
+      r.nextAt = 0; r.step++;
+      update(r, r.last);
+      show(r); place(r, true); movedAt = Date.now();
+    });
   }
   function leave(r) {
-    runs.delete(r.id); unpreview(r); strike();
+    runs.delete(r.id); r.parts.forEach(close);
     r.hl.remove(); r.cur.classList.add('k-pr-out');
     setTimeout(() => r.cur.remove(), still.matches ? 0 : 320);
   }
   function redraw() {
+    advance();
     runs.forEach((r) => place(r));
-    const on = !!typeTimer || Date.now() - movedAt < 500;
+    const on = !!typeTimer || Date.now() - movedAt < 500 || [...runs.values()].some((r) => r.step < r.steps.length - 1 && r.at && r.at.ins);
     if (on !== busy) { busy = on; say({ type: 'busy', on }); }
     if (!runs.size && !layer.querySelector('.k-pr-flash')) { clearInterval(tick); tick = 0; }
   }
-  const wake = () => { if (!tick) tick = setInterval(redraw, 200); };
-  new ResizeObserver(() => requestAnimationFrame(redraw)).observe(document.documentElement);
+  const wake = () => { if (!tick) tick = setInterval(redraw, 120); };
+  new ResizeObserver(() => requestAnimationFrame(() => runs.forEach((r) => place(r)))).observe(document.documentElement);
 
+  const readStep = (t) => (t && typeof t === 'object' && typeof t.quote === 'string' && t.quote ? { quote: str(t.quote, 600), text: str(t.text, 2000), before: str(t.before, 200), anchor: str(t.anchor, 200) } : null);
   return {
     state(list) {
       const seen = new Set();
@@ -1045,14 +1151,15 @@ function startPresence() {
         seen.add(s.id);
         let r = runs.get(s.id);
         if (!r) { r = make(s.id, s.agent, s.name); runs.set(s.id, r); dock.append(r.cur); r.cur.dataset.mode = 'dock'; }
-        const q = { quote: str(s.quote, 600), text: str(s.text, 2000), final: s.final === true, before: str(s.before, 200), hint: str(s.hint, 1000), anchor: str(s.anchor, 200) };
+        const q = { quote: str(s.quote, 600), text: str(s.text, 2000), final: s.final === true, before: str(s.before, 200), hint: str(s.hint, 1000), anchor: str(s.anchor, 200),
+          steps: Array.isArray(s.steps) ? s.steps.slice(0, 8).map(readStep).filter(Boolean) : [] };
         r.verb = VERBS[s.phase] || '';
-        const key = q.quote + '\n' + q.anchor + '\n' + q.before;
-        // The place changed, or the old text is gone because the page has the new version.
-        const moved = key !== r.key || (r.range && !r.range.startContainer.isConnected);
-        if (moved) { r.key = key; find(r, q); show(r); movedAt = Date.now(); }
-        if (q.text && q.quote) preview(r, q.text); else if (r.ins && !q.quote) { unpreview(r); strike(); }
-        place(r, moved || (!!r.ins && !r.done));
+        r.last = q;
+        const key = JSON.stringify([q.final, q.steps.map(spotKey), spotKey(q)]);
+        const moved = update(r, q) || key !== r.key;
+        r.key = key;
+        if (moved) { show(r); movedAt = Date.now(); }
+        place(r, moved);
       });
       runs.forEach((r) => { if (!seen.has(r.id)) leave(r); });
       wake(); redraw();
@@ -1061,7 +1168,6 @@ function startPresence() {
     async restore(d) {
       // Web fonts change the height of the text. Wait for them, but not for long.
       try { await Promise.race([document.fonts.ready, new Promise((ok) => setTimeout(ok, 400))]); } catch {}
-      if (Number.isFinite(d.x) && Number.isFinite(d.y)) scrollTo({ left: d.x, top: d.y, behavior: 'instant' });
       (Array.isArray(d.flash) ? d.flash : []).slice(0, 8).forEach((f) => {
         const g = f && rangeOf(str(f.quote, 2000), str(f.before, 200), str(f.anchor, 200));
         if (!g) return;
@@ -1071,7 +1177,7 @@ function startPresence() {
         const ghost = make('', f.agent, f.name), box = mk('div', 'k-pr-box');
         box.dataset.agent = ghost.cur.dataset.agent; layer.append(box);
         paint(box, list, 'k-pr-flash');
-        if (f.cursor === true) { ghost.range = g; ghost.landed = true; place(ghost); ghost.cur.classList.add('k-pr-fade'); }
+        if (f.cursor === true) { ghost.landed = g; place(ghost); ghost.cur.classList.add('k-pr-fade'); }
         setTimeout(() => { box.remove(); ghost.hl.remove(); ghost.cur.remove(); }, 2200);
       });
       wake();
@@ -1086,18 +1192,21 @@ function startPresence() {
    element, until the first message from the parent window. A text from the viewer never becomes markup: the page only
    searches for it.
    Messages from the viewer, all { ns: 'k-cm', v: 1, type }:
-     hello     boxes. The page answers { type: 'ready' }. boxes: true draws the marks as boxes, as in a browser with no CSS Custom Highlight API.
+     hello     boxes, host. The page answers { type: 'ready' }. boxes: true draws the marks as boxes, as in a browser with no CSS Custom Highlight API.
+               host: true means that the viewer scrolls the page (see HOST). A deck keeps its own view, and it stays in the slide view.
+     view      top, h, user. The part of the page that shows, in pixels from the top of the document. user: the reader scrolled.
      threads   list: [{ id, quote, prefix, suffix, anchor, slide }], active, hover. The comments to place and to mark.
      mark      active, hover. The ids of the comments with a strong mark.
      reveal    id. Show the slide of that comment and scroll to it.
      unselect  Remove the selection.
-     scroll    dy. Scroll the page by dy pixels.
    Messages to the viewer:
      select    on, live, quote, prefix, suffix, anchor, slide, rects: [[x, y, w, h]], y. The selection, one box for each line. live: the pointer is down.
-     anchors   y, vh, dh, deck: { n, cur, paged } | null, list: [{ id, state, top, slide, hidden }]. top is in pixels from the top of the document.
+     anchors   deck: { n, cur, paged } | null, list: [{ id, state, top, slide, hidden }]. top is in pixels from the top of the document.
                state is 'exact' (the quote is there, and it has a mark), 'changed' (the text changed: the place is the start of the quote or the anchor element),
                'spot' (a comment on an element) or 'lost' (no place).
-     scroll    y. One message for each scroll event.
+     size      h, w. The height of the page, when the viewer scrolls it, and the width that the page reads best at, or 0.
+     goto      y, smooth. Scroll the view so that y is at its top, when the viewer scrolls the page.
+     keyscroll key, shift. A key that scrolls, pressed in the page, when the viewer scrolls the page.
      pick      id. A click on the mark of a comment, or '' for a click on other text.
      hover     id. The mark under the pointer, or ''.
      key       key: 'comment' for Ctrl or Cmd + Alt + M, or 'esc'. */
@@ -1113,7 +1222,7 @@ function runComments() {
 }
 function startComments() {
   const SKIP = 'script, style, template, noscript, .k-pr, .k-pr-dock, .k-pr-new, .k-cm, .k-rail, .k-deck-bar, .k-err';
-  const OWN = '.k-pr, .k-pr-dock, .k-pr-new, .k-cm, .k-rail, .k-deck-bar';
+  const OWN = '.k-pr, .k-pr-dock, .k-pr-new, .k-pr-was, .k-cm, .k-rail, .k-deck-bar';
   const DRAFT = '~draft';
   const root = document.documentElement;
   const still = matchMedia('(prefers-reduced-motion: reduce)');
@@ -1125,12 +1234,13 @@ function startComments() {
   document.body.append(layer);
   const slides = () => [...document.querySelectorAll('main.k-deck > .k-frame > .k-slide')];
   // items: one for each comment, with its range or its element. over: the mark under the pointer. hover: the comment under the pointer in the viewer.
-  let items = [], key = '', active = '', hover = '', over = '', boxes = !hasApi, stale = false, queued = 0, sent = '', painted = '', epoch = 0, down = false;
+  let items = [], key = '', active = '', hover = '', over = '', boxes = !hasApi, stale = false, queued = 0, sent = '', painted = '', epoch = 0, down = false, sentH = 0, sentW = 0;
 
   /** Finds the place of each comment in the text of the page. */
   function resolveAll() {
     stale = false; epoch++;
-    const nodes = textNodes(SKIP), texts = nodes.map((n) => n.data);
+    const nodes = textNodes(SKIP), texts = nodes.map(textOf);
+    const at = (p) => [nodes[p[0]], Math.min(p[1], nodes[p[0]].length)];
     items.forEach((it) => {
       const q = it.q, slide = q.slide ? document.getElementById(q.slide) : null;
       const el = (q.anchor && document.getElementById(q.anchor)) || (slide && slide.classList.contains('k-slide') ? slide : null);
@@ -1143,7 +1253,7 @@ function startComments() {
       }
       const hit = anchorQuote(texts, q, from, to);
       it.state = hit && hit.exact ? 'exact' : hit || el ? 'changed' : 'lost';
-      if (hit) { it.range = document.createRange(); it.range.setStart(nodes[hit.a[0]], hit.a[1]); it.range.setEnd(nodes[hit.b[0]], hit.b[1]); }
+      if (hit) { it.range = document.createRange(); it.range.setStart(...at(hit.a)); it.range.setEnd(...at(hit.b)); }
     });
   }
   /** Measures the place of each comment and tells the viewer when a place changed. Only an exact quote gets a mark. */
@@ -1159,8 +1269,16 @@ function startComments() {
       list.push({ id: it.id, state: it.state, top: top == null ? null : Math.round(top + scrollY), slide: n, hidden: top == null && it.state !== 'lost' });
     });
     const deck = all.length ? { n: all.length, cur: all.findIndex((s) => s.parentElement.classList.contains('k-cur')) + 1, paged: root.dataset.kView === 'slide' } : null;
-    const body = JSON.stringify([innerHeight, root.scrollHeight, deck, list]);
-    if (body !== sent) { sent = body; say({ type: 'anchors', y: scrollY, vh: innerHeight, dh: root.scrollHeight, deck, list }); }
+    const body = JSON.stringify([deck, list]);
+    if (body !== sent) { sent = body; say({ type: 'anchors', deck, list }); }
+    if (HOST.on) {
+      // The height of the content, not of the frame: the frame is as tall as the last height, and the page fills it.
+      const b = document.body, h = Math.ceil(b.getBoundingClientRect().bottom + scrollY + (parseFloat(getComputedStyle(b).marginBottom) || 0));
+      // The width that the page reads best at: its main column and some room on each side. 0 when the page sets no limit.
+      const main = document.querySelector('main.k-page'), cs = main && getComputedStyle(main), max = cs ? parseFloat(cs.maxWidth) : NaN;
+      const w = Number.isFinite(max) ? Math.round(max + 112) : 0;
+      if (h !== sentH || w !== sentW) { sentH = h; sentW = w; say({ type: 'size', h, w }); }
+    }
     paint();
     // A deck shows the number of comments of each slide on its thumbnail, and a dot on its tick.
     if (all.length) document.querySelectorAll('.k-tick[data-i], .k-thumb[data-i]').forEach((b) => {
@@ -1214,6 +1332,12 @@ function startComments() {
     let j = i;
     while (j + 1 < nodes.length && g.intersectsNode(nodes[j + 1])) j++;
     const texts = nodes.map((n) => n.data);
+    // Two blocks or two table cells with no white space between them in the source get one space in the quote, so the
+    // quote does not read "Outdoor unit4,200". White space never counts in a comparison, so the anchor does not change.
+    const block = (n) => { let e = n.parentElement; while (e && e !== document.body && getComputedStyle(e).display.startsWith('inline')) e = e.parentElement; return e; };
+    for (let n = i; n < j; n++) if (block(nodes[n]) !== block(nodes[n + 1]) && !/\s$/.test(texts[n])) texts[n] += ' ';
+    // A selection that ends at offset 0 of a node, after a triple click, does not take that node.
+    if (j > i && nodes[j] === g.endContainer && g.endOffset === 0) j--;
     let a = [i, nodes[i] === g.startContainer ? g.startOffset : 0], b = [j, nodes[j] === g.endContainer ? g.endOffset : texts[j].length];
     // The white space at the two ends is not part of the quote.
     const before = () => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
@@ -1262,11 +1386,24 @@ function startComments() {
     if ((sel && !sel.isCollapsed) || (e.target.closest && e.target.closest('a[href], button, input, textarea, select, summary, label, ' + OWN))) return;
     say({ type: 'pick', id: hit(e.clientX, e.clientY) });
   });
+  const SCROLL_KEYS = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '];
   addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyM') { e.preventDefault(); say({ type: 'key', key: 'comment' }); }
     else if (e.key === 'Escape' && !e.defaultPrevented) say({ type: 'key', key: 'esc' });
+    // The page does not scroll itself in the viewer, so the keys that scroll go to the viewer.
+    else if (HOST.on && SCROLL_KEYS.includes(e.key) && !e.defaultPrevented && !e.metaKey && !e.ctrlKey && !e.altKey
+      && !(e.target.closest && e.target.closest('input, textarea, select, button, a[href], summary, [contenteditable], [tabindex]:not([tabindex="-1"])'))) {
+      e.preventDefault(); say({ type: 'keyscroll', key: e.key, shift: e.shiftKey });
+    }
   });
-  addEventListener('scroll', () => say({ type: 'scroll', y: scrollY }), { passive: true });
+  // A link to a place in the page: the viewer scrolls there.
+  addEventListener('click', (e) => {
+    const a = HOST.on && !e.defaultPrevented && e.target.closest && e.target.closest('a[href^="#"]');
+    const el = a && a.getAttribute('href').length > 1 && document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)));
+    if (!el) return;
+    e.preventDefault();
+    scrollToY(el.getBoundingClientRect().top + scrollY - 16, !still.matches);
+  });
 
   // One measure for each frame at most. A change of the page text finds each place again; a change of size only measures.
   const queue = () => { if (!queued) queued = requestAnimationFrame(() => { queued = 0; if (stale) resolveAll(); measure(); }); };
@@ -1279,6 +1416,8 @@ function startComments() {
   addEventListener('k-layout', queue);
   addEventListener('load', queue);
   if (document.fonts) document.fonts.ready.then(queue, () => {});
+  // A web font that loads later moves the text on its line, and the size of the page can stay the same.
+  if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', queue);
 
   function reveal(id) {
     const it = items.find((x) => x.id === id), host = it && (it.range ? hostOf(it.range) : it.el);
@@ -1286,16 +1425,27 @@ function startComments() {
     const slide = host.closest('.k-slide');
     if (slide) slide.dispatchEvent(new CustomEvent('k-show'));
     requestAnimationFrame(() => {
-      const b = it.range ? it.range.getBoundingClientRect() : host.getBoundingClientRect();
-      if ((b.width || b.height) && (b.top < 72 || b.top > innerHeight - 120)) scrollBy({ top: b.top - innerHeight * 0.32, behavior: still.matches ? 'auto' : 'smooth' });
+      const b = it.range ? it.range.getBoundingClientRect() : host.getBoundingClientRect(), top = b.top + scrollY, vt = viewTop(), vh = viewH();
+      if ((b.width || b.height) && (top - vt < 72 || top - vt > vh - 120)) scrollToY(top - vh * 0.32, !still.matches);
     });
   }
+  let jumped = false;
   return (d) => {
     if (d.type === 'hello') {
       boxes = d.boxes === true || !hasApi;
-      sent = ''; painted = '';
+      const deck = !!document.querySelector('main.k-deck');
+      if (d.host === true && !deck) { HOST.on = true; root.dataset.kHost = ''; }
+      if (d.host === true && deck) dispatchEvent(new Event('k-host-deck'));
+      sent = ''; painted = ''; sentH = 0; sentW = 0;
       say({ type: 'ready' });
       queue();
+      // A link to a place in the page, such as a search result: the viewer scrolls there once the page has its height.
+      // Only at the first hello: the viewer can say hello again, and the reader has scrolled since.
+      const target = HOST.on && !jumped && (jumped = true) && location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (target) requestAnimationFrame(() => requestAnimationFrame(() => scrollToY(target.getBoundingClientRect().top + scrollY - 16, false)));
+    } else if (d.type === 'view') {
+      if (Number.isFinite(d.top) && Number.isFinite(d.h)) { HOST.top = Math.max(0, d.top); HOST.h = Math.max(0, d.h); }
+      if (d.user === true) dispatchEvent(new Event('k-userscroll'));
     } else if (d.type === 'threads' && Array.isArray(d.list)) {
       const list = d.list.slice(0, 300).filter((t) => t && typeof t.id === 'string' && t.id)
         .map((t) => ({ id: str(t.id, 64), q: { quote: str(t.quote, 1000), prefix: str(t.prefix, 64), suffix: str(t.suffix, 64), anchor: str(t.anchor, 200), slide: str(t.slide, 200) } }));
@@ -1305,7 +1455,6 @@ function startComments() {
     } else if (d.type === 'mark') { active = str(d.active, 64); hover = str(d.hover, 64); paint(); }
     else if (d.type === 'reveal') reveal(str(d.id, 64));
     else if (d.type === 'unselect') { const s = getSelection(); if (s) s.removeAllRanges(); }
-    else if (d.type === 'scroll' && Number.isFinite(d.dy)) scrollBy({ top: d.dy, behavior: d.smooth === true && !still.matches ? 'smooth' : 'instant' });
   };
 }
 

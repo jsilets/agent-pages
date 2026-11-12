@@ -2,11 +2,10 @@
 // The Worker does not wait for the run. The runner answers 202 at once and reports the result later at
 // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
 import { noteActivity, pruneActivity } from './activity';
+import { ENGINES, modelFor } from './assistants';
 import { newToken, newTokenId, readJson, type Mention } from './lib';
 import type { Comment, Env, Refusal, Thread } from './types';
 
-/** The program that the runner starts for each mention. Codex uses the ChatGPT sign-in of the person. */
-const ENGINES = { claude: 'claude', chatgpt: 'codex' } as const;
 /** The connector token of a run ends after this time. The runner stops a run after 180 seconds, and runs of one person wait in a queue. */
 export const TOKEN_TTL_MS = 15 * 60 * 1000;
 /** The runner stops the assistant after 180 seconds. A run with no result after this time shows as failed. */
@@ -29,6 +28,8 @@ export interface Job {
   /** The person who wrote the comment. The runner uses the Claude or ChatGPT sign-in of this person. */
   user: string;
   callback_url: string;
+  /** The model that the person chose for this assistant (PUT /api/assistants/<name>), or null for the default of the runner. */
+  model: string | null;
 }
 
 /** The latest run of a thread, as the comments API returns it. */
@@ -91,7 +92,7 @@ export async function runSandboxAgent(env: Env, comment: Comment, origin: string
   await pruneActivity(env, comment.slug, new Date(Date.now() - ACTIVITY_TTL_MS).toISOString()).catch((e) => console.error('activity prune', e));
   await noteActivity(env, id, 'started');
   try {
-    const job: Job = { mcp_url: `${origin}/s/_mcp/${token}`, comment_id: comment.id, slug: comment.slug, agent_label: agent, engine: ENGINES[agent], user: comment.author, callback_url: `${origin}/s/_run/${id}` };
+    const job: Job = { mcp_url: `${origin}/s/_mcp/${token}`, comment_id: comment.id, slug: comment.slug, agent_label: agent, engine: ENGINES[agent], user: comment.author, callback_url: `${origin}/s/_run/${id}`, model: await modelFor(env, comment.author, agent) };
     const res = await fetch(env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
     if (res.status !== 202) throw new Error(`it answered ${res.status}`);
   } catch (e) {

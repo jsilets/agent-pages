@@ -13,8 +13,11 @@ import { createServer } from 'node:http';
 
 process.env.RUNNER_PORT = process.env.VERIFY_PORT || '8899';
 process.env.RUN_TIMEOUT_MS = '3000';
+// A short minimum age, so the check of the stop rule takes seconds and not 30 s.
+process.env.SANDBOX_CLAUDE_MIN_AGE_MS = '2500';
 const R = await import('./local-runner.mjs');
 const { runJob } = await import('./run-comment.mjs');
+const { RUN_ALLOW } = await import('./egress-proxy.mjs');
 
 const USER = 'verify-controls';
 const env = { PATH: process.env.PATH, HOME: process.env.HOME, DOCKER_HOST: process.env.DOCKER_HOST, DOCKER_CONFIG: process.env.DOCKER_CONFIG, DOCKER_CONTEXT: process.env.DOCKER_CONTEXT };
@@ -72,8 +75,11 @@ try {
   const viaProxy = (target) => sh(`printf 'CONNECT ${target} HTTP/1.1\\r\\nHost: ${target}\\r\\n\\r\\n' | nc -w 5 ${proxy} 3128 | head -1`).out.trim();
   const deny = ['example.com:443', 'api.anthropic.com:80', '1.1.1.1:443', 'evil-api.anthropic.com.example.com:443', 'host.docker.internal:8804'].map((t) => `${t} -> ${viaProxy(t)}`);
   check('the proxy refuses a host that is not on the list, a port that is not 443, and an IP address', deny.every((l) => l.endsWith('403 Forbidden')), deny.join('\n'));
-  const allow = ['api.anthropic.com:443', 'platform.claude.com:443', 'chatgpt.com:443', 'auth.openai.com:443'].map((t) => `${t} -> ${viaProxy(t)}`);
-  check('the proxy opens a tunnel to the model hosts', allow.every((l) => l.endsWith('200 Connection Established')), allow.join('\n'));
+  const allow = RUN_ALLOW[engine].map((h) => `${h}:443 -> ${viaProxy(`${h}:443`)}`);
+  check(`the proxy opens a tunnel to the hosts of a ${engine} run only`, allow.every((l) => l.endsWith('200 Connection Established')), allow.join('\n'));
+  // The hosts of the other engine, and the sign-in hosts that only a sign-in container gets.
+  const other = [...RUN_ALLOW[OTHER[engine]], 'claude.ai', 'claude.com'].map((h) => `${h}:443 -> ${viaProxy(`${h}:443`)}`);
+  check(`a ${engine} container reaches no host of the other engine and no sign-in host`, other.every((l) => l.endsWith('403 Forbidden')), other.join('\n'));
   r = sh(`printf 'GET http://example.com/ HTTP/1.1\\r\\nHost: example.com\\r\\n\\r\\n' | nc -w 5 ${proxy} 3128 | head -1; printf 'GET /health HTTP/1.1\\r\\nHost: x\\r\\n\\r\\n' | nc -w 5 ${proxy} 3129 | head -1`);
   check('the proxy refuses plain HTTP, and its control port refuses a container', /403 Forbidden\s+HTTP\/1.1 401/.test(r.out), r.out);
 
@@ -108,6 +114,28 @@ try {
   await new Promise((ok) => setTimeout(ok, 1500));
   r = docker('ps', '-a', '--filter', `name=${box.name}`, '--format', '{{.Names}} {{.Status}}');
   check('the time limit ends the run and removes the container with every process in it', out.status === 'timeout' && r.out === '' && Date.now() - t0 < 8000, `status ${out.status} after ${out.ms_total} ms | error: ${out.error} | docker ps: "${r.out}"`);
+
+  // After the time limit, the next job of the user gets a new container that the proxy knows, and the old address is gone.
+  const oldIp = box.ip;
+  ({ box } = await R.ensureBox(USER, engine));
+  const health = await net.control('GET', '/health');
+  const first = RUN_ALLOW[engine][0];
+  const again = docker('exec', box.name, 'sh', '-c', `printf 'CONNECT ${first}:443 HTTP/1.1\\r\\nHost: ${first}:443\\r\\n\\r\\n' | nc -w 5 ${proxy} 3128 | head -1`).out.trim();
+  check('after a time limit, the next container of the user starts and reaches the hosts of a run', again.endsWith('200 Connection Established') && health.containers === 1, `old address ${oldIp}, new address ${box.ip}, CONNECT ${first} -> ${again}, containers the proxy knows: ${health.containers}`);
+
+  // The stop rule: outside the time limit, the runner ends no program before it is SANDBOX_CLAUDE_MIN_AGE_MS old, and it
+  // ends a program by the end of its input, not by a signal. A Claude program can renew its sign-in in that time.
+  const child = spawn('docker', ['exec', '-i', box.name, 'sh', '-c', 'trap "echo SIGINT" INT; read x; echo EOF'], { env, stdio: ['pipe', 'pipe', 'ignore'] });
+  let said = '';
+  child.stdout.on('data', (d) => { said += d; });
+  const t_spawn = Date.now();
+  const proc = { child, t_spawn, closed: new Promise((ok) => child.on('close', ok)) };
+  box.procs.add(proc);
+  await new Promise((ok) => setTimeout(ok, 300));
+  await R.removeBox(box.key, 'idle');
+  const ended = await Promise.race([proc.closed.then(() => Date.now() - t_spawn), new Promise((ok) => setTimeout(() => ok(null), 1000))]);
+  const minAge = engine === 'claude' ? 2500 : 0;
+  check(`the runner ends a ${engine} program by the end of its input, and a Claude program not before its minimum age`, said.trim() === 'EOF' && ended !== null && ended >= minAge, `the program said "${said.trim()}" and ended ${ended} ms after its start (minimum ${minAge} ms)`);
 } catch (e) {
   check('the script ran to its end', false, `${e.stack || e} ${e.cause?.message ?? ''}`);
 } finally {

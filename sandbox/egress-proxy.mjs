@@ -2,12 +2,15 @@
 // The only way out of the network of the sandbox containers. It has no dependencies.
 //
 // Port 3128, for the sandbox containers:
-//   CONNECT <host>:443     A tunnel to a host of the allow list, and to no other host. The proxy does not open the TLS
+//   CONNECT <host>:443     A tunnel to a host of the list of that container, and to no other host. The proxy does not open the TLS
 //                          stream, so it never sees a model request or a sign-in.
 //   POST /mcp              The connector. The proxy finds the run by the address of the container that asks, and it
 //                          sends the request to the connector URL of that run. The container never gets the token.
 //   everything else        403.
 // Port 3129, for the runner only (the header x-control-secret must match CONTROL_SECRET):
+//   PUT /allow/<ip>        Body: { "hosts": ["…"], "profile": "claude" }. The hosts that the container with this address
+//                          can reach. A container that the runner did not register reaches no host.
+//   DELETE /allow/<ip>     The container is gone.
 //   PUT /route/<ip>        Body: { "mcp_url": "…" }. The container with this address now reaches this connector URL.
 //   DELETE /route/<ip>     The end of the run.
 //   PUT /cache             Body: { "answers": { "<method>": { "status": 200, "body": "<JSON text>" } } }. Stored answers
@@ -25,13 +28,28 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 /**
- * The hosts that Claude Code and Codex need for a run with a subscription sign-in.
+ * The hosts of a run, for each engine. A Claude container reaches no OpenAI host, and a Codex container no Anthropic host.
  * Claude Code: https://code.claude.com/docs/en/network-config.md, "Network access requirements". api.anthropic.com has
- * the model, and platform.claude.com renews the sign-in. claude.ai and claude.com are for the sign-in in connect.mjs.
- * Codex: chatgpt.com has the model for a ChatGPT sign-in, and auth.openai.com renews the sign-in. api.openai.com is for a
- * sign-in with an API key.
+ * the model. platform.claude.com takes the "OAuth token exchange, refresh, and revocation", so a run can renew the sign-in
+ * and `claude auth logout` can revoke it.
+ * Codex: chatgpt.com has the model for a ChatGPT sign-in (the proxy log of the Codex runs). auth.openai.com renews the
+ * sign-in: Codex sends the refresh token to https://auth.openai.com/oauth/token. api.openai.com is for a sign-in with an API key.
  */
-export const DEFAULT_ALLOW = ['api.anthropic.com', 'platform.claude.com', 'claude.ai', 'claude.com', 'chatgpt.com', 'auth.openai.com', 'api.openai.com'];
+export const RUN_ALLOW = {
+  claude: ['api.anthropic.com', 'platform.claude.com'],
+  codex: ['chatgpt.com', 'auth.openai.com', 'api.openai.com'],
+};
+/**
+ * The hosts of a sign-in (`claude auth login`, `codex login --device-auth`), only while it waits for the person.
+ * The refused CONNECTs of real sign-ins found them (sandbox/README.md, "Sign in from the web app"). The browser of the
+ * person opens claude.com and auth.openai.com/codex/device, not the container.
+ */
+export const SIGNIN_ALLOW = {
+  claude: [...RUN_ALLOW.claude, 'claude.ai', 'claude.com'],
+  codex: [...RUN_ALLOW.codex],
+};
+/** Every host that some container can reach during a run. */
+export const DEFAULT_ALLOW = [...new Set([...RUN_ALLOW.claude, ...RUN_ALLOW.codex])];
 
 /** True when the list has the host. An entry that starts with a dot matches each subdomain. */
 export const hostAllowed = (host, allow) => { const h = String(host).toLowerCase().replace(/\.$/, ''); return allow.some((a) => (a.startsWith('.') ? h.endsWith(a) : h === a)); };
@@ -49,9 +67,12 @@ const sameSecret = (a, b) => { const x = Buffer.from(String(a ?? '')), y = Buffe
 const ip = (socket) => String(socket.remoteAddress || '').replace(/^::ffff:/, '');
 const CACHED = new Set(['initialize', 'tools/list', 'notifications/initialized', 'server/discover']);
 
-export function startProxy({ allow = DEFAULT_ALLOW, secret, port = 3128, controlPort = 3129, log = (o) => console.log(JSON.stringify({ at: new Date().toISOString(), ...o })) } = {}) {
+export function startProxy({ allow = null, secret, port = 3128, controlPort = 3129, host = '0.0.0.0', log = (o) => console.log(JSON.stringify({ at: new Date().toISOString(), ...o })) } = {}) {
   /** Container address to connector URL. */
   const routes = new Map();
+  /** Container address to { hosts, profile }. With `allow` (EGRESS_ALLOW), each registered container gets that list instead. */
+  const allowed = new Map();
+  const hostsOf = (from) => (allowed.has(from) ? allow ?? allowed.get(from).hosts : []);
   /** JSON-RPC method to the last good answer of the connector. */
   const cache = new Map();
 
@@ -118,12 +139,14 @@ export function startProxy({ allow = DEFAULT_ALLOW, secret, port = 3128, control
   proxy.on('connect', (req, socket, head) => {
     const from = ip(socket);
     const t = connectTarget(req.url);
-    if (!t || t.port !== 443 || !hostAllowed(t.host, allow)) {
-      log({ ev: 'deny', from, target: String(req.url).slice(0, 120) });
+    const profile = allowed.get(from)?.profile ?? 'none';
+    if (!t || t.port !== 443 || !hostAllowed(t.host, hostsOf(from))) {
+      // The log keeps the host name only. A bad target can hold any text.
+      log({ ev: 'deny', from, profile, host: t ? t.host.slice(0, 80) : '(not a host name)', port: t?.port ?? null });
       return socket.end('HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n');
     }
     const up = connect(t.port, t.host, () => {
-      log({ ev: 'tunnel', from, target: `${t.host}:${t.port}` });
+      log({ ev: 'tunnel', from, profile, host: t.host, port: t.port });
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head?.length) up.write(head);
       up.pipe(socket); socket.pipe(up);
@@ -137,7 +160,20 @@ export function startProxy({ allow = DEFAULT_ALLOW, secret, port = 3128, control
   const control = createServer(async (req, res) => {
     const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (!sameSecret(req.headers['x-control-secret'], secret)) return send(401, { error: 'no' });
-    if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, routes: routes.size, cached: [...cache.keys()], allow });
+    if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, routes: routes.size, containers: allowed.size, cached: [...cache.keys()], allow });
+    const a = /^\/allow\/([0-9a-f.:]+)$/i.exec(req.url);
+    if (a) {
+      if (req.method === 'DELETE') { allowed.delete(a[1]); return send(200, { ok: true }); }
+      if (req.method !== 'PUT') return send(405, { error: 'PUT or DELETE' });
+      try {
+        const { hosts, profile } = JSON.parse((await readBody(req, 8192)).toString('utf8'));
+        if (!Array.isArray(hosts) || hosts.some((h) => typeof h !== 'string' || !/^\.?[a-z0-9.-]+$/i.test(h)) || typeof profile !== 'string') throw new Error('hosts');
+        allowed.set(a[1], { hosts: hosts.map((h) => h.toLowerCase()), profile: profile.slice(0, 40) });
+        return send(200, { ok: true });
+      } catch {
+        return send(400, { error: 'send { "hosts": ["<host name>"], "profile": "<name>" }' });
+      }
+    }
     if (req.url === '/cache') {
       if (req.method !== 'PUT') return send(405, { error: 'PUT' });
       try {
@@ -164,16 +200,16 @@ export function startProxy({ allow = DEFAULT_ALLOW, secret, port = 3128, control
       send(400, { error: 'send { "mcp_url": "<http or https URL>" }' });
     }
   });
-  proxy.listen(port, '0.0.0.0');
-  control.listen(controlPort, '0.0.0.0');
+  proxy.listen(port, host);
+  control.listen(controlPort, host);
   log({ ev: 'start', port, controlPort, allow });
-  return { proxy, control, routes, cache, close: () => { proxy.close(); control.close(); proxy.closeAllConnections?.(); control.closeAllConnections?.(); } };
+  return { proxy, control, routes, allowed, cache, close: () => { proxy.close(); control.close(); proxy.closeAllConnections?.(); control.closeAllConnections?.(); } };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const secret = process.env.CONTROL_SECRET;
   if (!secret || secret.length < 16) { console.error('CONTROL_SECRET must have 16 characters or more'); process.exit(1); }
-  const allow = process.env.EGRESS_ALLOW ? process.env.EGRESS_ALLOW.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) : DEFAULT_ALLOW;
+  const allow = process.env.EGRESS_ALLOW ? process.env.EGRESS_ALLOW.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) : null;
   startProxy({ allow, secret, port: +process.env.PROXY_PORT || 3128, controlPort: +process.env.CONTROL_PORT || 3129 });
   for (const s of ['SIGTERM', 'SIGINT']) process.on(s, () => process.exit(0));
 }

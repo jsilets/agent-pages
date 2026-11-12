@@ -61,10 +61,23 @@ export interface Activity {
   anchor: string | null;
   /** The version that the run stored, or null. */
   version: number | null;
+  /**
+   * Each edit of the latest edit_page call, in order, with its exact old text and new text. quote and text are the last one.
+   * The page shows the cursor at each edit in turn. Empty until the host saw an edit_page call.
+   */
+  edits: Step[];
   /** The id of the newest event of the run. */
   rev: number;
   /** The highest runner seq that changed the state. */
   seq: number;
+}
+
+/** One edit of an edit_page call, as plain text, with its place in the page. */
+export interface Step {
+  quote: string;
+  text: string;
+  before: string | null;
+  anchor: string | null;
 }
 
 /**
@@ -115,7 +128,8 @@ const sameSpot = (a: string | null, b: string | undefined) => !!a && !!b && (a.s
  * cursor back. After the host saw the edit_page call, the runner's typing events for the same text change nothing.
  */
 export function reduceActivity(events: ActivityEvent[]): Activity {
-  const a: Activity = { phase: 'starting', tool: null, quote: null, text: null, final: false, before: null, anchor: null, version: null, rev: 0, seq: 0 };
+  const a: Activity = { phase: 'starting', tool: null, quote: null, text: null, final: false, before: null, anchor: null, version: null, edits: [], rev: 0, seq: 0 };
+  let sealed = false;
   for (const e of [...events].sort((x, y) => x.id - y.id)) {
     a.rev = Math.max(a.rev, e.id);
     if (e.seq != null) {
@@ -129,20 +143,25 @@ export function reduceActivity(events: ActivityEvent[]): Activity {
       else if (e.tool === 'reply_to_comment') a.phase = 'replying';
       else {
         a.phase = 'reading';
-        Object.assign(a, { quote: null, text: null, final: false, before: null, anchor: null });
+        Object.assign(a, { quote: null, text: null, final: false, before: null, anchor: null, edits: [] });
       }
     } else if (e.kind === 'focus' || e.kind === 'typing') {
-      if (!e.quote || (a.final && sameSpot(a.quote, e.quote))) continue;
+      if (!e.quote || (a.final && (sameSpot(a.quote, e.quote) || a.edits.some((s) => sameSpot(s.quote, e.quote))))) continue;
       const same = sameSpot(a.quote, e.quote);
       a.phase = 'editing';
       a.before = e.before ?? (same ? a.before : null);
       a.anchor = e.anchor ?? (same ? a.anchor : null);
       a.text = e.kind === 'typing' ? (e.text ?? '') : same ? a.text : null;
       a.quote = e.quote;
+      if (a.final) a.edits = [];
       a.final = false;
     } else if (e.kind === 'edit') {
+      // The edits of one call come one after the other. An edit after a stored version starts the list of the next call.
+      if (!a.final || sealed) a.edits = [];
+      sealed = false;
       Object.assign(a, { phase: 'editing', quote: e.quote ?? null, text: e.text ?? '', final: true, before: e.before ?? null, anchor: e.anchor ?? null });
-    } else if (e.kind === 'version') a.version = e.version ?? a.version;
+      if (e.quote && a.edits.length < 8) a.edits.push({ quote: e.quote, text: e.text ?? '', before: e.before ?? null, anchor: e.anchor ?? null });
+    } else if (e.kind === 'version') { a.version = e.version ?? a.version; sealed = true; }
     else if (e.kind === 'done' || e.kind === 'failed') a.phase = e.kind;
   }
   return a;

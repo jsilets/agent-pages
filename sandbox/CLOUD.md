@@ -85,21 +85,25 @@ Paste code here if prompted >
 - `claude auth status --json` prints `loggedIn`, `authMethod`, `subscriptionType` and `loginExpiresAt`. It took 0.15 to 0.5 s and made no model request. With no sign-in it printed `"loggedIn": false` and ended with exit code 1.
 - `claude -p` with no sign-in printed a result with `"is_error": true` and `"result": "Not logged in · Please run /login"`. The docs say: "When a failure happens inside the run, such as missing authentication, Claude Code prints the failure as the result on stdout."
 - Lifetime: the docs give no number for a `/login` sign-in. They say: "When the login you created with `/login` is within three days of expiring, Claude Code shows a warning at startup" and "Once the stored login expires and can't be refreshed, each model request fails with `Login expired · Please run /login`". Claude Code refreshes the sign-in. The docs do not say where it writes the new token. The config folder is the only place it has, so the sandbox must save the config folder after each run, not only after the first sign-in.
+- The refresh goes to `platform.claude.com`. On 2026-11-12 the proxy log had a tunnel to that host 2 s after the start of the first program of a runner, and the 40 runs after it worked. So a run must reach `platform.claude.com` as well as `api.anthropic.com`.
+- The refresh token works one time only. A process that ends after the refresh and before the write of the new tokens loses the sign-in (Claude Code issue 102265). The runner therefore never ends a Claude process younger than 30 s, except on the hard time limit (`README.md`, "The minimum age of a Claude process"). A cloud host must keep the same rule: a container must not sleep while a young program runs, and a save of the folder must come after the program ended.
 - `claude setup-token` makes "a one-year OAuth token". "It does not save the token anywhere; copy it and set it as the `CLAUDE_CODE_OAUTH_TOKEN` environment variable". The service would have to store that token for the person. The policy forbids that, so this design does not use `setup-token`.
 - `/login` is a command of the interactive terminal interface. The docs say that such commands "aren't available" in `-p` mode. `claude auth login` is the command for a script.
 
 ## "Connect Claude" in the web app
 
-The goal is the fewest steps, with the credential inside the sandbox of that person.
+The goal is the fewest steps, with the credential inside the sandbox of that person. The local runner has this flow now: `POST /connect`, `/connect/code`, `/connect/status`, `/connect/cancel` and `/disconnect` (`README.md`, "The runner"). The sign-in container is on the internal network, and the proxy lets it reach the sign-in hosts only while the sign-in waits.
 
 1. The viewer shows "Claude: not connected" with one button. The person clicks it.
-2. The host starts the sandbox of that person and runs `claude auth login` there. It reads the URL from the output and returns it to the browser.
+2. The host starts the sandbox of that person and runs `claude auth login --claudeai` there. It reads the URL from the output and returns it to the browser. Locally this took 0.7 s.
 3. The browser opens the URL in a new tab. The person signs in at Anthropic and approves. This is the flow of Anthropic. The service shows no login form of its own.
 4. The Anthropic page shows a code. The person copies it, goes back to the viewer, and pastes it in one field.
 5. The host writes the code to the standard input of the waiting `claude auth login` process. Claude Code gets the token itself and writes it to `/claude-config`.
 6. The host runs `claude auth status --json`. The viewer shows "connected" with the plan and the expiry date. The host saves the config folder for that person.
 
 The person does 4 actions: click, approve, copy, paste. A later "Disconnect" runs `claude auth logout` and deletes the saved config folder.
+
+"Connect ChatGPT" has 3 actions: click, open the link `https://auth.openai.com/codex/device`, and type the one-time code that the viewer shows. The runner runs `codex login --device-auth` and reads the link and the code from its output (3.2 s locally). The person types nothing in the viewer, so no code passes through the Worker. Device code sign-in must be on for the ChatGPT account.
 
 The first run after "Connect" can start at once, so the comment that asked for it needs no second post.
 
@@ -152,7 +156,9 @@ The Sandbox SDK (`@cloudflare/sandbox`) is a layer on Containers with command an
 
 Claude Code states "4 GB+ RAM" as its requirement (https://code.claude.com/docs/en/setup.md). `standard-1` meets it.
 
-Measured on 2026-11-12: the memory fits `basic` (peak 392 MB). The CPU does not. With a limit of 1/4 vCPU the reply came after 9.2 s, and the program that waited was not ready after 10 s. With 1/2 vCPU the reply came after 3.55 s, the same as with no limit. **Use `standard-1` for the Claude image.** A Codex container uses less, and Codex waits for long model turns, so test `basic` for the Codex image. `lite` is too small for both.
+Measured on 2026-11-12: the memory fits `basic` (peak 392 MB). The CPU does not. With a limit of 1/4 vCPU the reply came after 9.2 s, and the program that waited was not ready after 10 s. A program that waited 50 s still gave the reply after 10.6 s, because the run itself is CPU-bound at that limit. With 1/2 vCPU the reply came after 3.55 s, the same as with no limit. **Use `standard-1` for the Claude image.** **Use `basic` for the Codex image.** A Codex stand-in run at 1/4 vCPU took 1.07 to 1.47 s, against 0.85 s with no limit, and Codex has no waiting program. `lite` is too small for both.
+
+Give each container class its own egress list: the hosts of a run of its engine (`RUN_ALLOW` in `egress-proxy.mjs`), and the sign-in hosts only while a sign-in waits (`SIGNIN_ALLOW`).
 
 ### Disk and the sign-in
 
@@ -195,7 +201,7 @@ A real volume (Fly) or a paused sandbox (E2B) fits a credential file that change
 
 ## Not verified
 
-- No signed-in Codex run in docker mode. Claude Code has 27 signed-in runs in docker mode (`PERF.md`). The Codex image ran `codex exec` with a stand-in model only (`codex-standin.mjs`).
+- No signed-in Codex run in docker mode. Claude Code has more than 70 signed-in runs in docker mode (`PERF.md`, `MODELS.md`). The Codex image ran the full docker path with a stand-in model only (`codex-path.mjs`: the real proxy, the real connector, `runJob` and the callback).
 - The billable seconds, CPU and memory on Cloudflare. `COST.md` uses local measurements and lists what it assumes.
 - The egress controls on a cloud host. `verify-controls.mjs` proves them on OrbStack only.
 - No cloud deployment, no cold start from a registry, and no save or restore of the config folder.

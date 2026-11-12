@@ -37,6 +37,21 @@
     "cpu_idle_per_s": 0.05,
     "warm_s": 60
   },
+  "engine_at": {
+    "_measured": "Claude Code 2.1.311, sonnet, docker mode, SANDBOX_CPUS=0.25, 2026-11-12: a program that waited 50 s still took 12.4 s from the job to its end, and the cgroup counted 3.6 vCPU-s for its start and 3.6 for the run (0.7 to 1.0 at 1/2 or 2 vCPU).",
+    "basic": { "cold_busy_s": 16, "warm_busy_s": 12.4, "cpu_program_start_s": 3.6, "cpu_run_s": 3.6, "cpu_idle_per_s": 0.05 }
+  },
+  "codex": {
+    "_measured": "Codex 0.167.2. Busy: 10.4 to 13.8 s from the start to the end of codex exec with the real model (host mode, 4 runs). CPU: the stand-in model run in the image took 0.16 to 0.25 vCPU-s at 1/4 vCPU and 0.21 at 2 vCPU with a warm page cache (codex-standin.mjs). No program waits, so a Codex container uses no CPU between runs.",
+    "instance": "basic",
+    "cold_busy_s": 12,
+    "warm_busy_s": 12,
+    "cpu_program_start_s": 0,
+    "cpu_run_s": 0.25,
+    "cpu_idle_per_s": 0,
+    "warm_s": 60,
+    "no_waiting_program": true
+  },
   "cloud": {
     "_assumed": "Not measured on Cloudflare. start_s: the FAQ says cold starts are often 1 to 3 s. restore_s and save_s: the credential folder (512 KB) from and to R2.",
     "start_s": 2,

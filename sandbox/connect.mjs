@@ -1,59 +1,67 @@
 #!/usr/bin/env node
-// Connects one assistant for one user of docker mode: runs the sign-in of the unmodified program in the volume of the user.
-// It has no dependencies. Run it in a terminal, because the sign-in asks a question.
+// Connects one assistant for one user of docker mode, from a terminal. It has no dependencies.
+// It uses the same code as POST /connect of the runner: the sign-in of the unmodified program runs in a container of the
+// user, on the internal network, and the egress proxy lets it reach the sign-in hosts only while it waits.
 //
 //   node sandbox/connect.mjs <claude|chatgpt> [user] [--status | --logout]
 //
 // `user` is the author name that the host sends with a job: the Access email of the person, or `local` in development.
 // The default is `local`.
 //
-//   claude    runs `claude auth login`. Claude Code prints a link. The person signs in on the Anthropic page and pastes
-//             the code that the page shows.
+//   claude    runs `claude auth login --claudeai`. Claude Code prints a link. The person signs in on the Anthropic page
+//             and pastes the code that the page shows here.
 //   chatgpt   runs `codex login --device-auth`. Codex prints a link and a one-time code. The person opens the link,
 //             signs in to ChatGPT, and types the code. "Device code authorization for Codex" must be on in the
 //             security settings of the ChatGPT account, or the workspace admin must allow it.
 // The sign-in goes from the program to its maker. This script reads no credential and stores none: the program writes
-// its own file in the volume.
-// The volume of an engine exists only while the person is connected: a sign-in that fails removes the volume it made,
-// and --logout removes the volume. The runner reads "no volume" as "not connected" and starts no container for it.
-import { spawnSync } from 'node:child_process';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { codexVolumeOf, IMAGES, volumeOf } from './local-runner.mjs';
+// its own file in the volume. A sign-in that fails removes the volume it made, and --logout signs out and removes the volume.
+//
+// The script uses its own Docker objects (the port number 8898 in their names), so it does not touch a runner that runs.
+// Stop a runner that has a container of this user first, or use the web app: two programs must not share one sign-in folder.
+import { createInterface } from 'node:readline';
+
+process.env.RUNNER_PORT = process.env.CONNECT_PORT || '8898';
+process.env.RUNNER_MODE = 'docker';
+const R = await import('./local-runner.mjs');
 
 const argv = process.argv.slice(2);
 const flag = (name) => { const i = argv.indexOf(name); if (i < 0) return false; argv.splice(i, 1); return true; };
 const status = flag('--status'), logout = flag('--logout');
 const [agent, user = 'local'] = argv;
 if (agent !== 'claude' && agent !== 'chatgpt') { console.error('usage: connect.mjs <claude|chatgpt> [user] [--status | --logout]'); process.exit(2); }
+const engine = agent === 'claude' ? 'claude' : 'codex';
+const name = agent === 'claude' ? 'Claude' : 'ChatGPT';
+// The runner prints one JSON line for each event. Here they go to stderr, so the terminal shows the steps for the person.
+console.log = (...a) => process.stderr.write(`${a.join(' ')}\n`);
+const say = (t) => process.stdout.write(`${t}\n`);
+const connected = async () => (await R.assistantStatus(user)).assistants[agent].connected;
 
-const A = agent === 'claude'
-  ? { name: 'Claude', engine: 'claude', volume: volumeOf(user), mount: '/claude-config', login: ['claude', 'auth', 'login'], status: ['claude', 'auth', 'status'], logout: ['claude', 'auth', 'logout'], yes: /"loggedIn":\s*true/ }
-  : { name: 'ChatGPT', engine: 'codex', volume: codexVolumeOf(user), mount: '/codex-home', login: ['codex', 'login', '--device-auth'], status: ['codex', 'login', 'status'], logout: ['codex', 'logout'], yes: /^logged in/im };
-
-const IMAGE = IMAGES[A.engine];
-const docker = (args, opts = {}) => spawnSync('docker', args, { encoding: 'utf8', ...opts });
-const hasVolume = () => docker(['volume', 'inspect', '-f', '{{.Name}}', A.volume]).status === 0;
-if (docker(['image', 'inspect', '-f', '{{.Id}}', IMAGE]).status !== 0) {
-  console.log(`Building the image ${IMAGE}…`);
-  if (docker(['build', '--target', A.engine, '-t', IMAGE, dirname(fileURLToPath(import.meta.url))], { stdio: 'inherit' }).status !== 0) process.exit(1);
+say(`User:    ${user}`);
+say(`Volumes: ${R.volumeOf(user)} (Claude, /claude-config), ${R.codexVolumeOf(user)} (ChatGPT, /codex-home)`);
+let ok;
+try {
+  if (logout) { await R.disconnect(user, engine); ok = false; }
+  else if (status) ok = await connected();
+  else {
+    const s = await R.startSignIn(user, engine);
+    say(`\nOpen this link in a browser and sign in:\n  ${s.url}`);
+    if (s.user_code) say(`Then type this one-time code on the page:\n  ${s.user_code}\n\nWaiting for the approval…`);
+    if (s.needs_code) {
+      const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: !!process.stdin.isTTY });
+      const code = await new Promise((r) => rl.question('Paste the code that the Anthropic page shows: ', (a) => { rl.close(); r(a.trim()); }));
+      const sent = R.sendCode(s.id, code);
+      if (sent.status !== 200) say(`The code was not sent: ${sent.body.error ?? sent.body.status}`);
+    }
+    let st;
+    while ((st = R.signInStatus(s.id).body).status === 'pending') await new Promise((r) => setTimeout(r, 1000));
+    if (st.detail) say(st.detail);
+    ok = st.status === 'connected';
+  }
+} catch (e) {
+  say(String(e.message || e));
+  ok = false;
+} finally {
+  await R.shutdown();
 }
-// The same limits as a run, but with the normal network: the sign-in needs the sign-in hosts, and a person watches it.
-const run = (cmd, tty) => ['run', '--rm', ...(tty ? ['-it'] : []), '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '-v', `${A.volume}:${A.mount}`, IMAGE, ...cmd];
-// With no volume the person is not connected. The check starts no container, so it makes no empty volume.
-const connected = () => { if (!hasVolume()) return false; const r = docker(run(A.status, false)); return A.yes.test(`${r.stdout}${r.stderr}`); };
-const had = hasVolume();
-
-console.log(`User:    ${user}`);
-console.log(`Volumes: ${volumeOf(user)} (Claude, /claude-config), ${codexVolumeOf(user)} (ChatGPT, /codex-home)`);
-if (logout) { if (had) docker(run(A.logout, false), { stdio: 'inherit' }); docker(['volume', 'rm', A.volume]); }
-else if (!status) {
-  if (!process.stdin.isTTY) { console.error('Run this command in a terminal. The sign-in asks a question.'); process.exit(2); }
-  console.log(`Starting the sign-in of ${A.name} in the volume ${A.volume}…\n`);
-  docker(run(A.login, true), { stdio: 'inherit' });
-}
-const ok = connected();
-// A sign-in that did not finish leaves no volume behind, so the runner does not take the person as connected.
-if (!ok && !had && !status && !logout) docker(['volume', 'rm', A.volume]);
-console.log(`\n${A.name}: ${ok ? 'connected' : 'not connected'}`);
+say(`\n${name}: ${ok ? 'connected' : 'not connected'}`);
 process.exit(ok || logout ? 0 : 1);

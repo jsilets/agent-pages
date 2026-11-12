@@ -227,6 +227,27 @@ describe('edit_page with a reply', () => {
       expect((await w.thread()).status).toBe('open');
     }
   });
+  it('never resolves a thread with a reply that asks a question, from edit_page or from reply_to_comment', async () => {
+    const w = await world();
+    const out = await w.edit({ edits: fix, comment_id: 'c1', reply: { body: 'Fixed the typo. Should I also shorten the title?', resolve: true } });
+    expect(out.result.structuredContent!.reply.resolved).toBe(false);
+    expect((await w.thread()).status).toBe('open');
+    const ask = async (body: string, resolve: boolean) =>
+      (await rpc(methods(x, store), w.env, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'reply_to_comment', arguments: { comment_id: 'c1', body, resolve } } }, { ...ctx, label: 'claude', slug: 'g/n' })) as { result: { structuredContent: { resolved: boolean } } };
+    for (const body of ['Which part should change: the title or the second paragraph?', 'Do you mean "the heading?"', 'Shorter? ']) {
+      expect((await ask(body, true)).result.structuredContent.resolved).toBe(false);
+      expect((await w.thread()).status).toBe('open');
+    }
+    // A reply with no question can still resolve the thread.
+    expect((await ask('This page has no typo left.', true)).result.structuredContent.resolved).toBe(true);
+    expect((await w.thread()).status).toBe('resolved');
+  });
+  it('gives the assistant the slide of a thread on a deck, so "this slide" has a meaning', async () => {
+    const w = await world();
+    await w.env.DB.prepare("UPDATE comments SET slide = 'bets', quote = NULL WHERE id = 'c1'").run();
+    const out = (await rpc(methods(x, store), w.env, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'list_comments', arguments: { slug: 'g/n' } } }, { ...ctx, label: 'claude', slug: 'g/n' })) as { result: { structuredContent: { threads: { id: string; slide: string | null }[] } } };
+    expect(out.result.structuredContent.threads.map((t) => [t.id, t.slide])).toEqual([['c1', 'bets']]);
+  });
   it('stores no version and no reply when an edit fails, and tells the assistant why', async () => {
     const w = await world();
     const out = await w.edit({ edits: [{ old_text: 'no such text', new_text: 'x' }], comment_id: 'c1', reply: { body: 'Fixed.', resolve: true } });

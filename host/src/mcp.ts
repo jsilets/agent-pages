@@ -15,7 +15,7 @@ export const PROTOCOLS = [...LEGACY, MODERN];
 
 const SERVER_INFO = { name: 'agent-pages', title: 'Agent Pages', version: '0.1.0' };
 const INSTRUCTIONS =
-  'Pages are HTML documents with versions. People write comments on them. Read a page with get_page. To change it for a comment, call edit_page with comment_id and reply: one call stores the edit and the answer. Use reply_to_comment for a question, and for a comment that needs no edit.';
+  'Pages are HTML documents with versions. People write comments on them. Read a page with get_page. To change it for a comment that says what to change, call edit_page with comment_id and reply: one call stores the edit and the answer. For a comment that is unclear, such as "make it better" or "thoughts?", make no edit: ask one short question with reply_to_comment, and leave the thread open.';
 /** How long a client may keep the tool list and the answer of server/discover. Both change only with a deploy. */
 const CACHE = { ttlMs: 5 * 60_000, cacheScope: 'public' };
 const META = 'io.modelcontextprotocol/';
@@ -87,7 +87,7 @@ export const TOOLS = [
     title: 'Edit page',
     annotations: { title: 'Edit page', ...WRITES },
     description:
-      'Edit the latest version of a page by exact text replacement in its stored HTML, and store the result as a new version. Each old_text must occur exactly once. When an edit fails, the tool stores nothing: no version and no reply. To answer the comment that asked for the edit, give comment_id and reply in this call, and do not call reply_to_comment after it.',
+      'Edit the latest version of a page by exact text replacement in its stored HTML, and store the result as a new version. Use it only for a request that says what to change. Each old_text must occur exactly once. When an edit fails, the tool stores nothing: no version and no reply. To answer the comment that asked for the edit, give comment_id and reply in this call, and do not call reply_to_comment after it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,7 +102,7 @@ export const TOOLS = [
         reply: {
           type: 'object',
           description: 'The answer to the thread of comment_id. The tool stores it after the new version, and only when each edit succeeds. It needs comment_id.',
-          properties: { body: { ...text, description: 'The reply text: what the edit changed.' }, resolve: { type: 'boolean', description: 'True resolves the thread too. Default: false.' } },
+          properties: { body: { ...text, description: 'The reply text: one sentence that says what the edit changed.' }, resolve: { type: 'boolean', description: 'True resolves the thread too, when the edit does all that the comment asked. A body that ends with a question mark never resolves the thread. Default: false.' } },
           required: ['body'],
           additionalProperties: false,
         },
@@ -115,10 +115,10 @@ export const TOOLS = [
     name: 'reply_to_comment',
     title: 'Reply to comment',
     annotations: { title: 'Reply to comment', ...WRITES },
-    description: 'Add a reply to a comment thread: a question, or the answer to a comment that needs no edit. Set resolve to true to resolve the thread too. With an edit, use the reply of edit_page in place of this tool.',
+    description: 'Add a reply to a comment thread: a short question for a comment that is unclear, or the answer to a comment that needs no edit. Leave resolve false for a question: a body that ends with a question mark never resolves the thread. With an edit, use the reply of edit_page in place of this tool.',
     inputSchema: {
       type: 'object',
-      properties: { comment_id: { ...text, description: 'The id of a comment in the thread.' }, body: { ...text, description: 'The reply text.' }, resolve: { type: 'boolean', description: 'Default: false.' } },
+      properties: { comment_id: { ...text, description: 'The id of a comment in the thread.' }, body: { ...text, description: 'The reply text.' }, resolve: { type: 'boolean', description: 'True resolves the thread, when it needs nothing more. Default: false.' } },
       required: ['comment_id', 'body'],
       additionalProperties: false,
     },
@@ -159,9 +159,11 @@ async function pageHtml(env: Env, p: PageInfo) {
 }
 
 const replyOut = (c: Comment) => ({ id: c.id, body: c.body, author: c.author, mention: c.mention, created_at: c.created_at });
-const threadOut = (t: Thread) => ({ id: t.id, slug: t.slug, version: t.version, anchor: t.anchor, quote: t.quote, body: t.body, author: t.author, mention: t.mention, status: t.status, created_at: t.created_at, replies: t.replies.map(replyOut) });
+const threadOut = (t: Thread) => ({ id: t.id, slug: t.slug, version: t.version, anchor: t.anchor, quote: t.quote, slide: t.slide ?? null, body: t.body, author: t.author, mention: t.mention, status: t.status, created_at: t.created_at, replies: t.replies.map(replyOut) });
 
 type Args = Record<string, unknown>;
+/** A reply that asks a question leaves its thread open, whatever `resolve` says: the person has to answer it. */
+export const asksQuestion = (body: unknown) => typeof body === 'string' && /\?["')\]]*\s*$/.test(body);
 /** A tool returns an object. The connector sends it as JSON text and as structuredContent. A `content` member replaces both. */
 type Tool = (env: Env, args: Args, ctx: McpContext, x: ExecutionContext, store: StoreVersion) => Promise<Record<string, unknown>>;
 
@@ -226,7 +228,7 @@ const tools: Record<string, Tool> = {
     try {
       const c = await addComment(env, { parent_id: comment.id, body: reply.body, author: ctx.label });
       if ('error' in c) throw new ToolError(c.error);
-      const resolved = reply.resolve && (await resolveThread(env, c.parent_id!));
+      const resolved = reply.resolve && !asksQuestion(c.body) && (await resolveThread(env, c.parent_id!));
       return { ...result, reply: { id: c.id, thread_id: c.parent_id, body: c.body, author: c.author, resolved } };
     } catch (e) {
       // The version is stored, so this call is not an error. The assistant must know that the thread has no answer yet.
@@ -239,7 +241,7 @@ const tools: Record<string, Tool> = {
     if (parent) inScope(parent.slug, ctx);
     const c = await addComment(env, { parent_id: str(args.comment_id, 'comment_id'), body: args.body, author: ctx.label });
     if ('error' in c) throw new ToolError(c.error);
-    const resolved = args.resolve === true && (await resolveThread(env, c.parent_id!));
+    const resolved = args.resolve === true && !asksQuestion(c.body) && (await resolveThread(env, c.parent_id!));
     return { id: c.id, thread_id: c.parent_id, slug: c.slug, body: c.body, author: c.author, resolved };
   },
 };

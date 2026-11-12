@@ -37,7 +37,7 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 
 - R2 stores the HTML of each version at `pages/<group>/<name>/<version>.html`. D1 stores the page list, the versions and the share links.
 - At publish time, the Worker indexes the text of the page in a D1 FTS5 table, with one row for each claim. Browser Rendering takes a light and a dark screenshot of the top of the page, and R2 stores them as `pages/<group>/<name>/<version>.<theme>.webp`.
-- The raw route gives each `.k-claim` section with no id the id `claim-<n>`. A search result links to `/p/<group>/<name>#claim-<n>`, and the viewer passes the hash to the frame.
+- The raw route gives each `.k-claim` section with no id the id `claim-<n>`. A search result links to `/p/<group>/<name>#claim-<n>`. The viewer passes the hash to the frame, and the view scrolls to the claim one time, after the page reports its height.
 - The viewer shows each page in an `<iframe>` with the `sandbox` attribute. The page HTML comes from a route that sends `Content-Security-Policy: sandbox`. So the script in a page runs with no origin, and it cannot read the host's cookies or call its API.
 - Cloudflare Access protects the whole hostname. A person signs in with Access. The CLI sends an Access service token.
 - The Worker checks the Access JWT on each request too. Access at the edge is the first check, and the Worker is the second.
@@ -65,8 +65,16 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `DELETE /api/shares/<token>` | Access | Revoke a share link |
 | `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies. `run` is the latest sandbox run of the thread or `null`. `runs` has the latest run of each comment that started one, by comment id. `?status=open` or `?status=resolved` keeps one status. |
 | `POST /api/pages/<group>/<name>/comments` | Access | Add a comment. Body: `{ "body": "...", "quote": "...", "prefix": "...", "suffix": "...", "anchor": "...", "slide": "...", "parent_id": "..." }`. Only `body` is necessary. `prefix` and `suffix` are the text before and after the quote. The host keeps at most 64 characters of each, next to the quote, and drops them for a comment with no quote. `slide` is the id of the deck slide, at most 200 characters. The host stores the latest version with the comment. The author is the Access identity. |
+| `PATCH /api/comments/<id>` | Access | Change the body of your own comment. Body: `{ "body": "..." }`. The host sets `edited_at` and reads the mention again. A changed mention starts no run. The route answers 403 for the comment of another person. |
+| `DELETE /api/comments/<id>` | Access | Delete your own comment. The first comment of a thread takes the thread with it: its replies, its runs, their events and their connector tokens. The answer is `{ "deleted": n }`. |
 | `PUT`, `DELETE /api/comments/<id>/resolve` | Access | Resolve a thread, or open it again. The route answers 204, or 404 for an unknown id. |
 | `POST /api/assistants/warm` | Access | Ask the sandbox runner to get ready for the person. The host sends `POST <runner origin>/warm` with `{ "user": "..." }` and the header `x-runner-secret`, at most one time in 60 seconds for each person. The route answers 202 with `{ "sent": true }` or `{ "sent": false }`. |
+| `GET /api/assistants` | Access, same origin | The state of Claude and ChatGPT for the person: `handled`, `connected` (`null` when the runner did not answer), `models`, `default_model` and the saved `model`. See "Assistants". |
+| `PUT /api/assistants/<claude or chatgpt>` | Access, same origin | Save the model of the person. Body: `{ "model": "<id>" }` with an id from `models`, or `{ "model": null }` for the default. |
+| `POST /api/assistants/<claude or chatgpt>/connect` | Access, same origin | Start a sign-in. The answer is `{ id, url, user_code?, needs_code, expires_at }`. |
+| `GET /api/assistants/connect/<id>` | Access, same origin | The state of a sign-in of the person: `pending`, `connected`, `failed` or `expired`. |
+| `POST /api/assistants/connect/<id>/code` | Access, same origin | Send the code from Claude's page. Body: `{ "code": "..." }`. The host passes the code straight to the runner. It never stores or logs it. |
+| `DELETE /api/assistants/<claude or chatgpt>/connection` | Access, same origin | Disconnect the assistant. |
 | `POST /api/comments/<id>/run` | Access | Start the run of a comment again. The comment must have `@claude` or `@chatgpt`. The route answers 202, or 409 while a run of the comment is running, or 503 with no sandbox runner. |
 | `GET /api/pages/<group>/<name>/activity?since=<cursor>` | Access | The latest version of the page, a `cursor`, and `runs`: the state of each run that is running or that changed after `since`. The answer has no `runs` when the cursor did not move. |
 | `GET`, `POST /api/connector-tokens` | Access | List or make connector tokens. POST body: `{ "label": "..." }`. The POST response has the `id`, the token and the `mcp_url`. The list has the `id`, the last 4 characters of the token, the `label`, the `slug` scope and `expires_at` of each token. |
@@ -129,9 +137,14 @@ Each run gets its own connector token. The token has the page of the comment as 
 
 The viewer shows comments in a column at the right of the page, next to the text that they are about.
 
-- Select text in the page. A "Comment" button appears next to the selection. Click it, or press Cmd+Alt+M (Ctrl+Alt+M on Windows and Linux). A comment box opens in the column, level with the text. Enter starts a new line. Cmd+Enter or Ctrl+Enter posts the comment. Esc closes the box.
+The view has one scroll bar, at the right edge of the window, under the bar. It scrolls the page and the comment column together, so a card never lags behind its text. The frame of a page is as tall as the page: the kit reports the height (`size`), and the page does not scroll itself in the viewer. The viewer checks each height. It allows at most 200,000 px, and it stops a page that grows with its frame after 6 growths in 2 seconds. Keys that scroll, links to `#id` and the cursor of an assistant ask the viewer to scroll. With cards beside it, the page keeps the width that it reads best at, and the page and the column sit together in the middle of the window, as in Google Docs.
+
+- Select text in the page. The selection can cross inline elements, paragraphs, lists, tables, code and diagram labels. A "Comment" button appears next to the selection. Click it, or press Cmd+Alt+M (Ctrl+Alt+M on Windows and Linux). A comment box opens in the column, level with the text. Enter starts a new line. Cmd+Enter or Ctrl+Enter posts the comment. Esc closes the box.
 - The comment button in the bar opens a box for a comment on the whole page. These comments show at the top of the column.
 - Each card shows the first lines of its thread. A click on a card or on its marked text opens the card, moves it a little to the left, and shows the replies and a reply box. The other cards move up or down so that no two cards overlap. The cards follow the page when it scrolls.
+- The ⋯ menu on your own comment has "Edit" and "Delete". "Delete" asks to confirm. On the first comment of a thread, it deletes the whole thread. An edited comment shows "Edited".
+- After a post, the focus goes to the new card. Tab reaches its buttons and its reply box. Esc closes the box or the card, and the focus goes back to where it was: the page or the bar button.
+- A card shows the name of the author. An Access email such as `ann.lee@example.com` shows as "Ann Lee" with the initials "AL".
 - "Resolve" on a card hides the thread. The bar then shows "N resolved". That button lists the resolved threads, each with "Reopen".
 - Type `@` in a box to pick an assistant from a list. The list shows when an assistant is not connected. The viewer asks the runner to warm up when a person focuses a comment box (see `POST /api/assistants/warm`).
 
@@ -147,11 +160,13 @@ The page marks text with the CSS Custom Highlight API. A browser with no support
 
 The column changes with the width of the window:
 
-- Wide: the column is 328 px.
-- Medium: the column shows a dot for each thread. A click on a dot opens its card over the page.
-- Narrow: dots show at the edge of the page. A click on a dot opens the thread in a sheet at the bottom of the window.
+- Wide (1000 px and more): the column is 316 px.
+- Medium (700 to 999 px): a strip of 40 px beside the page shows a marker for each thread. A click on a marker opens its card next to the marker.
+- Narrow (under 700 px): a gutter of 30 px beside the page shows the markers, so a marker never covers text. A tap on a marker opens the thread in a sheet at the bottom of the window.
 
-In a deck, the column shows the threads of the current slide. The slide thumbnails show the number of open threads of each slide.
+In a deck, the column shows the threads of the current slide. A slide with no thread gets the whole width. The deck stays in the slide view in the viewer. The slide thumbnails show the number of open threads of each slide.
+
+An old version (`/p/<group>/<name>/v/<n>`) shows its comments read-only, with a note in the column. It has no comment box, no reply box, no Resolve and no menu. A shared page (`/s/<token>`) shows no comments: the people of the share link do not see the discussion.
 
 When a person writes a comment with `@claude` or `@chatgpt`, the assistant cursor starts at the quote of that comment. It does not wait for the first event of the run. When the run ends, the reply appears in the card.
 
@@ -161,9 +176,9 @@ While an assistant works, the viewer shows it in three places:
 
 - The comment gets a reaction with the name of the assistant. A run that fails shows one line with a "Try again" button. A run with no sign-in shows "not connected" with a "Connect" button.
 - The bar shows a chip, for example "Claude is editing". A click on the chip scrolls the page to the cursor.
-- The page shows a cursor with the name of the assistant. The cursor moves to the text that the assistant replaces, and the page marks that text. Then the new text appears after the old text as a preview. The stored page does not change until `edit_page` stores the new version.
+- The page shows a cursor with the name of the assistant. The cursor moves to the text that the assistant replaces. The new text types in at the same place, and the old text fades and goes as the new text grows. The stored page does not change until `edit_page` stores the new version. An `edit_page` call with more than one edit shows each edit in turn.
 
-When the page has a new version, the viewer loads it in a second frame with the same sandbox. Then the viewer puts the new frame over the old frame at the same scroll position, and it updates the version in the bar. The viewer does not reload.
+When the page has a new version, the viewer loads it in a second frame with the same sandbox. The new frame reports its height first. The viewer waits until the cursor has typed its text, at most 4 seconds. Then the viewer puts the new frame over the old frame at the same scroll position, and it updates the version in the bar. The text after the edit does not move. The viewer does not reload.
 
 ### The events
 
@@ -192,9 +207,9 @@ The host does not store the state of a run. `reduceActivity` in `host/src/activi
 
 ### The transport
 
-The viewer polls `GET /api/pages/<group>/<name>/activity?since=<cursor>`. It polls every 500 ms while a run is running on the page and for 10 seconds after a comment. At other times it polls every 5 seconds. The route makes one query that reads two rows. When the cursor moved, it makes two more queries: the runs of the page and the events of the page. The host uses polling because a Worker has no memory between requests, so Server-Sent Events from a Worker must poll D1 too.
+The viewer polls `GET /api/pages/<group>/<name>/activity?since=<cursor>`. It polls every 500 ms while a run is running on the page and for 10 seconds after a comment. At other times it polls every 2 seconds, so a version that an agent publishes shows within about 2 seconds. A hidden tab does not poll. The route makes one query that reads two rows. When the cursor moved, it makes two more queries: the runs of the page and the events of the page. The host uses polling because a Worker has no memory between requests, so Server-Sent Events from a Worker must poll D1 too.
 
-For a run of 20 seconds, one open viewer makes about 40 requests. About 25 of them find new events. One run costs about 1,500 to 2,500 D1 row reads for each open viewer, and about 30 to 45 D1 writes.
+An idle open viewer makes 30 requests a minute (1,800 an hour), each with one query that reads two rows. For a run of 20 seconds, one open viewer makes about 40 requests. About 25 of them find new events. One run costs about 1,500 to 2,500 D1 row reads for each open viewer, and about 30 to 45 D1 writes.
 
 ### The page side
 
@@ -202,12 +217,38 @@ The viewer sends the state to the page frame with `postMessage`. The frame keeps
 
 `Explain.findQuote` finds the quote in the text of the page. White space does not count, so a quote can cross inline elements and blocks. The start of a quote counts when the end is not in the page text. A quote that occurs two times needs the text before it or an element id. With neither one, the page marks no text and the cursor stays at the top of the window. In a deck, the page shows the slide that has the quote, unless the reader moved the deck in the last 2.5 seconds.
 
-`host/dev/simulate-run.mjs` is a fake runner for work on the viewer. It plays one run with no assistant: it sends the progress events and it calls the real connector, so the page gets a new version and the thread gets a reply. It answers `POST /warm` with 202 and logs the user.
+`host/dev/simulate-run.mjs` is a fake runner for work on the viewer. It plays one run with no assistant: it sends the progress events and it calls the real connector, so the page gets a new version and the thread gets a reply. It answers `POST /warm` with 202 and logs the user. It also fakes the sign-in routes of "Assistants", with a fake provider page for each assistant. `--connected claude,codex` sets the engines that start connected (the default is both). `--auto-approve` connects a ChatGPT sign-in after 3 seconds. A comment with `[multi]` gets an `edit_page` call with two edits.
 
 ```bash
 node host/dev/simulate-run.mjs --port 8812
 cd host && SANDBOX_RUNNER_URL=http://localhost:8812/run bunx vite --port 8787
 ```
+
+`tests/browser/README.md` tells how to run the browser tests of the viewer in Chromium, WebKit and Firefox.
+
+## Assistants
+
+Each person connects Claude and ChatGPT with their own plan. The sandbox runner holds each sign-in. The host passes each request on with the identity of the person and the header `x-runner-secret`, and it checks each answer. The assistant routes take requests from the viewer of the host only: the host refuses a `Sec-Fetch-Site` of `cross-site` or `same-site`, and a write with another `Origin`.
+
+The ⋯ menu in the bar and the `@` list in a comment box open "Assistants". It shows the state of each assistant, a Connect or Disconnect button, and the models.
+
+- Connect opens one main button, "Continue to Claude" or "Continue to ChatGPT". It opens the page of the provider in a new tab. The person signs in there.
+- Claude then shows a code. The person pastes it into the dialog, with Cmd+V or with the Paste button. The dialog sends a pasted code at once.
+- ChatGPT needs a short code that the dialog shows in large letters, with a Copy button. The dialog asks for the state every 2 seconds until it says "Connected".
+- Disconnect needs a second click to confirm.
+- The models come from the runner, for example "Faster" and "More careful". The default has a tag. A click saves the choice at once, and each job of that person carries `model`.
+
+The runner contract: each request is `POST <runner origin><path>` with a JSON body and the header `x-runner-secret`. Each answer is JSON of at most 16 KB.
+
+| Path | Body | Answer |
+|---|---|---|
+| `/status` | `{ user }` | `{ assistants: { claude: { connected, models: [{ id, label, note }], default_model }, chatgpt: { ... } } }` |
+| `/connect` | `{ user, engine: "claude" or "codex" }` | `{ id, url, user_code?, needs_code, expires_at }` |
+| `/connect/status` | `{ id }` | `{ status: "pending", "connected", "failed" or "expired", detail? }` |
+| `/connect/code` | `{ id, code }` | `{ status, detail? }` |
+| `/disconnect` | `{ user, engine }` | `{ ok }` |
+
+The host keeps at most 8 models, each with an id that matches `[\w.:/@-]{1,100}`, a label of at most 40 characters and a note of at most 120. A sign-in `url` must be https (http to localhost in development only). The `id` must match `[\w-]{8,128}`, and a `user_code` must match `[A-Za-z0-9-]{4,32}`. The host keeps a sign-in for 30 minutes at most, and only its person can read it. A code is at most 2048 characters with no white space.
 
 ## Deploy the host
 

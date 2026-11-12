@@ -3,7 +3,7 @@
 // A stand-in model (the OpenAI Responses API with SSE) and a stand-in connector run in this process. The stand-in model
 // asks for one get_page call and then answers "done". It has no dependencies.
 //
-//   node sandbox/codex-standin.mjs [image] [model name]
+//   [STANDIN_CPUS=0.25] node sandbox/codex-standin.mjs [image] [model name]
 //
 // Default image: agent-pages-sandbox-codex. Default model name: gpt-6.1-sol, so Codex gives the model the tools of a real
 // run, with code mode. It prints the tools that Codex offered, the connector calls, the exit code, and the peak memory
@@ -52,7 +52,9 @@ const base = `http://host.docker.internal:${server.address().port}`;
 const job = { mcp_url: `${base}/mcp`, comment_id: 'ab12'.repeat(6), slug: 'g/n', agent_label: 'chatgpt', engine: 'codex' };
 const args = [...codexArgs(job, '/work', `${base}/mcp`), '-c', `model_providers.standin={ name = "standin", base_url = "${base}/v1", wire_api = "responses" }`, '-c', 'model_provider="standin"', '-m', model];
 // The controls of a run, but with a tmpfs for CODEX_HOME in place of a volume, and with a route to this machine.
-const docker = ['run', '--rm', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700', '--tmpfs', '/codex-home:rw,uid=10001,gid=10001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '10001:10001', '--memory', '1g', '--add-host', 'host.docker.internal:host-gateway',
+// STANDIN_CPUS sets a CPU limit, for the instance-type tests of COST.md (0.25 is the vCPU of the basic type).
+const cpus = process.env.STANDIN_CPUS ? ['--cpus', process.env.STANDIN_CPUS] : [];
+const docker = ['run', '--rm', '--read-only', '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700', '--tmpfs', '/codex-home:rw,uid=10001,gid=10001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '10001:10001', '--memory', '1g', ...cpus, '--add-host', 'host.docker.internal:host-gateway',
   image, 'sh', '-c', 'codex "$@" < /dev/null; echo "exit=$?"; cat /sys/fs/cgroup/memory.peak; grep usage_usec /sys/fs/cgroup/cpu.stat', 'sh', ...args];
 const t0 = Date.now();
 const out = await new Promise((ok) => { let o = ''; const c = spawn('docker', docker, { stdio: ['ignore', 'pipe', 'pipe'] }); c.stdout.on('data', (d) => (o += d)); c.on('close', () => ok(o)); });

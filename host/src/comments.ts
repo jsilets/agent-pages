@@ -8,7 +8,7 @@ const MAX_ANCHOR = 200;
 /** The text before and after the quote that the viewer stores with a comment. A longer text loses its far end. */
 export const MAX_CONTEXT = 64;
 
-const COLUMNS = 'id, slug, version, anchor, quote, prefix, suffix, slide, body, author, mention, parent_id, status, created_at';
+const COLUMNS = 'id, slug, version, anchor, quote, prefix, suffix, slide, body, author, mention, parent_id, status, created_at, edited_at';
 
 export interface CommentInput {
   /** The page. A reply may leave it out: it goes to the page of its thread. */
@@ -56,9 +56,9 @@ export async function addComment(env: Env, input: CommentInput): Promise<Comment
   }
   const page = slug ? await env.DB.prepare('SELECT latest FROM pages WHERE slug = ?').bind(slug).first<{ latest: number }>() : null;
   if (!slug || !page) return refuse(404, 'no such page');
-  const c: Comment = { id: newId(), slug, version: page.latest, anchor, quote, prefix, suffix, slide, body, author: input.author, mention: parseMention(body), parent_id, status: 'open', created_at: new Date().toISOString() };
-  await env.DB.prepare(`INSERT INTO comments (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(c.id, c.slug, c.version, c.anchor, c.quote, c.prefix, c.suffix, c.slide, c.body, c.author, c.mention, c.parent_id, c.status, c.created_at)
+  const c: Comment = { id: newId(), slug, version: page.latest, anchor, quote, prefix, suffix, slide, body, author: input.author, mention: parseMention(body), parent_id, status: 'open', created_at: new Date().toISOString(), edited_at: null };
+  await env.DB.prepare(`INSERT INTO comments (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(c.id, c.slug, c.version, c.anchor, c.quote, c.prefix, c.suffix, c.slide, c.body, c.author, c.mention, c.parent_id, c.status, c.created_at, null)
     .run();
   return c;
 }
@@ -94,4 +94,41 @@ export async function resolveThread(env: Env, id: string): Promise<boolean> {
 export async function reopenThread(env: Env, id: string): Promise<boolean> {
   const res = await env.DB.prepare("UPDATE comments SET status = 'open' WHERE id = ? AND parent_id IS NULL").bind(id).run();
   return res.meta.changes > 0;
+}
+
+/**
+ * Changes the body of a comment. Only its author can change it. The mention follows the new body, but a change starts no run:
+ * the assistant answers a comment when a person writes it, and "Try again" starts a run again.
+ */
+export async function editComment(env: Env, id: string, author: string, value: unknown): Promise<Comment | Refusal> {
+  const c = await getComment(env, id);
+  if (!c) return refuse(404, 'no such comment');
+  if (c.author !== author) return refuse(403, 'you can change only your own comments');
+  const body = typeof value === 'string' ? value.trim() : '';
+  if (!body) return refuse(400, 'the comment has no body');
+  if (body.length > MAX_COMMENT) return refuse(413, `the comment is over ${MAX_COMMENT} characters`);
+  const edited: Comment = { ...c, body, mention: parseMention(body), edited_at: new Date().toISOString() };
+  await env.DB.prepare('UPDATE comments SET body = ?, mention = ?, edited_at = ? WHERE id = ?').bind(edited.body, edited.mention, edited.edited_at, id).run();
+  return edited;
+}
+
+/**
+ * Deletes a comment. Only its author can delete it. The first comment of a thread takes the whole thread with it: the replies,
+ * the runs of the thread, their events and their connector tokens. Returns the number of comments that it deleted.
+ */
+export async function deleteComment(env: Env, id: string, author: string): Promise<{ deleted: number } | Refusal> {
+  const c = await getComment(env, id);
+  if (!c) return refuse(404, 'no such comment');
+  if (c.author !== author) return refuse(403, 'you can delete only your own comments');
+  // ?1 is the comment. ?2 is 1 for the first comment of a thread, so the same statements serve a reply and a thread.
+  const root = c.parent_id ? 0 : 1;
+  const ids = 'SELECT id FROM comments WHERE id = ?1 OR (?2 = 1 AND parent_id = ?1)';
+  const count = await env.DB.prepare(`SELECT COUNT(*) AS n FROM (${ids})`).bind(id, root).first<{ n: number }>();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM run_events WHERE run_id IN (SELECT id FROM agent_runs WHERE comment_id IN (${ids}))`).bind(id, root),
+    env.DB.prepare(`DELETE FROM connector_tokens WHERE id IN (SELECT token_id FROM agent_runs WHERE comment_id IN (${ids}))`).bind(id, root),
+    env.DB.prepare(`DELETE FROM agent_runs WHERE comment_id IN (${ids})`).bind(id, root),
+    env.DB.prepare('DELETE FROM comments WHERE id = ?1 OR (?2 = 1 AND parent_id = ?1)').bind(id, root),
+  ]);
+  return { deleted: Number(count?.n ?? 0) };
 }

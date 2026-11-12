@@ -522,9 +522,14 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 .k-pr-cur[data-mode="dock"] .k-pr-flag { position: static; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16); animation: k-pr-float 1.6s ease-in-out infinite alternate; }
 .k-pr-cur[data-mode="dock"] .k-pr-flag svg { display: block; }
 @keyframes k-pr-float { to { translate: 0 3px; } }
-.k-pr-new { margin-left: 0.25em; padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--c) 14%, transparent); color: color-mix(in srgb, var(--c) 72%, var(--p)); text-decoration: none; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-/* The old text that the preview replaces. GrayText is for a browser that gives a highlight no custom properties. */
-::highlight(k-pr-old) { color: GrayText; color: var(--t, GrayText); text-decoration: line-through; }
+/* The preview of an edit, in place: the new text types in where the old text starts, and the old text fades and gives up its room. */
+.k-pr-new { border-radius: 2px; background: color-mix(in srgb, var(--c) 14%, transparent); color: inherit; text-decoration: none; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.k-pr-was { opacity: 0.3; transition: opacity 0.4s ease-out; }
+@starting-style { .k-pr-was { opacity: 1; } }
+
+/* In the host viewer, the viewer scrolls the page, and the bar of the viewer names an assistant that has no place in the text. */
+:root[data-k-host] { overflow: hidden; }
+:root[data-k-host] .k-pr-dock { display: none; }
 
 /* ─── Comments: the text that a comment is about ───────────────────
    The host viewer draws the comments outside the page. The page marks only the text: with the CSS Custom Highlight API,

@@ -2,7 +2,7 @@
 
 Date: 2026-11-12. Nothing here is deployed. The run numbers come from one Mac (Apple silicon, OrbStack, Docker 29.4.0), Claude Code 2.1.311 and the model `sonnet`. The prices come from the Cloudflare pages that "Rates" lists.
 
-`node sandbox/cost.mjs` prints the table below from `sandbox/cost-inputs.json`. Change an input when a new measurement replaces it, and run the command again. `node sandbox/cost.mjs --instance=basic` prints the same table for the `basic` instance type.
+`node sandbox/cost.mjs` prints the table below from `sandbox/cost-inputs.json`. Change an input when a new measurement replaces it, and run the command again. `--instance=basic` prints the same table for another instance type. `--engine=codex` prints the table for the Codex image, with its own inputs and the `basic` instance type.
 
 ## The short answers
 
@@ -40,12 +40,14 @@ Sources, read on 2026-11-12: https://developers.cloudflare.com/containers/pricin
 | Memory of a Claude container at its peak in a run | 175 to 392 MB, in 9 runs. The number includes the file cache of the 273 MB binary, and the old program and the new program at the same moment at the end of a run. | `peak_memory_mb` in the runner log |
 | Memory of a Codex container, one `codex exec` with one tool call | 249 to 260 MB peak when the binary is not in the page cache (2 runs), 26 to 41 MB when it is (8 runs) | A stand-in model, `node sandbox/codex-standin.mjs`. No Codex run with the real model ran in a container. |
 | Reply time with a CPU limit of 1/4 vCPU (`basic`) | 9.2 s. The program that waited was not ready after 10 s, and `init` came 4.0 s after the job. | 1 run, `SANDBOX_CPUS=0.25` |
+| The same, with a program that waited 50 s | 10.6 s from the job (`init` 2.1 s, first token 6.3 s). The program start used 3.6 vCPU-s over about 15 s, and the run used 3.6 vCPU-s more. | 1 run, `SANDBOX_CPUS=0.25`, 2026-11-12 |
+| A Codex stand-in run at 1/4 vCPU | 1.07 to 1.47 s, against 0.85 s at 2 vCPU | `STANDIN_CPUS=0.25 node sandbox/codex-standin.mjs` |
 | Reply time with a CPU limit of 1/2 vCPU (`standard-1`) | 3.55 s. The same as with no limit (3.4 to 3.7 s). | 1 run, `SANDBOX_CPUS=0.5` |
 
 - `lite` is too small. 256 MiB is less than the peak, and 1/16 vCPU is a quarter of `basic`.
-- `basic` has enough memory. But a quarter of a vCPU makes the reply 2.6 times slower, and the program cannot start while a person types.
-- **`standard-1` is the smallest type that keeps the speed.** It also meets the "4 GB+ RAM" that Claude Code states as its requirement.
-- A Codex container needs much less memory. Codex makes 2 to 5 s model turns, so 1/4 vCPU can be enough for it. `basic` for the Codex image is a choice to test in the cloud.
+- `basic` has enough memory for Claude. But a quarter of a vCPU makes the reply about 3 times slower, and no warm policy fixes it. The program start takes about 15 s, so a program started on intent is not ready when the person posts. A program that waited 50 s was ready, and the run still took 10.6 s, because Claude Code needs about 4 times the CPU between the model turns at this limit.
+- **`standard-1` is the smallest type that keeps the speed of Claude.** It also meets the "4 GB+ RAM" that Claude Code states as its requirement.
+- **`basic` is enough for Codex.** Codex is a native binary, it has no waiting program, and a stand-in run at 1/4 vCPU was only 0.2 to 0.6 s slower. Its model turns take 2 to 5 s, so the CPU limit is a small part of a run.
 
 ## The formula
 
@@ -111,7 +113,18 @@ The measured life of 4 containers checks the formula. The runner logs `container
 
 Add $5 a month for the Workers Paid plan in each row. Memory is 72 to 76 percent of each month with a linger of 90 s or more, and 58 percent with no linger. The Durable Object is 11 to 12 percent, and CPU is 8 to 20 percent. R2 and Worker requests are $0.22 a month together.
 
-The same policies on `basic` cost 41 to 55 percent of these numbers ($11.79 for a 90 s linger with runs alone). Those rows use the CPU numbers of a run with no CPU limit. A run at 1/4 vCPU was 2.6 times slower and used more CPU, so the `basic` rows are a lower limit.
+### The other engine and the other instance type
+
+`node sandbox/cost.mjs --engine=claude --instance=basic` uses the numbers that were measured at 1/4 vCPU (`engine_at.basic` in the inputs: a cold run of 16 s, a warm run of 12.4 s, and 3.6 vCPU-s for the program start and for each run). `node sandbox/cost.mjs --engine=codex` uses the `codex` block: a run of 12 s, 0.25 vCPU-s, and no waiting program.
+
+| Engine and instance type | 90 s linger, runs alone | 90 s linger, bursts of 4 | Reply time |
+|---|---|---|---|
+| Claude, `standard-1` | $27.22 | $19.16 | 3.5 s with a waiting program |
+| Claude, `basic` | $15.84 | $10.86 | 10.6 s with a waiting program, about 3 times slower |
+| Codex, `basic` | $9.47 | $6.56 | About 10 s, as with no limit |
+| Codex, `standard-1` | $25.73 | $17.63 | About 10 s |
+
+Each number is for one month, with no included usage. For Codex, warm on intent buys nothing, because no program waits. Its rows in the output of `cost.mjs` only show the price of a container that starts early.
 
 ## What the policy buys
 
@@ -129,7 +142,8 @@ The same policies on `basic` cost 41 to 55 percent of these numbers ($11.79 for 
 ## Recommendation
 
 - Use warm on intent with a short linger. On Cloudflare, a container class with `sleepAfter` of 60 to 90 s does the linger, and the viewer call `POST /api/assistants/warm` starts the container.
-- Set `standard-1` for the Claude image. Test `basic` for the Codex image.
+- Set `standard-1` for the Claude image. Claude on `basic` costs about 40 percent less, but each reply is about 3 times slower.
+- Set `basic` for the Codex image. It costs about a third of `standard-1` ($9.47 against $25.73 a month for a 90 s linger with runs alone), at the same speed. Do not send `/warm` for Codex.
 - Expect $23 to $40 a month for 20,000 Claude runs with this policy, plus $5 for the plan. The arrival pattern decides where in that range. A 30 s linger with no warm on intent costs $11.48, and it loses the fast path for most next comments and for every first comment.
 - Do not keep a 10-minute linger. It costs 2.7 to 5.9 times more than a 90 s linger, and it is faster only for a comment that comes 90 s to 10 minutes after the last one.
 
@@ -139,5 +153,5 @@ The same policies on `basic` cost 41 to 55 percent of these numbers ($11.79 for 
 - The restore and the save of the sign-in folder (R2 or a snapshot). The model takes 0.5 s each.
 - Whether a Durable Object is billed while its container waits. The model bills the object for the whole life of the container, so it is an upper limit for that part.
 - The number of Durable Object and Worker requests in a run. The model takes 25 and 20.
-- CPU and memory with a real model in a Codex container. Codex has no program that waits, so its container idles at about 1 MB and almost no CPU. A Codex run takes 11 to 15 s (host mode), so its `busy` is 2 to 3 times that of Claude.
+- CPU and memory with a real model in a Codex container. Codex has no program that waits, so its container idles at about 1 MB and almost no CPU. A Codex run takes 8 to 15 s (host mode), so its `busy` is 2 to 3 times that of Claude. The CPU of a Codex run at 1/4 vCPU comes from the stand-in model only.
 - How long people type and how often they close a comment box with no post.

@@ -1,0 +1,37 @@
+{
+  "claude": {
+    "default_model": "sonnet",
+    "models": [
+      {
+        "id": "sonnet",
+        "label": "Faster",
+        "note": "Answers in about 5 seconds. As good as the careful option in the tests."
+      },
+      {
+        "id": "opus",
+        "label": "More careful",
+        "note": "Answers in about 11 seconds. For long or subtle rewrites."
+      }
+    ]
+  },
+  "codex": {
+    "default_model": "gpt-6.1-sol",
+    "models": [
+      {
+        "id": "gpt-6.1-sol",
+        "label": "Standard",
+        "note": "Answers in about 10 seconds. The usual Codex model."
+      },
+      {
+        "id": "gpt-6-luna",
+        "label": "Faster",
+        "note": "Answers in about 8 seconds. For small edits."
+      },
+      {
+        "id": "gpt-6-astra",
+        "label": "More careful",
+        "note": "Answers in about 12 seconds. For long or subtle rewrites."
+      }
+    ]
+  }
+}

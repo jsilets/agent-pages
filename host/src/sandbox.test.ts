@@ -115,10 +115,18 @@ describe('runSandboxAgent', () => {
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(fetched).toHaveBeenCalledOnce();
       expect(fetched.mock.calls[0][0]).toBe('http://runner/run');
-      expect(JSON.parse(fetched.mock.calls[0][1].body as string)).toEqual({ mcp_url: `${ORIGIN}/s/_mcp/${token}`, comment_id: c.id, slug: 'g/n', agent_label: 'claude', engine: 'claude', user: 'ann@example.com', callback_url: `${ORIGIN}/s/_run/${runId}` });
+      expect(JSON.parse(fetched.mock.calls[0][1].body as string)).toEqual({ mcp_url: `${ORIGIN}/s/_mcp/${token}`, comment_id: c.id, slug: 'g/n', agent_label: 'claude', engine: 'claude', user: 'ann@example.com', callback_url: `${ORIGIN}/s/_run/${runId}`, model: null });
       expect(runId).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(db.ran.some((r) => r.q.startsWith('UPDATE agent_runs'))).toBe(false);
     }
+  });
+  it('sends the model that the author of the comment chose for the assistant', async () => {
+    const fetched = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 202 }));
+    vi.stubGlobal('fetch', fetched);
+    const db = fakeDb({ first: (q) => (q.includes('FROM assistant_prefs') ? { model: 'claude-careful' } : null) });
+    await runSandboxAgent(env(db, 'http://runner/run'), comment(), ORIGIN);
+    expect(JSON.parse(fetched.mock.calls[0][1].body as string).model).toBe('claude-careful');
+    expect(db.ran.find((r) => r.q.includes('FROM assistant_prefs'))!.args).toEqual(['ann@example.com', 'claude']);
   });
   it('sends the runner secret as the header x-runner-secret when the host has one, and no such header with no secret', async () => {
     for (const secret of ['s3cret', undefined]) {

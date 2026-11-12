@@ -1,0 +1,56 @@
+{
+  "label": "codex-6-luna",
+  "agent": "chatgpt",
+  "host": "http://localhost:8804",
+  "at": "2026-11-12T16:20:33.316Z",
+  "runs": [
+    {
+      "task": "typo",
+      "expect": "edit",
+      "comment": "fix the typo in the heading",
+      "slug": "eval-codex-6-luna/typo-1-mwdr7qti",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,edit_page",
+      "turns": 1,
+      "ms_reply": 8758,
+      "ms_first_tool": 4536,
+      "edited": true,
+      "versions": 1,
+      "thread_status": "resolved",
+      "reply": "I corrected “pmups” to “pumps” in the heading.",
+      "replies": 1,
+      "words_before": 4,
+      "words_after": 4,
+      "removed": [
+        "<h1>How heat pmups work</h1>"
+      ],
+      "added": [
+        "<h1>How heat pumps work</h1>"
+      ]
+    },
+    {
+      "task": "better",
+      "expect": "ask",
+      "comment": "make it better",
+      "slug": "eval-codex-6-luna/better-1-mwdr7xoj",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,reply_to_comment",
+      "turns": 1,
+      "ms_reply": 7985,
+      "ms_first_tool": 3071,
+      "edited": false,
+      "versions": 0,
+      "thread_status": "open",
+      "reply": "Which change would you like: fix the typo in the heading, shorten the long winter paragraph, or revise the whole page?",
+      "replies": 1,
+      "words_before": 0,
+      "words_after": 0,
+      "removed": [],
+      "added": []
+    }
+  ]
+}

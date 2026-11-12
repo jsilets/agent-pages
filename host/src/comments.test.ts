@@ -1,4 +1,4 @@
-// Comment anchors, reopen and the runner warm-up through the HTTP routes of the Worker, with real SQL (see testdb.ts).
+// Comment anchors, edit and delete, reopen and the runner warm-up through the HTTP routes of the Worker, with real SQL (see testdb.ts).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { route } from './lib';
 import { testDb } from './testdb';
@@ -36,7 +36,7 @@ function host(vars: Record<string, string> = {}) {
     await Promise.all(tasks.splice(0));
     return { status: res.status, body: (res.status === 204 ? null : await res.json()) as any };
   };
-  return { call, sent };
+  return { call, sent, db: env.DB };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -73,6 +73,60 @@ describe('comment anchors', () => {
     const h = host();
     await h.call('PUT', '/api/pages/g/n', page);
     expect((await h.call('POST', '/api/pages/g/n/comments', { body: 'x', slide: 's'.repeat(201) })).status).toBe(413);
+  });
+});
+
+describe('edit and delete', () => {
+  it('PATCH changes the body of your own comment, marks it as edited and reads the mention again', async () => {
+    const h = host();
+    await h.call('PUT', '/api/pages/g/n', page);
+    const c = (await h.call('POST', '/api/pages/g/n/comments', { body: 'Fix this.', quote: 'First' })).body;
+    expect(c.edited_at).toBeNull();
+    const out = await h.call('PATCH', `/api/comments/${c.id}`, { body: '  @claude fix this.  ' });
+    expect(out.status).toBe(200);
+    expect(out.body).toMatchObject({ id: c.id, body: '@claude fix this.', mention: 'claude', quote: 'First' });
+    expect(Date.parse(out.body.edited_at)).not.toBeNaN();
+    const [t] = (await h.call('GET', '/api/pages/g/n/comments')).body;
+    expect(t).toMatchObject({ body: '@claude fix this.', edited_at: out.body.edited_at });
+    // A changed mention starts no run: only a new comment does.
+    expect(h.sent).toEqual([]);
+  });
+  it('PATCH refuses an empty body, a body over the limit, an unknown id and the comment of another person', async () => {
+    const h = host();
+    await h.call('PUT', '/api/pages/g/n', page);
+    const c = (await h.call('POST', '/api/pages/g/n/comments', { body: 'Mine.' })).body;
+    expect((await h.call('PATCH', `/api/comments/${c.id}`, { body: '   ' })).status).toBe(400);
+    expect((await h.call('PATCH', `/api/comments/${c.id}`, { body: 'x'.repeat(4001) })).status).toBe(413);
+    expect((await h.call('PATCH', `/api/comments/${c.id}`, 'not json')).status).toBe(400);
+    expect((await h.call('PATCH', `/api/comments/${'f'.repeat(24)}`, { body: 'x' })).status).toBe(404);
+    await h.db.prepare('UPDATE comments SET author = ? WHERE id = ?').bind('ann@example.com', c.id).run();
+    expect(await h.call('PATCH', `/api/comments/${c.id}`, { body: 'Changed.' })).toEqual({ status: 403, body: { error: 'you can change only your own comments' } });
+    expect((await h.call('GET', '/api/pages/g/n/comments')).body[0].body).toBe('Mine.');
+  });
+  it('DELETE of a reply deletes the reply only, and DELETE of the first comment deletes the thread with its runs', async () => {
+    const h = host();
+    await h.call('PUT', '/api/pages/g/n', page);
+    const root = (await h.call('POST', '/api/pages/g/n/comments', { body: 'Root.' })).body;
+    const r1 = (await h.call('POST', '/api/pages/g/n/comments', { body: 'One.', parent_id: root.id })).body;
+    await h.call('POST', '/api/pages/g/n/comments', { body: 'Two.', parent_id: root.id });
+    const other = (await h.call('POST', '/api/pages/g/n/comments', { body: 'Other thread.' })).body;
+    await h.db.prepare("INSERT INTO agent_runs (id, comment_id, agent, status, started_at) VALUES ('run1', ?, 'claude', 'done', '2026-11-11T10:00:00Z')").bind(root.id).run();
+    await h.db.prepare("INSERT INTO run_events (run_id, slug, seq, at, kind, data) VALUES ('run1', 'g/n', 1, '2026-11-11T10:00:01Z', 'note', '{}')").run();
+    expect(await h.call('DELETE', `/api/comments/${r1.id}`)).toEqual({ status: 200, body: { deleted: 1 } });
+    expect((await h.call('GET', '/api/pages/g/n/comments')).body.find((t: { id: string }) => t.id === root.id).replies.map((c: { body: string }) => c.body)).toEqual(['Two.']);
+    expect(await h.call('DELETE', `/api/comments/${root.id}`)).toEqual({ status: 200, body: { deleted: 2 } });
+    expect((await h.call('GET', '/api/pages/g/n/comments')).body.map((t: { id: string }) => t.id)).toEqual([other.id]);
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM agent_runs').first()).toEqual({ n: 0 });
+    expect(await h.db.prepare('SELECT COUNT(*) AS n FROM run_events').first()).toEqual({ n: 0 });
+    expect((await h.call('DELETE', `/api/comments/${root.id}`)).status).toBe(404);
+  });
+  it('DELETE refuses the comment of another person and keeps it', async () => {
+    const h = host();
+    await h.call('PUT', '/api/pages/g/n', page);
+    const c = (await h.call('POST', '/api/pages/g/n/comments', { body: 'Theirs.' })).body;
+    await h.db.prepare('UPDATE comments SET author = ? WHERE id = ?').bind('ann@example.com', c.id).run();
+    expect(await h.call('DELETE', `/api/comments/${c.id}`)).toEqual({ status: 403, body: { error: 'you can delete only your own comments' } });
+    expect((await h.call('GET', '/api/pages/g/n/comments')).body).toHaveLength(1);
   });
 });
 

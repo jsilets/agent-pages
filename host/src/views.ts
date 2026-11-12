@@ -3,6 +3,7 @@
 
 import kitCss from '../../kit/explain.css?raw';
 import kitJs from '../../kit/explain.js?raw';
+import assistantsJs from './assistants-ui.js?raw';
 import marginJs from './margin.js?raw';
 
 /**
@@ -49,6 +50,7 @@ const ICON: Record<string, string> = {
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
   comment: '<path d="M5.5 5h13A1.5 1.5 0 0 1 20 6.5v8a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V16h-2A1.5 1.5 0 0 1 4 14.5v-8A1.5 1.5 0 0 1 5.5 5Z"/>',
   thumb: '<path d="M7.5 10.5V20"/><path d="M14.3 6.3 13.5 10.5h4.9a1.8 1.8 0 0 1 1.75 2.2l-1.3 5.6A2.2 2.2 0 0 1 16.7 20H5.5A1.5 1.5 0 0 1 4 18.5V12a1.5 1.5 0 0 1 1.5-1.5h2l3.2-6.2a.8.8 0 0 1 .7-.4 2.3 2.3 0 0 1 2.9 2.4Z"/>',
+  spark: '<path d="M12 3.5c.6 3.9 2.6 5.9 6.5 6.5-3.9.6-5.9 2.6-6.5 6.5-.6-3.9-2.6-5.9-6.5-6.5 3.9-.6 5.9-2.6 6.5-6.5Z"/><path d="M18.5 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3Z"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/>',
 };
 const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -154,43 +156,61 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-links .v-icon { width: 28px; height: 28px; }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
 
+/* ─── The view: one scroller under the bar ───────────────────
+   The frame of a page is as tall as the page, so the page does not scroll itself. The scroller holds the frame and the
+   margin side by side, and its scroll bar is the only one, at the right edge of the window, under the bar. A deck frame is
+   as tall as the view and sticks to its top. margin.js sets the height of the frame. */
+.v-scroll { position: relative; flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior-y: contain; background: var(--bg); }
+.v-body { position: relative; display: flex; justify-content: center; min-height: 100%; }
+.v-stage { position: relative; flex: 1; min-width: 0; }
+.v-stage > .v-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
+.v-body[data-kind="deck"] .v-stage > .v-frame, .v-stage > .v-frame.is-self { position: sticky; top: 0; }
+.v-stage > .v-frame.is-in { position: absolute; top: 0; left: 0; z-index: 1; opacity: 0; pointer-events: none; }
+.v-body[data-kind="deck"] .v-stage > .v-frame.is-in { top: var(--st, 0); }
+.v-stage > .v-frame.is-in.is-on { opacity: 1; transition: opacity 0.24s ease; }
+
 /* ─── Comments: cards in the margin, aligned with their text in the page ───
-   wide: a column of cards beside the page. mid: a thin column of dots, and the open card floats left of its dot.
-   narrow: dots over the right edge of the page, and the open card in a sheet at the bottom. margin.js sets --y. */
-/* clip: cards below the end of the view must not make the viewer itself scroll. */
-.v-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: clip; }
+   wide: a column of cards beside the page. mid: a thin column of markers, and the open card floats beside its marker.
+   narrow: a thin gutter of markers, and the open card in a sheet at the bottom. margin.js sets --y in page pixels. */
 .v-btn:disabled { opacity: 0.5; cursor: default; }
-.cm-col { position: relative; z-index: 4; flex: none; display: flex; flex-direction: column; width: 328px; box-sizing: border-box; background: var(--bg); }
+.cm-col { --cm-w: 316px; position: relative; z-index: 4; flex: none; width: var(--cm-w); box-sizing: border-box; }
 .cm-col[hidden] { display: none; }
-.v-body[data-cm="mid"] .cm-col { width: 44px; border-left: 0.5px solid var(--b); }
-.v-body[data-cm="narrow"] .cm-col { position: absolute; top: 0; right: 0; bottom: 0; width: 34px; background: none; pointer-events: none; }
-.cm-pins { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0 12px; }
-.cm-pins:empty { display: none; }
-.v-body:not([data-cm="wide"]) .cm-pins { position: relative; align-items: center; gap: 4px; padding: 8px 0 0; }
-.cm-view { position: relative; flex: 1; min-height: 0; overflow: visible clip; clip-path: inset(0 0 0 -100vw); }
-.cm-rail { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
-.cm-card { box-sizing: border-box; padding: 10px 12px 10px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 1px 2px rgba(0, 0, 0, 0.04); color: var(--p); font-size: 13px; line-height: 1.45; cursor: pointer; outline-offset: 2px; }
-.cm-rail > .cm-card { position: absolute; top: 0; left: 12px; right: 16px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.15s; }
-.cm-rail > .cm-card.is-in { transition: box-shadow 0.15s; }
-.cm-card.is-hover:not(.is-active) { box-shadow: 0 0 0 0.5px var(--b2), 0 2px 8px rgba(0, 0, 0, 0.08); }
-.cm-card.is-active { cursor: default; box-shadow: 0 0 0 0.5px var(--b2), 0 8px 24px rgba(0, 0, 0, 0.13), 0 2px 6px rgba(0, 0, 0, 0.06); }
-.cm-rail > .cm-card.is-active { z-index: 2; transform: translate3d(-10px, var(--y, 0), 0); }
-.cm-card.has-new:not(.is-active) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--link) 60%, transparent), 0 2px 8px rgba(0, 0, 0, 0.06); }
-.cm-list { display: flex; flex-direction: column; gap: 10px; }
-.cm-c { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.v-body[data-cm="mid"] .cm-col { --cm-w: 40px; border-left: 0.5px solid var(--b); }
+.v-body[data-cm="narrow"] .cm-col { --cm-w: 30px; }
+.cm-ro { margin: 12px 16px 0 12px; padding: 8px 10px; border-radius: 8px; background: var(--bg2); color: var(--s); font-size: 12px; line-height: 1.45; }
+.cm-ro a { font-weight: 600; }
+.v-body:not([data-cm="wide"]) .cm-ro { display: none; }
+.cm-pins { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0 12px; }
+.cm-pins:empty { padding: 0; }
+.v-body:not([data-cm="wide"]) .cm-pins { align-items: center; gap: 4px; padding: 8px 0 0; }
+.v-body:not([data-cm="wide"]) .cm-pins:empty { padding: 0; }
+.cm-rail { position: absolute; inset: 0; }
+
+/* A card: the quiet form until it opens, like the comments of Google Docs. The open card is raised and moves toward the page. */
+.cm-card { position: relative; box-sizing: border-box; padding: 10px 12px 12px; border-radius: 10px; background: color-mix(in srgb, var(--bg2) 70%, var(--bg)); box-shadow: 0 0 0 0.5px var(--b); color: var(--p); font-size: 13px; line-height: 1.5; cursor: pointer; outline-offset: 2px; transition: background-color 0.15s, box-shadow 0.15s; }
+.cm-rail > .cm-card { position: absolute; top: 0; left: 12px; right: 16px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.15s, box-shadow 0.15s; }
+.cm-rail > .is-in { transition: none !important; }
+.cm-card.is-hover:not(.is-active) { background: var(--bg2); box-shadow: 0 0 0 0.5px var(--b2); }
+.cm-card.is-active { z-index: 2; cursor: default; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b), 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06); }
+.v-body[data-cm="wide"] .cm-rail > .cm-card.is-active { transform: translate3d(-14px, var(--y, 0), 0); }
+.cm-card.has-new:not(.is-active) { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--link) 55%, transparent); }
+.cm-list { display: flex; flex-direction: column; gap: 12px; }
+.cm-c { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
 .cm-c.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes cm-in { from { opacity: 0; transform: translateY(6px); } }
-.cm-ava { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--bg3); color: var(--s); font: 600 11px/1 var(--sans); }
-.cm-ava.is-agent { background: var(--a); color: var(--a-on); }
+.cm-ava { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg3); box-shadow: inset 0 0 0 0.5px var(--b); color: var(--s); font: 600 11px/1 var(--sans); letter-spacing: 0.02em; }
+.cm-ava.is-agent { background: var(--a); color: var(--a-on); box-shadow: none; }
 .cm-main { min-width: 0; }
-.cm-head { display: flex; align-items: baseline; gap: 6px; min-height: 24px; line-height: 24px; padding-right: 26px; }
-.cm-head b { min-width: 0; overflow: hidden; font-weight: 600; font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
-.cm-head time { flex: none; font-size: 11.5px; color: var(--t); }
-.cm-list > .cm-c ~ .cm-c .cm-head { padding-right: 0; }
-.cm-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.cm-card:not(.is-active) .cm-body { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cm-head { display: flex; align-items: flex-start; gap: 4px; min-height: 28px; }
+.cm-names { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-top: 0; }
+.cm-names b { overflow: hidden; font-weight: 600; font-size: 13px; line-height: 16px; white-space: nowrap; text-overflow: ellipsis; }
+.cm-names time { font-size: 11.5px; line-height: 15px; color: var(--t); white-space: nowrap; }
+/* The first comment keeps room for the resolve button in the corner. */
+.cm-list > .cm-c:first-of-type .cm-head, .cm-list > .cm-quote + .cm-c .cm-head { padding-right: 30px; }
+.cm-body { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; line-height: 1.5; }
+.cm-card:not(.is-active) .cm-body { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .cm-at { color: var(--link); font-weight: 600; }
-.cm-quote { display: flex; flex-direction: column; gap: 3px; padding: 1px 0 1px 8px; border-left: 2px solid rgba(229, 168, 35, 0.75); color: var(--s); font-size: 12px; line-height: 1.4; }
+.cm-quote { display: flex; flex-direction: column; gap: 3px; padding: 1px 0 1px 9px; border-left: 2.5px solid rgba(229, 168, 35, 0.8); color: var(--s); font-size: 12px; line-height: 1.4; }
 .cm-quote q { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; quotes: none; }
 .cm-card.is-active .cm-quote q { -webkit-line-clamp: 6; }
 /* Beside the page, the mark in the page shows the quote. A card shows it only when the text changed. */
@@ -199,41 +219,45 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-quote.is-changed q { text-decoration: line-through; text-decoration-color: var(--t); }
 .cm-flag { align-self: flex-start; padding: 0 6px; border-radius: 4px; background: var(--bg2); color: var(--s); font: 600 10.5px/17px var(--sans); }
 .cm-quote.is-off q::after { content: " · not on this slide"; color: var(--t); }
-.cm-more { display: flex; flex-direction: column; gap: 1px; padding-left: 32px; font-size: 12px; }
+.cm-more { display: flex; flex-direction: column; gap: 1px; padding-left: 38px; font-size: 12px; }
 .cm-more.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .cm-n { color: var(--link); font-weight: 600; }
 .cm-last { overflow: hidden; color: var(--s); white-space: nowrap; text-overflow: ellipsis; }
 .cm-list .v-react, .cm-list .v-runfail { margin-top: 6px; }
-.cm-done { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; opacity: 0; }
-.cm-card:hover .cm-done, .cm-card.is-active .cm-done, .cm-done:focus-visible { opacity: 1; }
-.cm-card:not(.cm-rail > *) { position: relative; }
-.cm-foot { position: relative; margin-top: 10px; }
+.cm-done { position: absolute; top: 9px; right: 8px; width: 28px; height: 28px; opacity: 0; }
+.cm-menu { flex: none; width: 26px; height: 26px; margin: -1px -4px 0 0; opacity: 0; }
+.cm-card:hover :is(.cm-done, .cm-menu), .cm-card.is-active :is(.cm-done, .cm-menu), :is(.cm-done, .cm-menu):focus-visible, .cm-menu[aria-expanded="true"] { opacity: 1; }
+@media (hover: none) { .cm-done, .cm-menu { opacity: 1; } }
+.cm-foot { position: relative; margin-top: 12px; }
 .cm-card:not(.is-active) .cm-foot { display: none; }
-.cm-foot:not(.has-text):not(:focus-within) .cm-acts { display: none; }
-.cm-card textarea { display: block; width: 100%; min-height: 32px; box-sizing: border-box; margin: 0; padding: 6px 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px/1.45 var(--sans); resize: none; overflow-y: auto; }
+.cm-foot:not(.has-text):not(.has-focus) .cm-acts { display: none; }
+.cm-card textarea { display: block; width: 100%; min-height: 34px; box-sizing: border-box; margin: 0; padding: 7px 12px; border: 0.5px solid var(--b2); border-radius: 17px; background: var(--bg); color: var(--p); font: 13px/1.45 var(--sans); resize: none; overflow-y: hidden; }
+.cm-card textarea.cm-edit { margin-top: 6px; border-radius: 10px; }
 .cm-card textarea::placeholder { color: var(--t); }
 .cm-card textarea:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent); }
 .cm-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.cm-acts .v-btn { height: 28px; align-self: auto; }
-.cm-acts .v-create { width: auto; height: 28px; padding: 0 12px; }
-.cm-hint { margin-right: auto; font-size: 11px; color: var(--t); }
-.cm-card.is-compose { cursor: default; }
-.cm-card.is-compose .cm-main { display: flex; flex-direction: column; gap: 8px; }
-.cm-card.is-compose .cm-head { padding-right: 0; }
+.cm-acts .v-btn { height: 28px; align-self: auto; border-color: transparent; border-radius: 999px; padding: 0 12px; }
+.cm-acts .v-create { width: auto; height: 28px; padding: 0 14px; border-radius: 999px; }
+.cm-hint { margin-right: auto; font: 500 11px var(--sans); color: var(--t); }
+.cm-card.is-compose { cursor: default; background: var(--bg); }
+.cm-card.is-compose .cm-main { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.cm-card.is-compose .cm-head { min-height: 28px; align-items: center; }
 .cm-card.is-compose .cm-quote:empty { display: none; }
 /* The assistants that "@" offers. */
 .cm-pick { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); animation: v-pop 0.12s ease-out; }
-.cm-card.is-compose .cm-main { position: relative; }
 .cm-opt { display: grid; grid-template-columns: 22px auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
-.cm-opt .cm-ava { grid-row: span 2; width: 22px; height: 22px; background: var(--a); color: var(--a-on); }
+.cm-opt .cm-ava { grid-row: span 2; width: 22px; height: 22px; background: var(--a); color: var(--a-on); box-shadow: none; }
 .cm-opt b { font-size: 12.5px; }
 .cm-opt .cm-at { font: 500 11.5px var(--mono); color: var(--t); }
 .cm-opt .cm-state { grid-column: 2 / 4; font-size: 11px; color: var(--s); }
 .cm-opt .cm-state:empty { display: none; }
 .cm-opt .cm-state.is-off { color: var(--line, #993C1D); }
+.cm-opt.is-settings { grid-template-columns: 22px 1fr; margin-top: 2px; border-top: 0.5px solid var(--b); border-radius: 0 0 7px 7px; padding-top: 7px; }
+.cm-opt.is-settings b { font-weight: 500; color: var(--s); }
+.cm-gear { width: 22px; height: 14px; }
 .cm-opt.is-on, .cm-opt:hover { background: var(--bg2); }
-/* The dots: a card in short form, for the narrow layouts. */
-.cm-dot { display: none; place-items: center; position: relative; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50% 50% 50% 4px; background: #E5A823; color: #1a1a1a; font: 600 11px/1 var(--sans); cursor: pointer; pointer-events: auto; box-shadow: 0 0 0 2px var(--bg), 0 1px 3px rgba(0, 0, 0, 0.2); transition: transform 0.15s; }
+/* The markers: a card in short form, for the narrow layouts. They sit in the margin, never over the page. */
+.cm-dot { display: none; place-items: center; position: relative; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50% 50% 50% 4px; background: #E5A823; color: #1a1a1a; font: 600 10.5px/1 var(--sans); cursor: pointer; box-shadow: 0 0 0 2px var(--bg), 0 1px 3px rgba(0, 0, 0, 0.2); transition: transform 0.15s; }
 .cm-dot.is-agent { background: var(--a); color: var(--a-on); }
 .cm-dot.is-hover, .cm-dot.is-active { transform: scale(1.12); }
 .cm-dot.is-active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px #E5A823; }
@@ -241,19 +265,25 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-dot i { position: absolute; right: -5px; bottom: -4px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--p); color: var(--bg); font: 600 9px/14px var(--sans); font-style: normal; }
 .cm-dot.is-draft { background: var(--p); color: var(--bg); font-size: 15px; }
 .v-body:not([data-cm="wide"]) .cm-dot { display: grid; }
-.v-body:not([data-cm="wide"]) .cm-rail > .cm-dot { position: absolute; top: 0; left: 9px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
-.v-body[data-cm="narrow"] .cm-rail > .cm-dot { left: 4px; }
+.v-body:not([data-cm="wide"]) .cm-rail > .cm-dot { position: absolute; top: 0; left: 8px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.v-body[data-cm="narrow"] .cm-rail > .cm-dot { left: 4px; width: 22px; height: 22px; }
 .v-body:not([data-cm="wide"]) :is(.cm-rail, .cm-pins) > .cm-card:not(.is-active) { display: none; }
-.v-body[data-cm="mid"] .cm-rail > .cm-card.is-active { left: auto; right: 52px; width: 308px; transform: translate3d(0, var(--y, 0), 0); }
-.v-body[data-cm="mid"] .cm-pins > .cm-card.is-active { position: absolute; top: 8px; right: 52px; width: 308px; }
+/* The middle layout: the open card floats beside its marker, over the page, with the look of a popover. */
+.v-body[data-cm="mid"] :is(.cm-rail, .cm-pins) > .cm-card.is-active { position: absolute; left: auto; right: 48px; width: 316px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 14px 36px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.06); }
+.v-body[data-cm="mid"] .cm-rail > .cm-card.is-active { transform: translate3d(0, var(--y, 0), 0); }
+.v-body[data-cm="mid"] .cm-pins > .cm-card.is-active { top: 8px; }
+.v-body[data-cm="mid"] :is(.cm-rail, .cm-pins) > .cm-card.is-active::after { content: ""; position: absolute; top: 14px; right: -6px; width: 10px; height: 10px; background: var(--bg); box-shadow: 0.5px -0.5px 0 0 var(--b2); transform: rotate(45deg); }
 /* The sheet: the open card on a phone. */
-.cm-sheet { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; max-height: 72%; border-radius: 16px 16px 0 0; background: var(--bg); box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.2), 0 0 0 0.5px var(--b2); animation: cm-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cm-sheet { position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; max-height: min(70%, 560px); border-radius: 16px 16px 0 0; background: var(--bg); box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.2), 0 0 0 0.5px var(--b2); animation: cm-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); padding-bottom: env(safe-area-inset-bottom); }
 .cm-sheet[hidden] { display: none; }
+.cm-sheet::before { content: ""; align-self: center; flex: none; width: 36px; height: 4px; margin-top: 8px; border-radius: 2px; background: var(--b2); }
 @keyframes cm-up { from { transform: translateY(40px); opacity: 0; } }
-.cm-sheet-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 16px; font: 600 13px var(--sans); }
-.cm-slot { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 14px; }
-.cm-slot > .cm-card { box-shadow: none; padding: 0; }
-.cm-slot > .cm-card .cm-done { top: 0; right: 0; }
+.cm-sheet-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 8px 0 16px; font: 600 13.5px var(--sans); }
+.cm-slot { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 16px 16px; }
+.cm-slot > .cm-card { padding: 0; background: none; box-shadow: none; }
+.cm-slot > .cm-card .cm-done { top: -2px; right: -6px; opacity: 1; }
+.cm-slot > .cm-card .cm-menu { opacity: 1; }
+.cm-slot > .cm-card textarea { font-size: 16px; }
 /* The button at a selection in the page. The layer lies over the frame and takes no pointer events itself. */
 .cm-over { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
 .cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 9px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); animation: cm-add 0.14s ease-out; }
@@ -262,6 +292,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-add svg { width: 15px; height: 15px; }
 .cm-add kbd { height: 17px; box-shadow: none; background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; opacity: 0.8; font-size: 10.5px; }
 @keyframes cm-add { from { opacity: 0; scale: 0.92; } }
+.v-body.is-ro .cm-add, .v-body.is-ro .cm-done { display: none; }
 #cres { width: auto; gap: 5px; padding: 0 8px; font: 500 12px var(--sans); }
 #cres[hidden] { display: none; }
 #cres svg { width: 14px; height: 14px; }
@@ -273,6 +304,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-resmain span { overflow-wrap: anywhere; }
 .v-resmain q { color: var(--s); font-size: 12px; quotes: none; padding-left: 6px; border-left: 2px solid var(--b2); }
 .v-resrow .v-link { flex: none; margin-top: 2px; }
+/* The small menu of a comment: Edit and Delete. */
+.cm-mpop { position: fixed; z-index: 45; min-width: 160px; padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06); animation: v-pop 0.12s ease-out; }
+.cm-mpop .v-item { min-height: 30px; padding: 5px 10px; }
 
 /* Assistants: one color each, for the reaction, the chip in the bar and the cursor in the page. The kit has the same colors. */
 .a-claude { --a: #C4541C; --a-on: #fff; }
@@ -308,11 +342,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-ver.is-bump { animation: v-bump 0.9s ease-out; }
 @keyframes v-bump { 0%, 30% { background: color-mix(in srgb, var(--link) 16%, transparent); border-color: var(--link); } }
 
-/* The page and, for a moment, the next version of it on top. */
-.v-stage { position: relative; flex: 1; min-width: 0; }
-.v-stage > .v-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
-.v-frame.is-in { z-index: 1; opacity: 0; pointer-events: none; }
-.v-frame.is-in.is-on { opacity: 1; transition: opacity 0.24s ease; }
 
 .v-dlg { width: 360px; max-width: calc(100vw - 32px); padding: 18px; box-sizing: border-box; border: 0.5px solid var(--b2); border-radius: 14px; background: var(--bg); color: var(--p); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22); }
 .v-dlg::backdrop { background: rgba(0, 0, 0, 0.3); }
@@ -323,6 +352,67 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .v-btn { flex: none; align-self: flex-start; height: 30px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
 .v-btn:hover { background: var(--bg2); }
+
+/* ─── Assistants: the sign-in and the model of each assistant ─── */
+.a-dlg { width: 440px; padding: 0; overflow: hidden; }
+.a-dlg[open] { display: flex; flex-direction: column; max-height: min(640px, calc(100vh - 32px)); }
+.a-head { flex: none; display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 10px 0 20px; }
+.a-head h2 { flex: 1; margin: 0; }
+.v-icon[hidden] { display: none; }
+.a-back { margin-left: -10px; }
+.a-body { flex: 1; min-height: 0; overflow: auto; padding: 0 20px 20px; }
+.a-lede { margin: -2px 0 6px !important; }
+.a-row { padding: 16px 0; border-top: 0.5px solid var(--b); }
+.a-row:first-of-type { border-top: 0; padding-top: 8px; }
+.a-top { display: flex; align-items: center; gap: 10px; }
+.a-top .cm-ava { width: 30px; height: 30px; font-size: 12px; }
+.a-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.a-who b { font: 600 14px/18px var(--sans); }
+.a-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 18px; color: var(--s); }
+.a-state::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--t); }
+.a-state.is-on { color: var(--p); }
+.a-state.is-on::before { background: #3B9B54; }
+.a-top .v-create, .a-top .v-btn { width: auto; height: 30px; padding: 0 14px; border-radius: 999px; align-self: center; }
+.v-btn.is-armed { background: var(--fill); color: var(--ink); border-color: transparent; }
+.a-models { display: grid; gap: 6px; margin: 12px 0 0 40px; border: 0; padding: 0; }
+.a-models legend { padding: 0; margin-bottom: 6px; font: 500 12px var(--sans); color: var(--s); }
+.a-model { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 9px 12px 9px 10px; border-radius: 10px; box-shadow: inset 0 0 0 0.5px var(--b2); cursor: pointer; }
+.a-model:hover { background: var(--bg2); }
+.a-model:has(input:checked) { box-shadow: inset 0 0 0 1.5px var(--p); }
+.a-model:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
+.a-model input { grid-row: span 2; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--p); }
+.a-model b { display: flex; align-items: center; gap: 6px; font: 600 13px/18px var(--sans); }
+.a-model span { font-size: 12px; line-height: 1.4; color: var(--s); }
+.a-model .v-tag { padding: 0 6px; font: 500 10.5px/16px var(--sans); }
+.a-none { margin: 12px 0 0 40px !important; font-size: 12.5px !important; }
+/* The steps of a sign-in: one main button, then the code. */
+.a-steps { display: grid; gap: 16px; margin: 14px 0 0; padding: 0; list-style: none; counter-reset: a-step; }
+.a-steps > li { position: relative; display: grid; gap: 8px; padding-left: 34px; counter-increment: a-step; }
+.a-steps > li::before { content: counter(a-step); position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg2); font: 600 11.5px/1 var(--sans); color: var(--s); }
+.a-steps > li.is-done::before { content: "✓"; background: var(--p); color: var(--bg); }
+.a-steps h3 { margin: 1px 0 0; font: 600 13.5px/20px var(--sans); }
+.a-steps p { margin: 0 !important; }
+.a-go { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 40px; border: 0; border-radius: 10px; background: var(--p); color: var(--bg); font: 600 14px var(--sans); cursor: pointer; }
+.a-go:hover:not(:disabled) { background: var(--press); }
+.a-go:disabled { opacity: 0.5; cursor: default; }
+.a-go svg { width: 15px; height: 15px; }
+.a-field { display: flex; gap: 6px; }
+.a-field input { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); color: var(--p); font: 500 14px var(--mono); }
+.a-field input:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent); }
+.a-field .v-btn { height: 40px; align-self: auto; padding: 0 14px; border-radius: 10px; font-weight: 600; }
+.a-code { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 10px 10px 16px; border-radius: 12px; background: var(--bg2); }
+.a-code output { font: 600 26px/1.2 var(--mono); letter-spacing: 0.08em; color: var(--p); user-select: all; }
+.a-code .v-btn { height: 32px; align-self: auto; border-radius: 999px; padding: 0 14px; font-weight: 600; }
+.a-live { display: flex; align-items: center; gap: 8px; min-height: 22px; margin-top: 16px; font-size: 13px; color: var(--s); }
+.a-live:empty { display: none; }
+.a-live.is-wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--b2); border-top-color: var(--p); animation: a-spin 0.8s linear infinite; }
+.a-live.is-on { color: var(--p); font-weight: 600; }
+.a-live.is-on::before { content: "✓"; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #3B9B54; color: #fff; font-size: 11px; }
+.a-live.is-bad { color: var(--line, #A32D2D); }
+@keyframes a-spin { to { transform: rotate(360deg); } }
+.a-fine { margin-top: 14px !important; font-size: 12px !important; color: var(--t) !important; }
+.v-create.is-danger { background: #A32D2D; color: #fff; }
+.v-create.is-danger:hover { background: #8A2424; }
 
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
 .v-toast[hidden] { display: none; }
@@ -339,8 +429,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-whochip { padding: 0 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump, .cm-c.is-new, .cm-more.is-new, .cm-pick, .cm-sheet, .cm-add { animation: none; }
-  .v-frame.is-in.is-on, .cm-rail > .cm-card, .cm-rail > .cm-dot, .cm-dot { transition: none; }
+  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump, .cm-c.is-new, .cm-more.is-new, .cm-pick, .cm-sheet, .cm-add, .cm-mpop { animation: none; }
+  .v-stage > .v-frame.is-in.is-on, .cm-rail > .cm-card, .cm-rail > .cm-dot, .cm-dot, .cm-card { transition: none; }
+  .a-live.is-wait::before { animation: none; }
 }
 
 /* ─── Library ───────────────────────────────────────────── */
@@ -883,7 +974,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     ${step('right', n + 1, 'Next version')}
   </div>
   <button type="button" class="v-icon" id="cres" data-pop="pop-res" aria-label="Resolved threads" hidden>${icon('check')}<span>0 resolved</span></button>
-  <button type="button" class="v-icon" id="cnew" data-tip="Comment on the page" aria-label="Comment on the page" aria-keyshortcuts="Control+Alt+M Meta+Alt+M">${icon('comment')}</button>
+  <button type="button" class="v-icon" id="cnew" data-tip="Comment on the page" aria-label="Comment on the page" aria-keyshortcuts="Control+Alt+M Meta+Alt+M"${old ? ' hidden' : ''}>${icon('comment')}</button>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
   ${presentButton(input.kind)}
@@ -896,6 +987,8 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   </div>
   <div class="v-pop" id="pop-more" hidden>
     ${appearance()}
+    <div class="v-hr"></div>
+    <button type="button" class="v-item" id="assistants">${icon('spark')}<span>Assistants</span></button>
     <div class="v-hr"></div>
     ${pdfItem(`/pdf/${esc(slug)}/${n}`)}
     <a class="v-item" href="/raw/${esc(slug)}/${n}?k=${KIT}" target="_blank" rel="noopener">${icon('open')}Open in new tab</a>
@@ -918,29 +1011,35 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <div id="res-list"></div>
   </div>
 </header>
-<div class="v-body" id="body" data-cm="wide">
+<div class="v-scroll" id="scroll">
+<div class="v-body" id="body" data-cm="wide" data-kind="${input.kind === 'deck' ? 'deck' : 'page'}">
 <div class="v-stage"><iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
   <div class="cm-over"><button type="button" class="cm-add" id="cm-add" aria-keyshortcuts="Control+Alt+M Meta+Alt+M" hidden>${icon('comment')}Comment<kbd></kbd></button></div>
 </div>
 <aside class="cm-col" id="cm-col" aria-label="Comments" hidden>
+  ${old ? `<p class="cm-ro" id="cm-ro">This is version ${n}. Its comments are read-only. <a href="/p/${esc(slug)}">Open the latest version</a> to reply.</p>` : ''}
   <div class="cm-pins" id="cm-pins"></div>
-  <div class="cm-view" id="cm-view"><div class="cm-rail" id="cm-rail"></div></div>
+  <div class="cm-rail" id="cm-rail"></div>
 </aside>
-<section class="cm-sheet" id="cm-sheet" aria-label="Comment" hidden>
-  <div class="cm-sheet-head"><span>Comment</span><button type="button" class="v-icon" id="cm-close" aria-label="Close">${icon('x')}</button></div>
+</div>
+</div>
+</div>
+<section class="cm-sheet" id="cm-sheet" aria-labelledby="cm-sheet-h" hidden>
+  <div class="cm-sheet-head"><span id="cm-sheet-h">Comment</span><button type="button" class="v-icon" id="cm-close" aria-label="Close">${icon('x')}</button></div>
   <div class="cm-slot" id="cm-slot"></div>
 </section>
-</div>
 <div class="v-toast" id="toast" role="status" hidden></div>
 <div class="v-sr" id="live" role="status" aria-live="polite"></div>
-<dialog class="v-dlg" id="connect" aria-labelledby="connect-h">
-  <h2 id="connect-h">Connect <span data-who>Claude</span></h2>
-  ${/* TODO: replace this text with the sign-in step when the host has one. */ ''}
-  <p><span data-who>Claude</span> works with your own subscription. You sign in one time, and Pages uses that sign-in for each comment that asks <span data-who>Claude</span>.</p>
-  <p>This build has no sign-in step in the viewer yet. Sign in on the machine that runs the sandbox runner, then choose Try again.</p>
-  <div class="v-dlg-acts"><button type="button" class="v-btn" id="connect-close">Close</button><button type="button" class="v-create" id="connect-retry">Try again</button></div>
+<dialog class="v-dlg a-dlg" id="assist" aria-labelledby="assist-h">
+  <div class="a-head"><button type="button" class="v-icon a-back" id="assist-back" aria-label="Back to all assistants" hidden>${icon('left')}</button><h2 id="assist-h">Assistants</h2><button type="button" class="v-icon" id="assist-x" aria-label="Close">${icon('x')}</button></div>
+  <div class="a-body" id="assist-body"></div>
 </dialog>
-<script type="application/json" id="data">${data({ slug, version: n, latest, kit: KIT, followsLatest: input.followsLatest, who: input.who, agents: input.agents, icons: { link: ICON.link, check: ICON.check, x: ICON.x, thumb: ICON.thumb } })}</script>`;
+<dialog class="v-dlg" id="cm-confirm" aria-labelledby="cm-confirm-h" aria-describedby="cm-confirm-p">
+  <h2 id="cm-confirm-h"></h2>
+  <p id="cm-confirm-p"></p>
+  <div class="v-dlg-acts"><button type="button" class="v-btn" id="cm-confirm-no" value="cancel">Cancel</button><button type="button" class="v-create is-danger" id="cm-confirm-ok" value="ok">Delete</button></div>
+</dialog>
+<script type="application/json" id="data">${data({ slug, kind: input.kind === 'deck' ? 'deck' : 'page', version: n, latest, kit: KIT, followsLatest: input.followsLatest, who: input.who, agents: input.agents, icons: { link: ICON.link, check: ICON.check, x: ICON.x, thumb: ICON.thumb, more: ICON.more } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -1024,7 +1123,7 @@ function reaction(r) {
     row.append(el('span', '', off ? who + ': not connected' : who + ' did not finish'), b);
     if (!off) row.title = r.detail || '';
     b.type = 'button';
-    b.onclick = () => (off ? connect(r) : retry(r.comment_id, b));
+    b.onclick = () => (off ? Assistants.connect(r.agent, () => retry(r.comment_id)) : retry(r.comment_id, b));
     return [row];
   }
   const on = r.status === 'running', chip = el('span', 'v-react ' + tone(r.agent)), label = who + (on ? ' is working on this comment' : ' took this comment');
@@ -1041,22 +1140,15 @@ async function retry(id, b) {
   try { await api('/api/comments/' + id + '/run', { method: 'POST' }); boost(); }
   catch (err) { toast('Could not start the run: ' + err.message); if (b) b.disabled = false; }
 }
-const dlg = $('#connect');
-let connectFor = null;
-function connect(r) {
-  connectFor = r;
-  $$('[data-who]', dlg).forEach((n) => { n.textContent = nameOf(r.agent); });
-  dlg.showModal();
-}
-$('#connect-close').addEventListener('click', () => dlg.close());
-$('#connect-retry').addEventListener('click', () => { dlg.close(); if (connectFor) retry(connectFor.comment_id); });
 
 ` +
+    assistantsJs +
     marginJs +
     `
 
 // ─── Activity: what the assistants do on this page ───
-// The viewer asks the host for the activity of the page: every 500 ms while a run goes on, and every 5 seconds at other times.
+// The viewer asks the host for the activity of the page: every 500 ms while a run goes on, and every 2 seconds at other times,
+// so a version that an agent publishes shows within about 2 seconds. An idle poll is one indexed query. A hidden tab does not poll.
 // It shows each run three times: as the reaction on the comment, as a chip in the bar, and as a cursor in the page.
 const VERBS = { starting: 'is starting', reading: 'is reading', editing: 'is editing', replying: 'is replying' };
 const POINTER = '<span class="v-ava"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.8 13.6 6.6 8.9 8.4 7 13.4z"/></svg></span>';
@@ -1064,7 +1156,7 @@ const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const stage = $('.v-stage');
 // runs: the runs that are running, by public id. landed: the new text of each edit, to mark it in the next version.
 const runs = new Map(), landed = new Map(), chips = new Map();
-let cursor = 0, latest = D.latest, boostUntil = 0, pollTimer = 0, frameBusy = false, calmAt = 0, sent = false, swapping = false;
+let cursor = 0, latest = D.latest, boostUntil = 0, pollTimer = 0, frameBusy = false, calmAt = 0, sent = false, sentKey = '', swapping = false;
 
 // The frame has no origin, so the target origin is '*'. The page in it gets text only, and it shows it with textContent.
 const toFrame = (msg, f = frame) => { if (f.contentWindow) f.contentWindow.postMessage({ ns: 'k-presence', v: 1, ...msg }, '*'); };
@@ -1072,11 +1164,13 @@ function sendPresence() {
   // An old version does not have the text that the assistant edits, so it shows no cursor.
   const show = D.followsLatest || D.version >= latest;
   // Before the first event with a place, the cursor starts at the text of the comment: its quote and the text before it.
-  const list = show ? [...runs.values()].map((r) => { const h = r.hint || {}; return { id: r.id, agent: r.agent, name: nameOf(r.agent), phase: r.phase, quote: r.quote || h.quote || '', text: r.quote ? r.text || '' : '', final: r.final === true, before: (r.quote ? r.before : h.before) || '', anchor: r.anchor || h.anchor || '', hint: h.quote || '' }; }) : [];
+  const list = show ? [...runs.values()].map((r) => { const h = r.hint || {}; return { id: r.id, agent: r.agent, name: nameOf(r.agent), phase: r.phase, quote: r.quote || h.quote || '', text: r.quote ? r.text || '' : '', final: r.final === true, before: (r.quote ? r.before : h.before) || '', anchor: r.anchor || h.anchor || '', hint: h.quote || '', steps: r.final && Array.isArray(r.edits) ? r.edits : [] }; }) : [];
   if (!list.length && !sent) return;
   sent = list.length > 0;
+  const key = JSON.stringify(list);
   toFrame({ type: 'state', runs: list });
-  calmAt = Date.now() + 800;
+  // The page needs a moment to say that its cursor moves. Only a new state gives it that moment.
+  if (key !== sentKey) { sentKey = key; calmAt = Date.now() + 400; }
 }
 // A message from a frame is not trusted: the page in it can send anything. The viewer reads numbers and booleans only.
 const waiters = [];
@@ -1097,7 +1191,7 @@ const ask = (f, msg, type, ms) => new Promise((ok) => {
   toFrame(msg, f);
 });
 // A frame that loads again (a new theme) lost its cursors.
-const wire = (f) => f.addEventListener('load', () => { if (f === frame && runs.size) { sent = false; sendPresence(); } });
+const wire = (f) => f.addEventListener('load', () => { if (f === frame && runs.size) { sent = false; sentKey = ''; sendPresence(); } });
 wire(frame);
 
 function drawWho() {
@@ -1155,7 +1249,7 @@ async function pollActivity() {
 }
 async function tick() {
   try { if (!document.hidden) await pollActivity(); } catch {}
-  pollTimer = setTimeout(tick, runs.size || Date.now() < boostUntil ? 500 : 5000);
+  pollTimer = setTimeout(tick, runs.size || Date.now() < boostUntil ? 500 : 2000);
 }
 // A comment or a retry may start a run. The host records it after the response, so the viewer polls fast for a moment.
 function boost() { boostUntil = Date.now() + 10000; clearTimeout(pollTimer); pollTimer = setTimeout(tick, 300); }
@@ -1163,37 +1257,41 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) { cl
 tick();
 
 // ─── A new version, with no reload ───
-// The next version loads in a second frame under the same sandbox. When it is ready and the cursor in the old frame is
-// still, the new frame takes the scroll position, fades in on top, and the old frame goes. The bar gets the new version.
+// The next version loads in a second frame under the same sandbox, at the same place in the view. It reports its height
+// first, so the view keeps its scroll position and nothing moves. When the cursor in the old frame has finished its text,
+// the new frame fades in on top, and the old frame goes. The bar gets the new version.
 async function swapTo(v) {
   if (swapping || document.fullscreenElement) return;
   swapping = true;
   const next = frame.cloneNode(false);
   try {
     next.removeAttribute('src');
+    next.classList.remove('is-self');
     next.dataset.src = '/raw/' + D.slug + '/' + v + '?k=' + D.kit;
     next.classList.add('is-in'); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1;
+    next.style.setProperty('--st', $('#scroll').scrollTop + 'px');
     const loaded = new Promise((ok, no) => { next.addEventListener('load', ok, { once: true }); next.addEventListener('error', no, { once: true }); setTimeout(no, 15000); });
-    next.src = srcOf(next);
+    const sized = Margin.prepare(next);
+    next.src = srcOf(next).replace(/#.*$/, '');
     stage.append(next);
     await loaded;
-    // Let the cursor finish its text, so the reader sees what changes. Then wait no more than 5 seconds.
-    const until = Date.now() + 5000;
-    while ((frameBusy || Date.now() < calmAt) && Date.now() < until) await wait(100);
-    const at = await ask(frame, { type: 'where' }, 'at', 400);
+    await sized;
+    // Let the cursor finish its text, so the reader sees what changes. Then wait no more than 4 seconds.
+    const until = Date.now() + 4000;
+    while ((frameBusy || Date.now() < calmAt) && Date.now() < until) await wait(50);
     const flash = [...landed.values()].filter((f) => f.version > D.version && f.version <= v).map((f) => ({ ...f, cursor: !runs.has(f.id) }));
-    await ask(next, { type: 'restore', x: at && Number.isFinite(at.x) ? at.x : 0, y: at && Number.isFinite(at.y) ? at.y : 0, flash }, 'restored', 1500);
+    await ask(next, { type: 'restore', flash }, 'restored', 1500);
     next.classList.add('is-on');
     await wait(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 260);
     const focused = document.activeElement === frame, old = frame;
     frame = next; wire(next);
     old.remove();
+    next.classList.remove('is-in', 'is-on'); next.removeAttribute('aria-hidden'); next.removeAttribute('tabindex'); next.style.removeProperty('--st');
     Margin.frame();
-    next.classList.remove('is-in', 'is-on'); next.removeAttribute('aria-hidden'); next.removeAttribute('tabindex');
-    if (focused) next.focus();
+    if (focused) next.focus({ preventScroll: true });
     landed.forEach((f, id) => { if (f.version <= v) landed.delete(id); });
     setVersion(v);
-    frameBusy = false; sent = false; sendPresence();
+    frameBusy = false; sent = false; sentKey = ''; sendPresence();
   } catch {
     // The frame did not load. A reload shows the new version, or the error.
     next.remove();

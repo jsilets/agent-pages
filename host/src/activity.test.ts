@@ -124,6 +124,22 @@ describe('reduceActivity', () => {
     events.push(ev(3, 'focus', { quote: 'Another place' }));
     expect(reduceActivity(events)).toMatchObject({ quote: 'Another place', text: null, final: false });
   });
+  it('lists the edits of one edit_page call in order, and starts a new list for the next call', () => {
+    const events = [ev(1, 'tool', { tool: 'edit_page' }), ev(null, 'edit', { quote: 'One', text: '1', anchor: 'a' }), ev(null, 'edit', { quote: 'Two', text: '2', before: 'B' })];
+    expect(reduceActivity(events)).toMatchObject({ quote: 'Two', text: '2', final: true, edits: [{ quote: 'One', text: '1', before: null, anchor: 'a' }, { quote: 'Two', text: '2', before: 'B', anchor: null }] });
+    // A typing event for an edit of the list changes nothing: the exact text of the call stays.
+    events.push(ev(2, 'typing', { quote: 'One', text: '' }));
+    expect(reduceActivity(events).edits).toHaveLength(2);
+    events.push(ev(null, 'version', { version: 3 }), ev(3, 'tool', { tool: 'edit_page' }), ev(null, 'edit', { quote: 'Three', text: '3' }));
+    expect(reduceActivity(events)).toMatchObject({ version: 3, edits: [{ quote: 'Three', text: '3' }] });
+    // A tool that only reads ends the edit.
+    events.push(ev(4, 'tool', { tool: 'get_page' }));
+    expect(reduceActivity(events)).toMatchObject({ phase: 'reading', quote: null, edits: [] });
+  });
+  it('keeps at most 8 edits of one call', () => {
+    const events = Array.from({ length: 12 }, (_, i) => ev(null, 'edit', { quote: 'Q' + i, text: 'T' + i }));
+    expect(reduceActivity(events).edits.map((s) => s.quote)).toEqual(['Q0', 'Q1', 'Q2', 'Q3', 'Q4', 'Q5', 'Q6', 'Q7']);
+  });
   it('works with the host events alone, and changes nothing after the end of the run', () => {
     const events = [ev(null, 'started'), ev(null, 'tool', { tool: 'get_page' }), ev(null, 'tool', { tool: 'edit_page' }), ev(null, 'edit', { quote: 'Old', text: 'New' }), ev(null, 'version', { version: 2 }), ev(null, 'failed'), ev(null, 'tool', { tool: 'get_page' })];
     expect(reduceActivity(events)).toMatchObject({ phase: 'failed', quote: 'Old', text: 'New', final: true, version: 2 });

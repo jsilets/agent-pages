@@ -102,6 +102,13 @@ export type Route =
   | { kind: 'api-activity'; slug: string }
   | { kind: 'api-comment-run'; id: string }
   | { kind: 'api-warm' }
+  | { kind: 'api-comment'; id: string }
+  | { kind: 'api-assistants' }
+  | { kind: 'api-assistant'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-assistant-connect'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-assistant-connection'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-connect'; id: string }
+  | { kind: 'api-connect-code'; id: string }
   | { kind: 'not-found' };
 
 const NUM = /^[1-9][0-9]{0,8}$/;
@@ -138,7 +145,19 @@ export function route(path: string): Route {
   }
   if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'resolve') return { kind: 'api-comment-resolve', id: p[2] };
   if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'run') return { kind: 'api-comment-run', id: p[2] };
+  if (p[0] === 'api' && p[1] === 'comments' && p.length === 3 && isId(p[2])) return { kind: 'api-comment', id: p[2] };
   if (path === '/api/assistants/warm') return { kind: 'api-warm' };
+  if (path === '/api/assistants') return { kind: 'api-assistants' };
+  if (p[0] === 'api' && p[1] === 'assistants' && p[2] === 'connect' && p.length >= 4 && /^[\w-]{8,128}$/.test(p[3])) {
+    if (p.length === 4) return { kind: 'api-connect', id: p[3] };
+    if (p.length === 5 && p[4] === 'code') return { kind: 'api-connect-code', id: p[3] };
+  }
+  if (p[0] === 'api' && p[1] === 'assistants' && (p[2] === 'claude' || p[2] === 'chatgpt')) {
+    const name = p[2];
+    if (p.length === 3) return { kind: 'api-assistant', name };
+    if (p.length === 4 && p[3] === 'connect') return { kind: 'api-assistant-connect', name };
+    if (p.length === 4 && p[3] === 'connection') return { kind: 'api-assistant-connection', name };
+  }
   if (path === '/api/connector-tokens') return { kind: 'api-connector-tokens' };
   if (p[0] === 'api' && p[1] === 'connector-tokens' && p.length === 3 && (isTokenId(p[2]) || isToken(p[2]))) return { kind: 'api-connector-token', token: p[2] };
   // The MCP connector takes any token text here. So a wrong token gets a 404 from the connector, not an Access error.

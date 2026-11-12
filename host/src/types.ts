@@ -16,6 +16,9 @@ export interface Env {
   SANDBOX_RUNNER_SECRET?: string;
 }
 
+/** The two assistants of the viewer. The runner calls the program for ChatGPT 'codex'. */
+export type Assistant = 'claude' | 'chatgpt';
+
 /** One row of the comments table. A reply has parent_id set to the first comment of its thread. */
 export interface Comment {
   id: string;
@@ -38,6 +41,8 @@ export interface Comment {
   parent_id: string | null;
   status: 'open' | 'resolved';
   created_at: string;
+  /** The time of the last change of the body, or null for a comment that nobody changed. */
+  edited_at?: string | null;
 }
 
 /** The first comment of a thread, with its replies, oldest first. */

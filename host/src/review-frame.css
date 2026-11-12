@@ -1,0 +1,97 @@
+
+/* ─── The marks of a review, inside the page ─────────────────────
+   Activity shows a change in the page itself. diff.js writes the data-diff attributes, and study.js puts these
+   rules into the frame. The colours are the green, red and blue ramps of the kit, so the marks match the page.
+   Colour is never the only sign: new words have a line below them, removed words have a line through them,
+   and a block that moved has a dashed line around it. */
+:root { --df-add: #EAF3DE; --df-add-line: #3B6D11; --df-add-ink: #27500A; --df-del: #FCEBEB; --df-del-line: #A32D2D; --df-del-ink: #791F1F; --df-move: #E6F1FB; --df-move-line: #185FA5; --df-ring: #185FA5;
+  /* The tint of a whole block. In the dark theme it is thinner than the tint of a word, because a block is large. */
+  --df-add-wash: var(--df-add); --df-del-wash: var(--df-del); --df-move-wash: var(--df-move);
+  /* The lines and the small text of the review itself. A page that does not use the kit has no such tokens. */
+  --df-rule: var(--b2, rgba(128, 128, 128, 0.5)); --df-text: var(--s, #73726c); --df-strong: var(--p, inherit); --df-hover: var(--bg2, rgba(128, 128, 128, 0.14)); --df-font: var(--sans, system-ui, -apple-system, "Segoe UI", sans-serif); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --df-add: #27500A; --df-add-line: #97C459; --df-add-ink: #C0DD97; --df-del: #791F1F; --df-del-line: #F09595; --df-del-ink: #F7C1C1; --df-move: #0C447C; --df-move-line: #85B7EB; --df-ring: #85B7EB;
+  --df-add-wash: color-mix(in srgb, #27500A 62%, transparent); --df-del-wash: color-mix(in srgb, #791F1F 52%, transparent); --df-move-wash: color-mix(in srgb, #0C447C 62%, transparent); } }
+:root[data-theme="dark"] { --df-add: #27500A; --df-add-line: #97C459; --df-add-ink: #C0DD97; --df-del: #791F1F; --df-del-line: #F09595; --df-del-ink: #F7C1C1; --df-move: #0C447C; --df-move-line: #85B7EB; --df-ring: #85B7EB;
+  --df-add-wash: color-mix(in srgb, #27500A 62%, transparent); --df-del-wash: color-mix(in srgb, #791F1F 52%, transparent); --df-move-wash: color-mix(in srgb, #0C447C 62%, transparent); }
+
+/* Words. */
+ins[data-diff], del[data-diff] { border-radius: 0.16em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+ins[data-diff] { background: var(--df-add); color: var(--df-add-ink); text-decoration: underline; text-decoration-color: var(--df-add-line); text-decoration-thickness: 0.085em; text-underline-offset: 0.2em; }
+del[data-diff] { background: var(--df-del); color: var(--df-del-ink); text-decoration: line-through; text-decoration-color: var(--df-del-line); text-decoration-thickness: 0.085em; }
+/* The removed words stand before the words that replace them, with a small space between the two. */
+del[data-diff] + ins[data-diff] { margin-left: 0.12em; }
+
+/* A new block, a removed block and a block that moved: a tint, and a bar on the left side. */
+[data-diff="add"], [data-diff="to"] { background-color: var(--df-add-wash); box-shadow: 0 0 0 6px var(--df-add-wash), -9px 0 0 0 var(--df-add-line); border-radius: 1px; }
+[data-diff="to"] { --df-add-wash: var(--df-move-wash); --df-add-line: var(--df-move-line); outline: 1.5px dashed var(--df-move-line); outline-offset: 7px; }
+[data-diff="del"] { background-color: var(--df-del-wash); box-shadow: 0 0 0 6px var(--df-del-wash), -9px 0 0 0 var(--df-del-line); border-radius: 1px; color: var(--df-del-ink); text-decoration: line-through; text-decoration-color: var(--df-del-line); }
+[data-diff="del"] :is(h1, h2, h3, h4, h5, h6, p, li, td, th, dt, dd, b, strong, small, span, a, figcaption, blockquote) { color: inherit; }
+[data-diff="del"] :is(img, svg, video, canvas) { opacity: 0.45; }
+/* An item of a list has its number or its dot where the bar goes. A new item has a line below its words, as new words have.
+   A removed item of a numbered list has no number, so the items after it keep the numbers of the newer version. */
+li[data-diff="add"], li[data-diff="to"] { box-shadow: 0 0 0 6px var(--df-add-wash); text-decoration: underline; text-decoration-color: var(--df-add-line); text-decoration-thickness: 0.085em; text-underline-offset: 0.2em; }
+li[data-diff="del"] { box-shadow: 0 0 0 6px var(--df-del-wash); }
+ol > li[data-diff="del"] { list-style-type: none; counter-increment: list-item 0; }
+/* A part that draws differently: the new drawing with a line around it. */
+[data-diff="obj"] { outline: 2px solid var(--df-add-line); outline-offset: 4px; border-radius: 3px; }
+/* A table has no space between its cells, so a row and a cell take the tint only. */
+tr[data-diff], :is(td, th)[data-diff] { box-shadow: none; }
+tr[data-diff="add"] > *, tr[data-diff="to"] > * { background-color: var(--df-add-wash); }
+tr[data-diff="del"] > * { background-color: var(--df-del-wash); color: var(--df-del-ink); text-decoration: line-through; text-decoration-color: var(--df-del-line); }
+/* A cell of a chart, a chip and each other inline part keep their own fill. A line around them is the mark. */
+:is(a, abbr, b, cite, code, data, em, i, kbd, label, mark, output, q, s, samp, small, span, strong, sub, sup, time, u, var)[data-diff] { background-color: transparent; box-shadow: none; outline-offset: 2px; border-radius: 3px; }
+:is(a, abbr, b, cite, code, data, em, i, kbd, label, mark, output, q, s, samp, small, span, strong, sub, sup, time, u, var)[data-diff="add"] { outline: 2px solid var(--df-add-line); }
+:is(a, abbr, b, cite, code, data, em, i, kbd, label, mark, output, q, s, samp, small, span, strong, sub, sup, time, u, var)[data-diff="del"] { outline: 2px solid var(--df-del-line); opacity: 0.75; }
+:is(a, abbr, b, cite, code, data, em, i, kbd, label, mark, output, q, s, samp, small, span, strong, sub, sup, time, u, var)[data-diff="mod"] { outline: 0; }
+
+/* The change that the reader is at. The script puts this box around it. */
+[data-diff-ring] { position: absolute; z-index: 2147483000; box-sizing: border-box; border: 2px solid var(--df-ring); border-radius: 9px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--df-ring) 16%, transparent); pointer-events: none; transition: left 0.2s, top 0.2s, width 0.2s, height 0.2s; transition-timing-function: cubic-bezier(0.25, 1, 0.5, 1); }
+[data-diff-ring][hidden] { display: none; }
+
+/* A fold: blocks with no change, behind one line that names them. A click shows them. */
+:root:not([data-diff-off]) [data-diff-skip]:not([data-diff-open]) { display: none !important; }
+[data-diff-gap] { display: flex; align-items: center; gap: 10px; margin: 16px 0; padding: 0; list-style: none; max-width: none; }
+[data-diff-gap]::before, [data-diff-gap]::after { content: ""; flex: 1; height: 0; border-top: 1px dashed var(--df-rule); }
+[data-diff-gap] button { flex: none; margin: 0; padding: 3px 10px; border: 0; border-radius: 999px; background: transparent; color: var(--df-text); font: 500 12.5px/18px var(--df-font); letter-spacing: 0; cursor: pointer; }
+[data-diff-gap] button:hover { background: var(--df-hover); color: var(--df-strong); }
+[data-diff-gap] button:focus-visible { outline: 2px solid var(--df-ring); outline-offset: 2px; }
+tr[data-diff-gap] { display: table-row; }
+tr[data-diff-gap]::before, tr[data-diff-gap]::after { content: none; }
+tr[data-diff-gap] > td { padding: 3px 0; border: 0; border-top: 1px dashed var(--df-rule); border-bottom: 1px dashed var(--df-rule); background: none; text-align: center; }
+
+/* "Show changes" is off: the newer version as it is, with no mark and no fold. */
+:root[data-diff-off] :is(del[data-diff], [data-diff="del"], [data-diff-gap], [data-diff-out], [data-diff-sheet="del"], [data-diff-ring]) { display: none !important; }
+:root[data-diff-off] ins[data-diff] { margin-left: 0; background: none; color: inherit; text-decoration: none; }
+:root[data-diff-off] li[data-diff] { text-decoration: none; }
+:root[data-diff-off] ol > li[data-diff] { list-style-type: revert; }
+:root[data-diff-off] [data-diff] { background-color: revert-layer; box-shadow: none; outline: 0; }
+:root[data-diff-off] tr[data-diff] > * { background-color: revert-layer; }
+:root[data-diff-off] [data-diff-sheet] .k-frame { box-shadow: var(--k-sheet); outline: 0; opacity: 1; }
+:root[data-diff-off] [data-diff-cap] span { display: none; }
+
+/* ─── A deck: each slide is a sheet with a caption. Only the slides that changed are open. ─── */
+html:has(main.k-deck-review), html:has(main.k-deck-review) body { background: var(--k-canvas); }
+main.k-deck-review { display: block; padding: 22px 0 48px; }
+main.k-deck-review > [data-diff-gap] { width: calc(1920px * var(--k-s)); margin: 0 auto 26px; }
+[data-diff-sheet] { width: calc(1920px * var(--k-s)); margin: 0 auto 30px; }
+[data-diff-cap] { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; font: 13px/20px var(--df-font); color: var(--df-text); }
+[data-diff-cap] b { font-weight: 600; color: var(--df-strong); }
+[data-diff-sheet="add"] .k-frame { box-shadow: 0 0 0 2px var(--df-add-line), var(--k-sheet); }
+[data-diff-sheet="del"] .k-frame { box-shadow: 0 0 0 2px var(--df-del-line), var(--k-sheet); opacity: 0.6; }
+[data-diff-sheet="to"] .k-frame { outline: 2px dashed var(--df-move-line); outline-offset: 4px; }
+[data-diff-out] { margin: 10px 0 0; font: 13px/24px var(--df-font); color: var(--df-text); }
+[data-diff-out] b { margin-right: 8px; font-weight: 600; color: var(--df-strong); }
+[data-diff-out] del { margin-right: 6px; padding: 2px 5px; }
+/* A slide shows each of its build steps, and it has no room for a fold. */
+main.k-deck-review .k-build { opacity: 1 !important; }
+/* The slide is a 1920 by 1080 canvas that the frame scales down, so the marks in it are larger. */
+.k-slide [data-diff="add"], .k-slide [data-diff="to"] { box-shadow: 0 0 0 14px var(--df-add-wash), -22px 0 0 0 var(--df-add-line); }
+.k-slide [data-diff="del"] { box-shadow: 0 0 0 14px var(--df-del-wash), -22px 0 0 0 var(--df-del-line); }
+.k-slide li[data-diff="add"], .k-slide li[data-diff="to"] { box-shadow: 0 0 0 14px var(--df-add-wash); }
+.k-slide li[data-diff="del"] { box-shadow: 0 0 0 14px var(--df-del-wash); }
+.k-slide [data-diff="obj"] { outline-width: 5px; outline-offset: 10px; border-radius: 8px; }
+.k-slide :is(b, span, small, output, strong, em, a, i, code)[data-diff] { box-shadow: none; outline-width: 5px; outline-offset: 5px; }
+/* The removed words make a slide longer. When it has no room, the script takes them out and the sheet lists them. */
+[data-diff-tight] .k-slide del[data-diff] { display: none; }
+
+@media (prefers-reduced-motion: reduce) { [data-diff-ring] { transition: none; } }

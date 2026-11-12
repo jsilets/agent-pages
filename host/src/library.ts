@@ -6,6 +6,9 @@ import { COMMON_SCRIPT, ICON, KIT, appearance, data, icon, shell, type PageRow }
 import type { Item } from './activity';
 import studyCss from './study.css?raw';
 import studyJs from './study.js?raw';
+import diffJs from './diff.js?raw';
+import frameCss from './review-frame.css?raw';
+import frameJs from './review-frame.js?raw';
 
 /**
  * The layout study. `classic` is the library as it was. `rooms` and `ledger` are two answers to one question:
@@ -50,8 +53,19 @@ const LUCIDE: Record<string, string> = {
   message: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
   arrowUpRight: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
   link2: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+  up: '<path d="m7 14 5-5 5 5"/>',
 };
 const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCIDE[name]}</svg>`;
+
+/**
+ * The diff core as a part of the library script. The page has one inline script and no modules, so the exports go,
+ * and a function scope keeps the names of the core apart from the names of the library.
+ * A backslash goes into each "<!--" and "</script" of the source: in a string they mean the same,
+ * and the HTML parser does not read them as the start of a comment or the end of the script.
+ */
+export const inlineDiff = (source: string) =>
+  `const Diff = (() => {\n${source.replace(/^export /gm, '').replace(/<!--/g, '<\\!--').replace(/<\/script/gi, '<\\/script')}\nreturn { diffHtml, summarize };\n})();\n`;
 
 // The brand mark without its tile, drawn in the text colour: dark on light, white on dark. The tile is for tabs and home screens.
 const MARK = `<svg class="h-mark" viewBox="24 32 208 192" aria-hidden="true">
@@ -362,7 +376,7 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
           <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous page</dd>
           <dt><kbd>o</kbd></dt><dd>Open</dd>
           <dt><kbd>c</kbd></dt><dd>Copy link</dd>
-          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>b</kbd></dt><dd>Before and after, in Activity</dd>' : ''}
+          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>n</kbd><kbd>N</kbd></dt><dd>Next and previous change, in Activity</dd>\n          <dt><kbd>s</kbd></dt><dd>Show or hide the changes</dd>' : ''}
         </dl>
       </div>
     </header>
@@ -382,8 +396,8 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
   <div class="l-edit-row"><button type="button" class="v-create" id="fsave">Create folder</button></div>
   <button type="button" class="v-item is-danger" id="fdelete" hidden>${icon('trash')}Delete folder, keep its pages</button>
 </div>
-<div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x } : {}) } })}</script>`;
+${layout === 'rooms' ? '<div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>\n' : ''}<div class="v-toast" id="toast" role="status" hidden></div>
+<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, ...(layout === 'rooms' ? { frame: { css: frameCss, js: frameJs } } : {}), icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo } : {}) } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -854,7 +868,9 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'p' && slug && !hits) togglePin(slug);
 });
 ` +
-    // The study functions and their state must exist before the first draw.
+    // The study functions and their state must exist before the first draw. Activity in Rooms compares versions with the diff core.
+    // Ledger has no Activity room, so it gets the name with no core behind it.
+    (layout === 'rooms' ? inlineDiff(diffJs) : study ? 'const Diff = null;\n' : '') +
     (study ? studyJs : '') +
     `
 render();

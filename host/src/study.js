@@ -42,10 +42,10 @@ function markOpened(slug, version) {
   try { localStorage.setItem(OPENED_KEY, JSON.stringify(opened)); } catch {}
   return true;
 }
-// A link to a page marks the page as opened. A row in the room does not: it shows the page in the room.
+// A link to a page marks the page as opened. A row in the room does not: it shows the change in the room.
 document.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a[href^="/p/"]');
-  if (!a || (a.closest('.e-row') && roomWide() && plain(e))) return;
+  if (!a || (a.closest('.e-row') && inRoom() && plain(e))) return;
   const m = a.getAttribute('href').match(/^\/p\/([a-z0-9-]+\/[a-z0-9-]+)/);
   const p = m && pageOf(m[1]);
   if (p && markOpened(p.slug, p.latest)) setTimeout(render, 0);
@@ -275,105 +275,359 @@ function studyMain(main) {
 }
 
 // ─── The room: Activity in Rooms ───
-const roomWide = () => LAYOUT === 'rooms' && place.list === 'activity' && matchMedia('(min-width: 1121px)').matches;
+const inRoom = () => LAYOUT === 'rooms' && place.list === 'activity' && !hits;
+const roomWide = () => inRoom() && matchMedia('(min-width: 1121px)').matches;
 function eRow(x, cur) {
   const p = pageOf(x.slug), l = look(x);
   return '<article class="e-row' + l.cls + (fresh(x) ? ' is-fresh' : '') + (cur && cur.id === x.id ? ' is-cur' : '') + '" data-slug="' + p.slug + '" data-ev="' + h(x.id) + '"><a class="e-link" href="' + itemHref(x) + '">'
     + '<span class="e-g">' + glyph(x) + '</span><span class="e-title">' + h(p.title) + '</span><span class="e-when">' + clock(x.at) + '</span><span class="e-line">' + say(x, 'event') + '</span></a></article>';
 }
-let roomList = [];
+let roomList = [], listTop = 0;
 function roomView(main, known) {
   let list = known;
   if (place.af) { const slugs = new Set(pagesUnder(place.af).map((p) => p.slug)); list = list.filter((x) => slugs.has(x.slug)); }
   const mine = list.filter(fresh).length;
   if (place.only) list = list.filter((x) => fresh(x) || x.state === 'working');
   roomList = list;
-  if (!$('#room')) { main.innerHTML = '<div class="r" id="room"><section class="r-list" id="rlist" aria-label="Activity"></section><section class="r-view" id="rview" aria-label="The page"></section></div>'; shown = ''; }
-  const cur = list.find((x) => x.id === place.ev) || list[0] || null;
+  if (!$('#room')) { main.innerHTML = '<div class="r" id="room"><section class="r-list" id="rlist" aria-label="Activity"></section><section class="r-view" id="rview" aria-label="Review"></section></div>'; shown = ''; }
+  const wide = roomWide();
+  // A wide window shows the newest item when the address names none. A narrow window shows the list, and a row opens its item.
+  const cur = known.find((x) => x.id === place.ev) || (wide ? list[0] : null) || null;
+  const room = $('#room'), was = room.classList.contains('is-open');
+  room.classList.toggle('is-open', !wide && !!cur);
   const f = place.af && folderOf(place.af);
   const head = '<div class="r-head"><div class="g-tabs" role="tablist" aria-label="Show">'
     + '<button type="button" role="tab" data-only="" aria-selected="' + !place.only + '">All</button>'
     + '<button type="button" role="tab" data-only="waiting" aria-selected="' + !!place.only + '">For you' + (mine ? '<span class="s-count">' + mine + '</span>' : '') + '</button></div>'
     + (f ? '<button type="button" class="r-scope" data-scope-off aria-label="Show every folder"><span>' + h(f.name) + '</span>' + icn('x') + '</button>' : '') + '</div>';
-  $('#rlist').innerHTML = head + (list.length ? byDay(list, (x) => eRow(x, roomWide() ? cur : null), 'r-day') : '<p class="g-none">' + (place.only ? 'Nothing waits for you.' : 'Nothing happened yet.') + '</p>');
-  drawPage(cur);
+  $('#rlist').innerHTML = head + (list.length ? byDay(list, (x) => eRow(x, wide ? cur : null), 'r-day') : '<p class="g-none">' + (place.only ? 'Nothing waits for you.' : 'Nothing happened yet.') + '</p>');
+  if (was && !room.classList.contains('is-open')) $('#rlist').scrollTop = listTop;
+  drawReview(cur);
 }
-// What the right side shows now: the item, its state, its versions and the theme. The same key keeps the frames, so a redraw does not load the page again.
-let shown = '', side = 'after', dwell;
-const zoom = new ResizeObserver((list) => list.forEach((e) => e.target.style.setProperty('--z', Math.min(1, e.contentRect.width / 860).toFixed(4))));
-const pageFrame = (slug, n, anchor, which, title) => '<iframe class="r-frame' + (which === side ? '' : ' is-off') + '" data-side="' + which + '" title="' + h(title) + '" sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox" src="/raw/' + slug + '/' + n + '?k=' + D.kit + (theme === 'auto' ? '' : '&theme=' + theme) + (anchor ? '#' + encodeURIComponent(anchor) : '') + '"></iframe>';
-function talk(x) {
-  const rows = [];
-  const on = x.quote ? '<small>On “' + h(x.quote) + '”</small>' : '';
-  if (x.kind === 'request') {
-    rows.push([person(x.author), h(x.ask) + on]);
-    const a = actor(x.agent);
-    if (x.state === 'working') rows.push([a, 'Working.<small>Started at ' + clock(x.started) + '. The new version shows here when it is ready.</small>']);
-    else if (x.state === 'changed') rows.push([a, h(x.reply || 'Changed the page.') + '<small>Version ' + x.version + ', ready after ' + took(x) + '</small>']);
-    else if (x.state === 'replied') rows.push([a, h(x.reply || 'Made no change.') + '<small>The page did not change.' + (x.open ? ' Answer in the comments of the page.' : '') + '</small>']);
-    else rows.push([a, '<span class="is-warn c-red">' + (x.cause === 'not_connected' ? a + ' is not connected, so the request did not run.' : x.cause === 'timeout' ? 'The run did not finish in time.' : 'The run did not finish.') + '</span><small>'
-      + (x.cause === 'not_connected' ? 'Connect ' + a + ', then write the comment again.' : 'Write the comment again to try once more.') + '</small>']);
-  } else if (x.kind === 'note') {
-    rows.push([person(x.author), h(x.body) + on + (x.replies ? '<small>' + x.replies + (x.replies === 1 ? ' reply' : ' replies') + '</small>' : '')]);
-  } else {
-    rows.push([x.first ? 'Published' : 'Version ' + x.version, new Date(x.at).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })]);
+
+// ─── The review: what one version changed, marked in the page itself ───
+// diff.js compares two versions in the browser. The newer version shows in a frame, with the marks in it.
+// The frame has the height of its page, so the review scrolls as one column: the record, then the page.
+// review-frame.js runs in the frame: it puts the box around a change, and it tells this script where the reader is.
+const NONCE = document.currentScript ? document.currentScript.nonce : '';
+const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox';
+const rawUrl = (slug, n) => '/raw/' + slug + '/' + n + '?k=' + D.kit + (theme === 'auto' ? '' : '&theme=' + theme);
+/** The item that stored version v of a page: a publish, or the request that an assistant ran. */
+const makerOf = (slug, v) => feed.find((i) => i.slug === slug && i.version === v && (i.kind === 'publish' || i.state === 'changed')) || null;
+/** A time for a small line: the hour, and the day too when it is not today. */
+function stamp(iso) {
+  const d = new Date(iso), day = dayOf(iso);
+  const date = day === 'Yesterday' ? day : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
+  return (day === 'Today' ? '' : date + ', ') + clock(iso);
+}
+
+/** The HTML of the versions that the reader looked at. A version never changes, so the copy stays good. */
+const texts = new Map();
+function versionHtml(slug, n) {
+  const url = rawUrl(slug, n);
+  let t = texts.get(url);
+  if (!t) {
+    t = fetch(url).then((r) => { if (!r.ok) throw new Error('version ' + n + ' did not load'); return r.text(); });
+    t.catch(() => texts.delete(url));
+    texts.set(url, t);
+    if (texts.size > 16) texts.delete(texts.keys().next().value);
   }
-  return '<dl class="r-talk">' + rows.map((r) => '<dt>' + h(r[0]) + '</dt><dd>' + r[1] + '</dd>').join('') + '</dl>';
+  return t;
 }
-function drawPage(x) {
+/**
+ * The document of the frame: the newer version with the marks, the rules for the marks, and the script that steps through them.
+ * The frame has the content rules of this page, so a script runs in it only with the nonce of this page.
+ * The kit and the script of the review get the nonce. A script that the page brought does not run in a review.
+ */
+function frameDoc(d) {
+  const doc = d.head + '<style>' + D.frame.css + '</style>' + d.body + '<script nonce="' + NONCE + '">' + D.frame.js + '<\/script>' + d.tail;
+  return doc.replace('<script>\n/* explain.js', '<script nonce="' + NONCE + '">\n/* explain.js');
+}
+const reviews = new Map();
+/** What version `after` changed: the document for the frame, the number of changes, and the list of places. */
+async function reviewOf(slug, before, after) {
+  const key = rawUrl(slug, before) + '>' + after;
+  let r = reviews.get(key);
+  if (!r) {
+    const [a, b] = await Promise.all([versionHtml(slug, before), versionHtml(slug, after)]);
+    const d = Diff.diffHtml(a, b, { review: true });
+    r = { doc: frameDoc(d), stops: d.stops, deck: d.deck, list: Diff.summarize(d.changes) };
+    reviews.set(key, r);
+    if (reviews.size > 8) reviews.delete(reviews.keys().next().value);
+  }
+  return r;
+}
+
+/** What was asked and what came of it, as the fields of a record. A name stands only in the small line, next to the time. */
+function record(x) {
+  const rows = [], on = x.quote ? ', on “' + h(x.quote) + '”' : '';
+  if (x.kind === 'request') {
+    const a = h(actor(x.agent));
+    rows.push(['Request', h(x.ask), h(person(x.author)) + ', ' + stamp(x.started) + on]);
+    if (x.state === 'working') rows.push(['Result', 'In progress', a + ' started at ' + clock(x.started) + '. The new version shows here when it is ready.']);
+    else if (x.state === 'changed') rows.push(['Result', h(x.reply || 'The page changed.'), a + ', version ' + x.version + ', after ' + took(x)]);
+    else if (x.state === 'replied') rows.push(['Result', h(x.reply || 'No change'), a + ' made no change to the page.' + (x.open ? ' Answer in the comments of the page.' : '')]);
+    else rows.push(['Result', '<span class="is-warn c-red">' + (x.cause === 'not_connected' ? 'The request did not run, because ' + a + ' is not connected.' : x.cause === 'timeout' ? 'The run did not finish in time.' : 'The run did not finish.') + '</span>',
+      x.cause === 'not_connected' ? 'Connect ' + a + ', then write the comment again.' : 'Write the comment again to try once more.']);
+  } else if (x.kind === 'note') {
+    rows.push(['Comment', h(x.body), h(person(x.author)) + ', ' + stamp(x.at) + on + (x.replies ? ', ' + x.replies + (x.replies === 1 ? ' reply' : ' replies') : '')]);
+  } else {
+    rows.push(['Published', x.first ? 'The first version' : 'Version ' + x.version, new Date(x.at).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })]);
+  }
+  return '<dl class="r-what">' + rows.map((r) => '<dt>' + r[0] + '</dt><dd>' + r[1] + '<small>' + r[2] + '</small></dd>').join('') + '</dl>';
+}
+/** The version in the review. Its arrows show what the version before and the version after changed, and its name lists every version. */
+function verPill(p, n, made) {
+  const step = (v, name) => {
+    const i = made ? makerOf(p.slug, v) : null;
+    return '<button type="button" class="v-step"' + (i ? ' data-ev-go="' + h(i.id) + '" data-tip="Version ' + v + '" aria-label="Show what version ' + v + ' changed"' : ' disabled aria-label="' + (v < n ? 'No version before this one' : 'No version after this one') + '"') + '>' + svg(name) + '</button>';
+  };
+  return '<div class="v-ver r-ver">' + (made ? step(n - 1, 'left') : '')
+    + '<button type="button" class="v-cur" data-vers aria-haspopup="true" aria-expanded="false" aria-label="Version ' + n + ' of ' + p.latest + '. Show every version"><b>Version ' + n + '</b><span class="v-of">of ' + p.latest + '</span>' + svg('down') + '</button>'
+    + (made ? step(n + 1, 'right') : '') + '</div>';
+}
+const plainFrame = (p, n, anchor) => '<iframe class="r-frame" title="' + h(p.title) + '" sandbox="' + SANDBOX + '" src="' + rawUrl(p.slug, n) + (anchor ? '#' + encodeURIComponent(anchor) : '') + '"></iframe>';
+
+// What the right side shows now: the item, its state, its versions, the theme and the width. The same key keeps the frame, so a redraw does not load the page again.
+let shown = '', rev = null, dwell;
+// The page has the width of a desk window, and the frame scales it down. On a phone the page has its own layout for that width.
+const zoom = new ResizeObserver((list) => list.forEach((e) => {
+  const w = e.contentRect.width;
+  e.target.style.setProperty('--z', (w >= 560 ? Math.min(1, w / 860) : 1).toFixed(4));
+  if (rev && rev.height) fitFrame(rev.height);
+}));
+const zOf = (page) => parseFloat(page.style.getPropertyValue('--z')) || 1;
+function drawReview(x) {
   const el = $('#rview');
   if (!el) return;
-  // A narrow window has no space for the page, so it does not load it.
-  if (!roomWide()) { shown = ''; el.innerHTML = ''; return; }
-  if (!x) { shown = ''; el.innerHTML = '<p class="r-none">Choose a change to see its page.</p>'; return; }
+  const wide = roomWide();
+  if (!x) { shown = ''; rev = null; el.innerHTML = wide ? '<p class="r-none">Choose a change to see it in its page.</p>' : ''; return; }
   const p = pageOf(x.slug);
-  // A change has the version before it and the version it made. Each other item shows the page as it is now.
-  const after = x.version || p.latest, before = x.version && x.version > 1 ? (x.kind === 'request' ? Math.min(x.from, x.version - 1) : x.version - 1) : 0;
-  const key = [x.id, x.state || '', after, before, theme].join('|');
+  // An item that stored a version shows what that version changed. Each other item shows the page as it is now.
+  const made = x.kind === 'publish' || x.state === 'changed' ? x.version : 0;
+  const after = made || p.latest, before = made > 1 ? made - 1 : 0;
+  const key = [x.id, x.state || '', after, before, p.latest, theme, wide ? 'wide' : 'flow'].join('|');
   if (key === shown) return;
-  if (shown.split('|')[0] !== x.id) side = 'after';
   shown = key;
-  el.innerHTML = '<header class="r-top"><div class="r-id"><h1>' + h(p.title) + '</h1>' + whereChip(p) + '</div><div class="r-acts">'
-    + (before ? '<div class="v-seg" role="group" aria-label="Version"><button type="button" data-side="before" aria-pressed="' + (side === 'before') + '" data-tip="Version ' + before + '">Before</button><button type="button" data-side="after" aria-pressed="' + (side === 'after') + '" data-tip="Version ' + after + '">After</button></div>' : '')
-    + '<a class="r-open" href="' + itemHref(x) + '">Open page' + icn('arrowUpRight') + '</a></div></header>' + talk(x)
-    + '<div class="r-stage" id="rstage" data-slug="' + p.slug + '" data-before="' + before + '" data-anchor="' + h(x.anchor || '') + '">' + pageFrame(p.slug, after, x.anchor, 'after', p.title) + '</div>';
+  rev = { key, slug: p.slug, made, before, after, anchor: x.anchor || '', stops: 0, at: 0, on: true, deck: false, list: [], all: false, height: 0 };
+  el.scrollTop = 0;
+  byHand = true;
+  el.innerHTML = '<header class="r-top"><button type="button" class="r-back" data-back>' + svg('left') + 'Activity</button>'
+    + '<div class="r-id"><h1>' + h(p.title) + '</h1>' + whereChip(p) + '</div><div class="r-acts">' + verPill(p, after, made)
+    + '<a class="r-open" href="' + itemHref(x) + '">Open page' + icn('arrowUpRight') + '</a></div></header>'
+    + '<div class="r-rec" id="rrec">' + record(x) + '</div><div class="r-stage' + (before ? ' is-flow' : '') + '" id="rstage"><div class="r-page" id="rpage"></div></div>';
   zoom.disconnect();
-  zoom.observe($('#rstage'));
+  zoom.observe($('#rpage'));
+  if (before) compare(key, p); else $('#rpage').innerHTML = plainFrame(p, after, rev.anchor);
   // A change that shows here for 2 seconds counts as opened, as a message in a mail program counts as read.
   clearTimeout(dwell);
   if (x.version > seenVersion(x.slug)) dwell = setTimeout(() => {
     if (shown === key && $('#rstage') && document.visibilityState === 'visible' && markOpened(x.slug, x.version)) render();
   }, 2000);
 }
-/** Before and After change the frame that shows. The Before frame loads when the reader first asks for it. */
-function setSide(which) {
-  const stage = $('#rstage');
-  if (!stage || !+stage.dataset.before) return;
-  side = which;
-  if (which === 'before' && !$('.r-frame[data-side="before"]', stage)) stage.insertAdjacentHTML('beforeend', pageFrame(stage.dataset.slug, stage.dataset.before, stage.dataset.anchor, 'before', 'The version before'));
-  $$('.r-frame', stage).forEach((f) => f.classList.toggle('is-off', f.dataset.side !== which));
-  $$('#rview [data-side]:not(iframe)').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.side === which)));
+/** Loads the two versions, compares them, and shows the newer one with the marks. */
+async function compare(key, p) {
+  $('#rpage').innerHTML = '<p class="r-wait">Comparing version ' + rev.before + ' with version ' + rev.after + '</p>';
+  let r = null;
+  try { r = await reviewOf(p.slug, rev.before, rev.after); } catch {}
+  if (shown !== key || !rev || !$('#rpage')) return;
+  if (!r) {
+    // Without the two versions there is nothing to mark, so the page shows as it is, in a frame that scrolls.
+    $('#rstage').classList.remove('is-flow');
+    $('#rpage').innerHTML = plainFrame(p, rev.after, rev.anchor);
+    $('#rstage').insertAdjacentHTML('afterbegin', '<div class="r-strip" id="rstrip"><span class="r-count">Version ' + rev.before + ' did not load, so the page shows with no marks.</span></div>');
+    return;
+  }
+  Object.assign(rev, { stops: r.stops, deck: r.deck, list: r.list });
+  drawChanges();
+  $('#rstage').insertAdjacentHTML('afterbegin', '<div class="r-strip" id="rstrip">' + (r.stops
+    ? '<div class="r-steps" role="group" aria-label="Changes"><button type="button" class="v-icon" data-step="-1" aria-label="Previous change" data-tip="Previous change" data-tip-start>' + svg('up') + '</button>'
+      + '<button type="button" class="v-icon" data-step="1" aria-label="Next change" data-tip="Next change" data-tip-start>' + svg('down') + '</button><span class="r-count" id="rcount" aria-live="polite"></span></div>'
+      + '<button type="button" class="r-switch" role="switch" aria-checked="true" data-show><span>Show changes</span><i aria-hidden="true"></i></button>'
+    : '<span class="r-count">Version ' + rev.after + ' shows the same content as version ' + rev.before + '.</span>') + '</div>');
+  drawCount();
+  const f = document.createElement('iframe');
+  f.className = 'r-frame';
+  f.title = p.title + ', with the changes of version ' + rev.after;
+  f.setAttribute('sandbox', SANDBOX);
+  f.dataset.rev = '';
+  // The frame has the height of its page, so it never scrolls. The review scrolls.
+  f.setAttribute('scrolling', 'no');
+  f.srcdoc = r.doc;
+  $('#rpage').replaceChildren(f);
 }
-/** Shows an item in the room. When the reader chose it, the version it made counts as opened. */
+/** The list of places that changed, as the last field of the record. Each line goes to its place in the page. */
+function drawChanges() {
+  const dl = $('#rrec .r-what');
+  if (!dl || !rev || !rev.list.length) return;
+  $$('.r-chg-k, .r-chg-v', dl).forEach((n) => n.remove());
+  const list = rev.all || rev.list.length <= 5 ? rev.list : rev.list.slice(0, 4), more = rev.list.length - list.length;
+  const where = (l) => (l.slide ? '<b>Slide ' + l.slide + (l.gone ? ' of the version before' : '') + '</b>' : '') + h(l.heading || (l.slide ? '' : 'Start of the page'));
+  dl.insertAdjacentHTML('beforeend', '<dt class="r-chg-k">Changes</dt><dd class="r-chg-v"><ol class="r-chg">'
+    + list.map((l) => '<li><button type="button" data-go="' + l.n + '"><span class="c-where">' + where(l) + '</span><span class="c-what">' + h(l.what) + '</span></button></li>').join('')
+    + '</ol>' + (more ? '<button type="button" class="r-all" data-all>Show ' + more + ' more</button>' : '') + '</dd>');
+}
+/** The place of the reader in the changes: the count, the two arrows, and the line of the list. */
+function drawCount() {
+  if (!rev) return;
+  const c = $('#rcount'), n = rev.stops;
+  if (c) c.textContent = !rev.on ? 'Version ' + rev.after + ' with no marks' : rev.at ? (rev.deck ? 'Changed slide ' : 'Change ') + rev.at + ' of ' + n : n + (rev.deck ? ' changed slide' : ' change') + (n === 1 ? '' : 's');
+  $$('#rstrip [data-step]').forEach((b) => { b.disabled = !rev.on || (b.dataset.step === '-1' ? rev.at <= 1 : rev.at >= n); });
+  const here = rev.on && rev.at ? rev.list.filter((l) => l.n <= rev.at).pop() : null;
+  $$('#rrec [data-go]').forEach((b) => { if (here && +b.dataset.go === here.n) b.setAttribute('aria-current', 'true'); else b.removeAttribute('aria-current'); });
+}
+const post = (msg) => { const f = $('#rpage iframe[data-rev]'); if (f && f.contentWindow) f.contentWindow.postMessage({ ns: 'ap-diff', ...msg }, '*'); };
+/** Goes to change n. From here to the next move of the reader, the scroll is not theirs. */
+function goChange(n) {
+  byHand = false;
+  post({ type: 'go', n, smooth: true });
+}
+function stepChange(d) {
+  if (!rev || !rev.stops || !rev.on) return;
+  const n = Math.max(1, Math.min(rev.stops, (rev.at || (d > 0 ? 0 : rev.stops + 1)) + d));
+  if (n !== rev.at) goChange(n);
+}
+function showChanges(on) {
+  if (!rev || !rev.stops) return;
+  rev.on = on;
+  post({ type: 'show', on });
+  const b = $('#rstrip [data-show]');
+  if (b) b.setAttribute('aria-checked', String(on));
+  drawCount();
+}
+/** The frame cannot scroll, so the review scrolls to the change. The change stops below the tool bar, which stays at the top. */
+function reveal(top, height, smooth) {
+  const view = $('#rview'), page = $('#rpage');
+  if (!view || !page) return;
+  const z = zOf(page), y = page.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop + top * z;
+  byHand = false;
+  view.scrollTo({ top: y - Math.max(64, Math.min(view.clientHeight * 0.25, (view.clientHeight - height * z) / 2)), behavior: smooth && !reduce ? 'smooth' : 'auto' });
+}
+/** The frame gets the height of its page. */
+function fitFrame(height) {
+  const page = $('#rpage');
+  if (!page || !rev) return;
+  rev.height = height;
+  page.style.height = Math.ceil(height * zOf(page)) + 'px';
+  sendView();
+}
+// The frame does not see the scroll of the review. This tells it which part of it shows, so it knows the change that the reader is at.
+// byHand is false while the review scrolls to a change by itself, so that scroll does not move the reader to another change.
+let byHand = true, viewTick = 0;
+function sendView() {
+  viewTick = 0;
+  const view = $('#rview'), page = $('#rpage');
+  if (!view || !page || !rev || !rev.stops) return;
+  const z = zOf(page);
+  post({ type: 'view', top: (view.getBoundingClientRect().top - page.getBoundingClientRect().top) / z, height: view.clientHeight / z, free: byHand });
+}
+document.addEventListener('scroll', (e) => { if (e.target.id === 'rview' && !viewTick) viewTick = requestAnimationFrame(sendView); }, { passive: true, capture: true });
+for (const type of ['wheel', 'touchmove', 'pointerdown', 'keydown']) document.addEventListener(type, (e) => { if (e.target.closest && e.target.closest('#rview')) byHand = true; }, { passive: true, capture: true });
+// The frame of the review reports the change that the reader is at, its own height, and the keys that the reader pressed in it.
+addEventListener('message', (e) => {
+  const f = $('#rpage iframe[data-rev]'), d = e.data, view = $('#rview');
+  if (!f || e.source !== f.contentWindow || !d || d.ns !== 'ap-diff' || !rev || !view) return;
+  if (d.type === 'ready') sendView();
+  else if (d.type === 'at') { rev.at = +d.n || 0; drawCount(); if (typeof d.top === 'number') reveal(d.top, +d.height || 0, !!d.smooth); }
+  else if (d.type === 'size') fitFrame(+d.height || 0);
+  else if (d.type === 'shift') view.scrollTop += (+d.by || 0) * zOf($('#rpage'));
+  else if (d.type === 'key') {
+    if (reviewKey(d.key)) return;
+    const page = view.clientHeight * 0.85, by = { ' ': d.shift ? -page : page, PageDown: page, PageUp: -page, ArrowDown: 56, ArrowUp: -56 }[d.key];
+    byHand = true;
+    if (by) view.scrollBy({ top: by, behavior: reduce ? 'auto' : 'smooth' });
+    else if (d.key === 'Home' || d.key === 'End') view.scrollTo({ top: d.key === 'Home' ? 0 : view.scrollHeight });
+    else if (d.key === 'j' || d.key === 'k') move(d.key === 'j' ? 1 : -1);
+    else if (d.key === '/') { $('#q').focus(); $('#q').select(); }
+  }
+});
+
+/** The versions of the page in the review, newest first, with what made each one. A version that the feed does not hold has its number only. */
+function openVersions(btn, viaKey) {
+  const pop = $('#pop-ver'), p = rev && pageOf(rev.slug);
+  if (!pop || !p) return;
+  const rows = [];
+  for (let v = p.latest; v >= 1 && rows.length < 80; v--) {
+    const i = makerOf(p.slug, v);
+    const what = !i ? '' : i.kind === 'request' ? 'Changed by ' + h(actor(i.agent)) : v === 1 ? 'First version' : 'Published';
+    rows.push('<button type="button" class="v-item v-vitem"' + (i ? ' data-ev-go="' + h(i.id) + '"' : ' disabled') + (rev.made === v ? ' aria-current="true"' : '') + '><span class="v-num">v' + v + '</span>'
+      + '<span class="v-vwhat">' + what + (v === p.latest ? '<span class="v-tag">Latest</span>' : '') + '</span><span class="v-meta">' + (i ? stamp(i.at) : '') + '</span></button>');
+  }
+  // Restore undoes the change in the review: it stores the version before that change again, as a new version.
+  const back = rev.made > 1 ? rev.made - 1 : 0;
+  pop.innerHTML = '<div class="v-label">Versions</div><div class="r-verlist">' + rows.join('') + '</div>'
+    + (back ? '<div class="v-hr"></div><button type="button" class="v-item c-amber" data-restore="' + back + '" data-next="' + (p.latest + 1) + '">' + svg('undo') + '<span>Restore version ' + back + '</span></button>' : '');
+  openPop(btn, pop, viaKey);
+}
+/**
+ * Stores version n again as the newest version. The host has no call for a restore, so this reads the version
+ * as the host serves it and publishes that. The host gives each claim with no id an id by its position,
+ * and those ids go, so the host can give them again.
+ */
+async function restoreVersion(slug, n) {
+  toast('Restoring version ' + n + '…', 0);
+  try {
+    const got = await fetch('/raw/' + slug + '/' + n + '?k=' + D.kit);
+    if (!got.ok) throw new Error('version ' + n + ' did not load');
+    let k = 0;
+    const html = (await got.text()).replace(/<section\b[^>]*>/gi, (tag) => (/\sclass\s*=\s*["'][^"']*\bk-claim\b/i.test(tag) ? tag.replace(' id="claim-' + ++k + '"', '') : tag));
+    const res = await fetch('/api/pages/' + slug, { method: 'PUT', headers: { 'content-type': 'text/html; charset=utf-8' }, body: html });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || res.statusText);
+    toast('Version ' + n + ' is the page again, as version ' + d.version, 3200);
+    await poll();
+    const made = makerOf(slug, d.version);
+    if (made) { place = { ...place, ev: made.id }; history.replaceState(history.state, '', urlOf(place)); markOpened(slug, d.version); }
+    render();
+  } catch (err) { toast('Could not restore version ' + n + ': ' + err.message, 4200); }
+}
+if ($('#pop-ver')) $('#pop-ver').addEventListener('click', (e) => {
+  const to = e.target.closest('[data-ev-go]');
+  if (to) { closePop(); pick(to.dataset.evGo, true); return; }
+  const b = e.target.closest('[data-restore]');
+  if (!b || !rev) return;
+  // The first click says what the restore does. The second click does it.
+  if (!b.classList.contains('is-armed')) { b.classList.add('is-armed'); b.querySelector('span').textContent = 'Click again to store version ' + b.dataset.restore + ' as version ' + b.dataset.next; return; }
+  closePop();
+  restoreVersion(rev.slug, +b.dataset.restore);
+});
+
+/** Shows an item in the review. When the reader chose it, the version it made counts as opened. */
 function pick(id, byHand) {
-  const x = roomList.find((i) => i.id === id);
+  const x = feed.find((i) => i.id === id);
   if (!x) return;
   place = { ...place, ev: id };
-  history.replaceState(null, '', urlOf(place));
+  history.replaceState(history.state, '', urlOf(place));
   if (byHand && x.version) markOpened(x.slug, x.version);
   render();
 }
+/** A narrow window shows one thing at a time: a row opens its item in the place of the list, and Back shows the list again. */
+function openItem(id) {
+  const x = feed.find((i) => i.id === id);
+  if (!x) return;
+  listTop = $('#rlist') ? $('#rlist').scrollTop : 0;
+  place = { ...place, ev: id };
+  history.pushState({ fromList: true }, '', urlOf(place));
+  if (x.version) markOpened(x.slug, x.version);
+  render();
+}
+function closeItem() {
+  if (history.state && history.state.fromList) { history.back(); return; }
+  place = { ...place, ev: '' };
+  history.replaceState(null, '', urlOf(place));
+  render();
+}
 let pickTimer;
-/** The keyboard moved the selection. In the room the page follows, after a short pause. */
+/** The keyboard moved the selection. The review follows, after a short pause. */
 function studySelected(el) {
-  if (!el || !el.dataset.ev || !roomWide()) return;
+  if (!el || !el.dataset.ev || !inRoom() || !(roomWide() || place.ev)) return;
   clearTimeout(pickTimer);
   pickTimer = setTimeout(() => pick(el.dataset.ev, true), 140);
 }
 
 $('#main').addEventListener('click', (e) => {
   const row = e.target.closest('.e-row');
-  if (row && roomWide() && plain(e)) { e.preventDefault(); sel = entries().indexOf(row); pick(row.dataset.ev, true); return; }
+  if (row && inRoom() && plain(e)) { e.preventDefault(); sel = entries().indexOf(row); if (roomWide()) pick(row.dataset.ev, true); else openItem(row.dataset.ev); return; }
   const lens = e.target.closest('[data-lens]');
   if (lens) { place = { ...place, lens: lens.dataset.lens }; history.replaceState(null, '', urlOf(place)); sel = -1; render(); return; }
   const only = e.target.closest('[data-only]');
@@ -381,16 +635,40 @@ $('#main').addEventListener('click', (e) => {
   if (e.target.closest('[data-scope-off]')) { go({ list: 'activity', only: place.only }); return; }
   const room = e.target.closest('[data-room]');
   if (room) { go({ list: 'activity', af: room.dataset.room }); return; }
-  const s = e.target.closest('button[data-side]');
-  if (s) setSide(s.dataset.side);
+  if (e.target.closest('[data-back]')) { closeItem(); return; }
+  const to = e.target.closest('[data-go]');
+  if (to && rev) { if (!rev.on) showChanges(true); goChange(+to.dataset.go); return; }
+  const st = e.target.closest('[data-step]');
+  if (st) { stepChange(+st.dataset.step); return; }
+  if (e.target.closest('[data-show]')) { showChanges(!(rev && rev.on)); return; }
+  if (e.target.closest('[data-all]') && rev) { rev.all = true; drawChanges(); drawCount(); return; }
+  const ev = e.target.closest('[data-ev-go]');
+  if (ev) { pick(ev.dataset.evGo, true); return; }
+  const vers = e.target.closest('[data-vers]');
+  if (vers) { e.stopPropagation(); openVersions(vers, e.detail === 0); }
 });
+/** The keys of the review. The frame sends its keys here too, so they work wherever the focus is. */
+function reviewKey(key) {
+  if (key === 'n') stepChange(1);
+  else if (key === 'N') stepChange(-1);
+  else if (key === 's') showChanges(!(rev && rev.on));
+  else if (key === 'Escape' && !roomWide() && place.ev) closeItem();
+  else return false;
+  return true;
+}
+// This listener runs before the keys of the library, so that Enter can open a row in the place of the list.
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'b' || !plain(e) || open || !roomWide() || e.target.closest('input, textarea, select, [contenteditable]')) return;
-  setSide(side === 'after' ? 'before' : 'after');
-});
-// A new theme draws the page in the room again.
+  if (e.metaKey || e.ctrlKey || e.altKey || open || !inRoom() || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if ((e.key === 'Enter' || e.key === 'o') && !roomWide() && !place.ev && !e.target.closest('button')) {
+    const el = e.target.closest('.e-row') || entries()[sel];
+    if (el && el.dataset.ev) { e.preventDefault(); e.stopPropagation(); openItem(el.dataset.ev); }
+    return;
+  }
+  if (reviewKey(e.key)) e.preventDefault();
+}, true);
+// A new theme and a new width draw the review again.
 $$('[data-theme-set]').forEach((b) => b.addEventListener('click', () => { if ($('#rview')) render(); }));
-addEventListener('resize', () => { if (place.list === 'activity' && !hits) render(); });
+addEventListener('resize', () => { if (inRoom()) render(); });
 
 // ─── Keep the list true. While a run is in work, ask the host every 4 seconds. ───
 let pollTimer, lastPoll = 0;

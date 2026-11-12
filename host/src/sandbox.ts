@@ -3,7 +3,7 @@
 // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
 import { noteActivity, pruneActivity } from './run-activity';
 import { ENGINES, modelFor } from './assistants';
-import { newToken, newTokenId, readJson, type Mention } from './lib';
+import { newToken, newTokenId, readJson, runnerFetch, type Mention } from './lib';
 import type { Comment, Env, Refusal, Thread } from './types';
 
 /** The connector token of a run ends after this time. The runner stops a run after 180 seconds, and runs of one person wait in a queue. */
@@ -93,7 +93,7 @@ export async function runSandboxAgent(env: Env, comment: Comment, origin: string
   await noteActivity(env, id, 'started');
   try {
     const job: Job = { mcp_url: `${origin}/s/_mcp/${token}`, comment_id: comment.id, slug: comment.slug, agent_label: agent, engine: ENGINES[agent], user: comment.author, callback_url: `${origin}/s/_run/${id}`, model: await modelFor(env, comment.author, agent) };
-    const res = await fetch(env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
+    const res = await runnerFetch(env, env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
     if (res.status !== 202) throw new Error(`it answered ${res.status}`);
   } catch (e) {
     await finishRun(env, id, 'failed', `runner: ${e instanceof Error ? e.message : String(e)}`.slice(0, MAX_DETAIL));
@@ -183,6 +183,6 @@ export async function warmRunner(env: Env, user: string, now = Date.now()): Prom
   const url = new URL('/warm', env.SANDBOX_RUNNER_URL).href;
   const secret = env.SANDBOX_RUNNER_SECRET;
   return async () => {
-    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-runner-secret': secret } : {}) }, body: JSON.stringify({ user }), signal: AbortSignal.timeout(10_000) });
+    await runnerFetch(env, url, { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-runner-secret': secret } : {}) }, body: JSON.stringify({ user }), signal: AbortSignal.timeout(10_000) });
   };
 }

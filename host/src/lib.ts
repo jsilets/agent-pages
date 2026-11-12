@@ -6,6 +6,12 @@ export type Theme = 'light' | 'dark';
 const PART = '[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?';
 const SLUG_RE = new RegExp(`^${PART}/${PART}$`);
 
+/**
+ * Sends one request to the sandbox runner: through the service binding SANDBOX_RUNNER when the host has one (the runner
+ * Worker of cloud/ in production), else with fetch (sandbox/local-runner.mjs in development). The URL is the same in both cases.
+ */
+export const runnerFetch = (env: { SANDBOX_RUNNER?: Fetcher }, url: string, init: RequestInit): Promise<Response> => (env.SANDBOX_RUNNER ? env.SANDBOX_RUNNER.fetch(url, init) : fetch(url, init));
+
 export function isSlug(s: string): boolean {
   return SLUG_RE.test(s);
 }

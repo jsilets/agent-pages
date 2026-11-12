@@ -80,22 +80,19 @@ The first command must show one version. The second command must show no instanc
 
 If the deploy fails on the container or the Durable Object, see "Wrangler fallback" at the end.
 
-## 6. Apply the host patch
+## 6. Test the host
+
+The host already has the service binding `SANDBOX_RUNNER` to the Worker `agent-pages-runner` in production mode. Deploy the runner before the host.
 
 ```sh
-cd ..
-git apply --check cloud/host.patch
-git apply cloud/host.patch
-cd host
+cd ../host
 bun run typecheck
 bun run test
 ```
 
-`cloud/HOST-PATCH.md` explains each change.
-
 ## 7. Deploy the host
 
-Apply the D1 migrations first. The branch adds `0013_comment_edits_assistants.sql`.
+Apply the D1 migrations first. The migrations `0004` to `0009` and `0013` add the comments and the runs.
 
 ```sh
 bunx cf d1 migrations apply <database id> --dir migrations

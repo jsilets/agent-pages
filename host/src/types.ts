@@ -14,6 +14,8 @@ export interface Env {
   SANDBOX_AGENTS?: string;
   /** Development only: the shared secret of the sandbox runner. The host sends it as the header x-runner-secret with each job. */
   SANDBOX_RUNNER_SECRET?: string;
+  /** Production: the service binding to the runner Worker of cloud/. With it, each request to the runner goes through the binding, and SANDBOX_RUNNER_URL gives only the paths. */
+  SANDBOX_RUNNER?: Fetcher;
 }
 
 /** The two assistants of the viewer. The runner calls the program for ChatGPT 'codex'. */

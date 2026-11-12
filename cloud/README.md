@@ -88,5 +88,4 @@ If the deployed container has no `NET_ADMIN`, `REQUIRE_EGRESS=1` refuses it. Do 
 | `dev/` | Local harness, controls check, archive round trip, model sync |
 | `cost.mjs`, `cost-inputs.json`, `COST.md` | The cost model |
 | `measure-after-deploy.mjs` | The measurements after a deploy |
-| `host.patch`, `HOST-PATCH.md` | The change to the host |
 | `DEPLOY.md` | The runbook |

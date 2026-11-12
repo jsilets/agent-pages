@@ -59,8 +59,10 @@ export default defineConfig(({ mode }: ConfigContext) => {
         ENVIRONMENT: bindings.text(production ? 'production' : 'development'),
         ACCESS_TEAM: bindings.text(profile.accessTeam),
         ACCESS_AUD: bindings.text(profile.accessAud),
-        // Development only: sandbox/local-runner.mjs. Production has no runner until a person decides where it runs.
+        // Development: sandbox/local-runner.mjs at SANDBOX_RUNNER_URL. Production: the runner Worker of cloud/, through the
+        // service binding SANDBOX_RUNNER. The runner has no public URL, so the host of the URL is a placeholder.
         ...(!production && process.env.SANDBOX_RUNNER_URL ? { SANDBOX_RUNNER_URL: bindings.text(process.env.SANDBOX_RUNNER_URL) } : {}),
+        ...(production ? { SANDBOX_RUNNER: bindings.worker({ worker: 'agent-pages-runner' }), SANDBOX_RUNNER_URL: bindings.text('https://runner.internal/run'), SANDBOX_RUNNER_SECRET: bindings.secret() } : {}),
         // Development only: the shared secret of the runner. The host sends it as the header x-runner-secret with each job.
         ...(!production && process.env.SANDBOX_RUNNER_SECRET ? { SANDBOX_RUNNER_SECRET: bindings.text(process.env.SANDBOX_RUNNER_SECRET) } : {}),
         // Development only: the mentions that the runner handles. Default: claude,chatgpt. Example: SANDBOX_AGENTS=claude.

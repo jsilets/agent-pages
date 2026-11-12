@@ -2,7 +2,7 @@
 // The sandbox runner holds the sign-ins. The host only passes each request on, with the person's identity and the
 // shared secret, and it checks each answer of the runner before the viewer gets it. The host never stores, logs or
 // returns the code that a person pastes from Claude: it goes straight to the runner.
-import { readJson } from './lib';
+import { readJson, runnerFetch } from './lib';
 import type { Assistant, Env } from './types';
 
 export const ASSISTANTS: readonly Assistant[] = ['claude', 'chatgpt'];
@@ -62,7 +62,7 @@ export async function callRunner(env: Env, path: string, body: Record<string, un
   if (!env.SANDBOX_RUNNER_URL) throw new RunnerError('no sandbox runner');
   let res: Response;
   try {
-    res = await fetch(new URL(path, env.SANDBOX_RUNNER_URL).href, {
+    res = await runnerFetch(env, new URL(path, env.SANDBOX_RUNNER_URL).href, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) },
       body: JSON.stringify(body),

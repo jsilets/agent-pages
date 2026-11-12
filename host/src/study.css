@@ -91,8 +91,8 @@
    Folders are small objects and pages are larger cards, so more folders fit in a row. The folder object does not change.
    The head of a page list holds the filters, the sort and the layout. A control has no fill until the reader uses it.
    A filter that is set shows its value in a filled chip. */
-.l[data-layout="rooms"] .l-folders { grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: 22px 20px; }
-.l[data-layout="rooms"] .l-folders > .fo { max-width: 176px; }
+.l[data-layout="rooms"] .l-folders { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 24px 22px; }
+.l[data-layout="rooms"] .l-folders > .fo { max-width: 148px; }
 .d-head { flex-wrap: wrap; justify-content: flex-start; gap: 6px 12px; min-height: 28px; margin-bottom: 12px; }
 .d-head h2 { flex: none; white-space: nowrap; }
 .d-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; }
@@ -301,7 +301,7 @@
   .r.is-open .r-back { display: inline-flex; }
 }
 @media (max-width: 760px) {
-  .l[data-layout="rooms"] .l-folders { grid-template-columns: none; grid-auto-columns: 34%; gap: 14px; }
+  .l[data-layout="rooms"] .l-folders { grid-template-columns: none; grid-auto-columns: 30%; gap: 14px; }
   .d-head { gap: 8px 10px; }
   .d-tools { order: 1; }
   .d-chips { order: 2; flex: 0 0 calc(100% + 32px); flex-wrap: nowrap; gap: 6px; margin: 0 -16px; padding: 0 16px; box-sizing: border-box; overflow-x: auto; scrollbar-width: none; }

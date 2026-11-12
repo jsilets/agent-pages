@@ -162,17 +162,18 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
    page shows above it, zoomed until its heading reads. The pages behind it show only as edges.
    Hover, focus, a press or a page dragged over it lifts the pages and fans them inside the folder's own
    width, and the front tips forward. The same object is used in Home, inside a folder and as a drop target. */
-.l-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 24px 20px; }
-.l-folders > .fo { max-width: 232px; }
+/* A folder is about 5:4, like a real file folder and the folder icons of Drive, Finder and Explorer. */
+.l-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 24px 22px; }
+.l-folders > .fo { max-width: 148px; }
 .fo { --fo-front: color-mix(in oklab, var(--fill) 46%, var(--line)); --fo-back: color-mix(in oklab, var(--fill) 30%, var(--line)); --fo-edge: color-mix(in oklab, var(--line) 85%, var(--ink));
   position: relative; display: block; min-width: 0; color: inherit; text-decoration: none; outline: none; -webkit-tap-highlight-color: transparent; }
 .fo:hover { text-decoration: none; }
-.fo-obj { position: relative; display: block; aspect-ratio: 16 / 10; perspective: 600px; }
+.fo-obj { position: relative; display: block; aspect-ratio: 5 / 4; perspective: 600px; }
 /* A soft contact shadow, so the folder sits on the page. */
 .fo-obj::after { content: ""; position: absolute; left: 6%; right: 6%; bottom: -4%; height: 10%; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 0, 0, 0.16), transparent); z-index: -1; }
 .fo-back { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--fo-back); stroke: none; overflow: visible; }
 /* The pages. --i is 0 (back) to 2 (front, the newest). Closed, the back pages stand a little higher and narrower, so their edges show. */
-.fo-sheet { position: absolute; left: 8%; right: 8%; top: 12%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 0.75px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12);
+.fo-sheet { position: absolute; left: 8%; right: 8%; top: 13%; aspect-ratio: 4 / 3; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 0.75px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12);
   transform: translateY(calc((2 - var(--i)) * -5%)) scaleX(calc(1 - (2 - var(--i)) * 0.045));
   transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1); transition-delay: calc((2 - var(--i)) * 20ms); }
 /* The front page is zoomed to its top left, so its heading is large enough to read above the front panel. */
@@ -182,12 +183,13 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .fo-sheet:not(.is-front) img { opacity: 0; }
 .fo:hover .fo-sheet img, .fo:focus-visible .fo-sheet img, .fo.is-press .fo-sheet img, .fo.is-drop .fo-sheet img { opacity: 1; }
 .fo-sheet.is-blank { background: linear-gradient(var(--bg3), var(--bg3)) 10% 22% / 54% 9% no-repeat, linear-gradient(var(--bg2), var(--bg2)) 10% 44% / 78% 5% no-repeat, #fff; }
-.fo-front { position: absolute; left: 0; right: 0; top: 34%; bottom: 0; border-radius: 5px 5px 8px 8px; background: linear-gradient(to bottom, color-mix(in oklab, var(--fo-front) 92%, #fff), var(--fo-front) 40%);
+.fo-front { position: absolute; left: 0; right: 0; top: 40%; bottom: 0; border-radius: 5px 5px 8px 8px; background: linear-gradient(to bottom, color-mix(in oklab, var(--fo-front) 92%, #fff), var(--fo-front) 40%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 -1px 2px rgba(0, 0, 0, 0.08);
   transform-origin: 50% 100%; transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1); }
 .fo-label { display: flex; align-items: flex-start; gap: 6px; margin-top: 10px; min-width: 0; }
 .fo-text { flex: 1; min-width: 0; }
-.fo-name { display: block; overflow: hidden; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; color: var(--p); white-space: nowrap; text-overflow: ellipsis; }
+/* A narrow folder gives its name two lines, so a name is not cut. */
+.fo-name { display: -webkit-box; overflow: hidden; font: 600 13.5px/19px var(--sans); letter-spacing: -0.005em; color: var(--p); -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
 .fo-meta { display: block; font: 12px/18px var(--sans); color: var(--s); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .fo-menu { flex: none; width: 26px; height: 26px; margin: -2px -6px 0 0; opacity: 0; }
 .fo:hover .fo-menu, .fo-menu:focus-visible, .fo-menu[aria-expanded="true"] { opacity: 1; }

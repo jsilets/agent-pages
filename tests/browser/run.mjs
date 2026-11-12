@@ -128,9 +128,9 @@ async function cardsClean(page) {
   return list;
 }
 /** The text of the page that a card is about, and the card: their tops in the window. */
-async function cardAndMark(page, id) {
+async function cardAndMark(page, id, slug = SLUGS.doc) {
   const card = await rect(page, `.cm-card[data-id="${id}"]`);
-  const t = await threads(SLUGS.doc);
+  const t = await threads(slug);
   const th = t.find((x) => x.id === id);
   const markTop = await pageFrame(page).evaluate((q) => {
     // The quote can cross inline elements: look for it in the text of all the nodes, then take the node of its first character.
@@ -195,6 +195,64 @@ async function travel(page, id) {
   const f = list[list.length - 1], far = list.map((s) => Math.hypot(s.x - f.x, s.y - f.y));
   const busy = list.filter((s, i) => far[i] > 0.5 || s.o < 0.99);
   return { px: Math.max(...far), ms: busy.length ? Math.round(busy[busy.length - 1].t - list[0].t) : 0, frames: list.length };
+}
+/**
+ * Records, on each frame before the browser paints it, the left edge and the width of the frame of the page, each card
+ * that shows (its left edge and its opacity) and the horizontal scroll of the view. Runs until window.__glideStop.
+ */
+function glideSampler() {
+  const log = (window.__glide = []);
+  window.__glideStop = false;
+  const tick = () => {
+    const f = document.querySelector('.v-stage > iframe:not(.is-in)').getBoundingClientRect(), sc = document.querySelector('#scroll'), col = document.querySelector('#cm-col');
+    const cards = [...document.querySelectorAll('.cm-rail > .cm-card, .cm-pins > .cm-card')].filter((c) => c.getClientRects().length)
+      .map((c) => ({ l: c.getBoundingClientRect().left, r: c.getBoundingClientRect().right, o: +getComputedStyle(c).opacity * +getComputedStyle(col).opacity }));
+    log.push({ t: performance.now(), e: performance.timeOrigin + performance.now(), vw: document.querySelector('#body').clientWidth, x: f.left, w: f.width, cards, sl: sc.scrollLeft, sw: sc.scrollWidth - sc.clientWidth });
+    if (!window.__glideStop) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+/** Runs an action with the sampler on, waits for the page to settle, and returns the samples. */
+async function sampled(page, action, ms = 600) {
+  await page.evaluate(glideSampler);
+  await action();
+  await sleep(ms);
+  return page.evaluate(() => { window.__glideStop = true; return window.__glide; });
+}
+/**
+ * The movement of the column in the samples. inner is the left and right edge of the column in the frame (docEdges minus the
+ * left of the frame). mid: follow the middle of the column, for a frame whose width changes. Returns the place in each
+ * frame, the distance, the time from the last frame before it moves to the first frame at its end, the largest step of
+ * one frame, and whether it moves in one direction only.
+ */
+function motion(log, inner, mid = false) {
+  const at = log.map((s) => (mid ? s.x + s.w / 2 : s.x + inner.left));
+  const steps = at.slice(1).map((v, i) => v - at[i]);
+  const moving = steps.map((d, i) => (Math.abs(d) > 0.01 ? i : -1)).filter((i) => i >= 0);
+  const total = at[at.length - 1] - at[0];
+  const first = moving.length ? moving[0] : 0, last = moving.length ? moving[moving.length - 1] + 1 : 0;
+  return {
+    at: at.map((v) => Math.round(v * 10) / 10), total, frames: moving.length,
+    ms: moving.length ? Math.round(log[last].t - log[first].t) : 0,
+    max: Math.max(0, ...steps.map(Math.abs)),
+    oneWay: steps.every((d) => Math.abs(d) <= 0.01 || Math.sign(d) === Math.sign(total)),
+    turns: steps.filter((d) => Math.abs(d) > 0.01).reduce((n, d, i, all) => n + (i && Math.sign(d) !== Math.sign(all[i - 1]) ? 1 : 0), 0),
+  };
+}
+/** Checks one glide: one direction, 150 to 260 ms, no step of more than 40% of the distance, and the end at the place. */
+function glideOk(m, end, msg) {
+  ok(m.oneWay, `${msg}: the column moves in one direction (${m.at.join(' ')})`);
+  ok(m.ms >= 150 && m.ms <= 260, `${msg}: the glide takes 150 to 260 ms (${m.ms} ms: ${m.at.join(' ')})`);
+  ok(m.max <= 0.4 * Math.abs(m.total), `${msg}: no frame moves more than 40% of the distance (${m.max.toFixed(1)} of ${Math.abs(m.total).toFixed(1)} px: ${m.at.join(' ')})`);
+  near(m.at[m.at.length - 1], end, 0.5, `${msg}: the glide ends at the place`);
+}
+/** No card over the text of the column, no card that shows cut by the right edge of the view, and no horizontal scroll, in any sampled frame. */
+function clearOfText(log, inner, msg) {
+  log.forEach((s, i) => {
+    ok(s.sl === 0 && s.sw <= 0, `${msg}: the view never scrolls sideways (frame ${i}: ${s.sl}, ${s.sw})`);
+    s.cards.filter((c) => c.o > 0.01).forEach((c) => ok(c.l >= s.x + inner.right + 10, `${msg}: a card is over the text in frame ${i} (${c.l.toFixed(1)} < ${(s.x + inner.right).toFixed(1)} + 10)`));
+    s.cards.filter((c) => c.o > 0.05).forEach((c) => ok(c.r <= s.vw + 8, `${msg}: a card that shows is cut by the edge of the view in frame ${i} (right ${c.r.toFixed(1)}, opacity ${c.o.toFixed(2)}, view ${s.vw})`));
+  });
 }
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, `${ENGINE}${DARK ? '-dark' : ''}-${name}.png`) }); };
 
@@ -265,6 +323,136 @@ const TESTS = {
         ok(one.left < none.left, `the column moved left at ${w} px`);
       }
     }
+  },
+
+  async 'the page glides when the margin opens and closes, like Google Docs'(page) {
+    const slug = await fresh('doc');
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await openViewer(page, slug);
+    const none = await docEdges(page), f0 = (await rect(page, '.v-stage > iframe')).left;
+    const inner = { left: none.left - f0, right: none.right - f0 };
+    const composer = () => until(() => page.evaluate(() => !!document.querySelector('.cm-card.is-compose')?.isConnected), 'the comment box opens');
+    // The first comment box: the column glides left, from the middle to the place that placeMargin gives.
+    const open = await sampled(page, async () => { await page.click('#cnew'); await composer(); });
+    const one = await docEdges(page);
+    near(one.right, one.view - 324, 1, 'the column ends where placeMargin puts it');
+    const mo = motion(open, inner);
+    if (process.env.GLIDE_DEBUG) console.log(open.map((s) => Math.round(s.t) + ':' + s.x.toFixed(1)).join(' '));
+    near(mo.at[0], none.left, 0.5, 'the glide starts at the middle');
+    glideOk(mo, one.left, 'open');
+    clearOfText(open, inner, 'open');
+    ok(open.some((s) => s.cards.length), 'the box shows during the glide');
+    console.log(`      1280 open: ${mo.ms} ms, ${mo.frames} frames, max step ${mo.max.toFixed(1)} of ${Math.abs(mo.total)} px: ${mo.at.filter((v, i, a) => i === 0 || v !== a[i - 1]).join(' → ')}`);
+    // Esc: the same glide back.
+    const close = await sampled(page, async () => { await page.keyboard.press('Escape'); await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'Esc closes the box'); });
+    const mc = motion(close, inner);
+    glideOk(mc, none.left, 'cancel');
+    near((await docEdges(page)).left, none.left, 0.5, 'the column is in the middle again');
+    console.log(`      1280 cancel: ${mc.ms} ms, ${mc.frames} frames, max step ${mc.max.toFixed(1)} px: ${mc.at.filter((v, i, a) => i === 0 || v !== a[i - 1]).join(' → ')}`);
+    // Open, Esc, open, quickly: each glide starts where the column is, with no jump and no stack of glides.
+    const quick = await sampled(page, async () => {
+      await page.click('#cnew'); await composer(); await sleep(70);
+      await page.keyboard.press('Escape'); await sleep(70);
+      await page.click('#cnew'); await composer();
+    }, 700);
+    const mq = motion(quick, inner);
+    ok(mq.max <= 0.4 * Math.abs(one.left - none.left), `quick: no jump (${mq.max.toFixed(1)} px: ${mq.at.join(' ')})`);
+    ok(mq.turns <= 2, `quick: the column turns at most twice (${mq.turns}: ${mq.at.join(' ')})`);
+    near(mq.at[mq.at.length - 1], one.left, 0.5, 'quick: the column ends at the place for the margin');
+    clearOfText(quick, inner, 'quick');
+    console.log(`      1280 quick: ${mq.turns} turns, max step ${mq.max.toFixed(1)} px: ${mq.at.filter((v, i, a) => i === 0 || v !== a[i - 1]).join(' → ')}`);
+    // Post the comment: the margin stays, nothing moves. After the glide, the text is where the mouse and the marks expect it.
+    await page.keyboard.type('Glide note.');
+    const post = await sampled(page, async () => { await page.keyboard.press(`${MOD}+Enter`); await until(async () => (await threads(slug)).length === 1, 'the comment is stored'); });
+    ok(motion(post, inner).frames === 0, 'posting the comment moves nothing');
+    await page.keyboard.press('Escape');
+    const p = await textPoint(page, '#p-second', 'paragraph');
+    await page.mouse.dblclick(p.x + 4, p.y);
+    await until(async () => (await pageFrame(page).evaluate(() => getSelection().toString())).trim() === 'paragraph', 'a double click after the glide selects the word under the mouse');
+    await until(() => page.isVisible('#cm-add'), 'the Comment button shows at the selection');
+    const btn = await rect(page, '#cm-add'), line = await pageTop(page, '#p-second');
+    ok(btn.bottom <= line + 2 && btn.bottom > line - 60, 'the Comment button sits just above the selection');
+    ok(btn.left >= one.left - 40 && btn.right <= one.right + 40, `the Comment button is over the column (${btn.left}–${btn.right}, column ${one.left}–${one.right})`);
+    await clickAdd(page);
+    await page.keyboard.type('On a word.');
+    await page.keyboard.press(`${MOD}+Enter`);
+    const t = await until(async () => (await threads(slug)).find((x) => x.quote === 'paragraph'), 'the comment on the word is stored');
+    await until(() => page.$(`.cm-card[data-id="${t.id}"]`), 'its card shows');
+    // The comment on the whole page sits at the top of the margin. Resolve it, so the card on the word can be level with its text.
+    const whole = (await threads(slug)).find((x) => !x.quote);
+    await api('/api/comments/' + whole.id + '/resolve', { method: 'PUT' });
+    await until(() => page.evaluate((id) => !document.querySelector(`.cm-card[data-id="${id}"]`), whole.id), 'the card of the whole page goes', 8000);
+    await sleep(400);
+    near((await docEdges(page)).left, one.left, 0.5, 'the column stays at its place while a thread is open');
+    const c = await rect(page, `.cm-card[data-id="${t.id}"]`), mark = await pageTop(page, '#p-second');
+    near(c.top, mark - 12, 14, 'the card is level with its text');
+    ok(c.left >= one.right + 10, 'the card is beside the column');
+    // Resolve the last thread with its button: the margin goes, and the column glides back to the middle.
+    await page.click(`.cm-card[data-id="${t.id}"]`);
+    const res = await sampled(page, async () => { await page.click(`.cm-card[data-id="${t.id}"] .cm-done`); await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'the margin goes with the last thread'); }, 500);
+    glideOk(motion(res, inner), none.left, 'resolve');
+  },
+
+  async 'the glide: a narrow view, a page that loads with threads, and reduced motion'(page) {
+    const slug = await fresh('doc');
+    // 1100 px: the column moves 154 px. The cards fade in only when they are inside the view.
+    await page.setViewportSize({ width: 1100, height: 860 });
+    await openViewer(page, slug);
+    const n11 = await docEdges(page), f11 = (await rect(page, '.v-stage > iframe')).left, i11 = { left: n11.left - f11, right: n11.right - f11 };
+    const o11 = await sampled(page, async () => { await page.click('#cnew'); await until(() => page.$('.cm-card.is-compose'), 'the comment box opens'); });
+    const e11 = await docEdges(page);
+    near(e11.right, e11.view - 324, 1, '1100: the column ends where placeMargin puts it');
+    glideOk(motion(o11, i11), e11.left, '1100 open');
+    clearOfText(o11, i11, '1100 open');
+    await page.keyboard.press('Escape');
+    await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'Esc closes the box');
+    await sleep(400);
+    // 1040 px: the column must get narrower. It takes its new width at the start, then glides; no card is ever over it.
+    await page.setViewportSize({ width: 1040, height: 860 });
+    await openViewer(page, slug);
+    const none = await docEdges(page);
+    const open = await sampled(page, async () => { await page.click('#cnew'); await until(() => page.$('.cm-card.is-compose'), 'the comment box opens'); });
+    const one = await docEdges(page), f1 = await rect(page, '.v-stage > iframe');
+    near(one.right, one.view - 324, 1, 'the narrower column ends where placeMargin puts it');
+    ok(one.right - one.left < none.right - none.left, 'the column is narrower');
+    const m = motion(open, null, true);
+    glideOk(m, f1.left + f1.width / 2, 'narrow open');
+    // The width changes one time, before the column moves: the frames before it have the old width and the old middle.
+    const wi = open.findIndex((s) => s.w === f1.width);
+    ok(wi > 0 && open.slice(wi).every((s) => s.w === f1.width) && open.slice(0, wi).every((s) => s.w === open[0].w && s.x === open[0].x), `the frame takes its new width one time, at the start (${open.map((s) => s.w).join(' ')})`);
+    near(m.at[wi], m.at[0], 0.5, 'the column keeps its middle when it gets narrower');
+    clearOfText(open, { left: one.left - f1.left, right: one.right - f1.left }, 'narrow open');
+    const close = await sampled(page, async () => { await page.keyboard.press('Escape'); await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'Esc closes the box'); });
+    const mc = motion(close, null, true);
+    ok(mc.oneWay && mc.ms >= 150 && mc.ms <= 260, `narrow close glides (${mc.ms} ms: ${mc.at.join(' ')})`);
+    const wj = close.findIndex((s) => s.w !== f1.width);
+    ok(wj > 0 && close.slice(wj).every((s) => s.w === close[close.length - 1].w) && close.slice(0, wj).every((s) => s.w === f1.width), `the frame takes its old width one time, at the end (${close.map((s) => s.w).join(' ')})`);
+    near(mc.at[wj], mc.at[wj - 1], 0.5, 'the column keeps its middle when it gets wider');
+    close.forEach((s, i) => ok(s.sl === 0 && s.sw <= 0, `narrow close: no sideways scroll in frame ${i}`));
+    near((await docEdges(page)).left, none.left, 0.5, 'the column is in the middle again');
+
+    // A page that loads with a thread: the column is at its place when the cards show, with no glide.
+    await comment(slug, { body: 'Load note.', quote: 'The second paragraph follows it.', prefix: '', suffix: '' });
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.addInitScript(`if (location.pathname.startsWith('/p/')) addEventListener('DOMContentLoaded', () => requestAnimationFrame(${glideSampler.toString()}))`);
+    await openViewer(page, slug, { cards: 1 });
+    await sleep(300);
+    const load = await page.evaluate(() => { window.__glideStop = true; return window.__glide; });
+    const shown = load.findIndex((s) => s.cards.length);
+    ok(shown >= 0, 'the card shows');
+    const xs = new Set(load.map((s) => s.x));
+    ok(xs.size <= 2, `the column takes no place between the middle and its place (${[...xs].join(', ')})`);
+    ok(load.slice(shown).every((s) => s.x === load[load.length - 1].x), 'from the first frame with a card, the column does not move');
+    ok(load.slice(shown).every((s) => s.cards.every((c) => c.o === 1)), 'the cards of a page that loads show with no fade');
+
+    // Reduced motion: the column goes to its place in one frame.
+    for (const t of await threads(slug)) await api('/api/comments/' + t.id, { method: 'DELETE' });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await openViewer(page, slug);
+    const still = await sampled(page, async () => { await page.click('#cnew'); await until(() => page.$('.cm-card.is-compose'), 'the comment box opens'); });
+    const ms = motion(still, { left: 0, right: 0 });
+    ok(ms.frames === 1, `with reduced motion, the column moves in one frame (${ms.at.join(' ')})`);
+    await page.emulateMedia({ reducedMotion: null });
   },
 
   async 'drag across inline elements, Comment button, post, card aligned'(page) {
@@ -584,6 +772,48 @@ const TESTS = {
     ok(await f.evaluate(() => document.documentElement.dataset.kView === 'slide'), 'the deck stays in the slide view');
     const rail = await f.evaluate(() => document.documentElement.dataset.kRail !== undefined);
     ok(rail, 'the thumbnails show at this width');
+  },
+
+  async 'a deck: the slide glides out of the room of the cards, and the cards move with it'(page) {
+    const slug = await fresh('deck');
+    await openViewer(page, slug);
+    await sleep(400);
+    const f = pageFrame(page);
+    // The place of the slide on each frame in the deck, on the clock that the two documents share.
+    const slideLog = () => f.evaluate(() => {
+      const log = (window.__slide = []);
+      window.__slideStop = false;
+      const tick = () => { const r = document.querySelector('.k-frame.k-cur').getBoundingClientRect(); log.push({ e: performance.timeOrigin + performance.now(), l: r.left, r: r.right, w: r.width }); if (!window.__slideStop) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
+    const slideEnd = () => f.evaluate(() => { window.__slideStop = true; return window.__slide; });
+    const before = await f.evaluate(() => document.querySelector('.k-frame.k-cur').getBoundingClientRect().right);
+    for (const [name, act, done] of [
+      ['open', () => page.click('#cnew'), () => page.evaluate(() => !!document.querySelector('.cm-card.is-compose')?.isConnected)],
+      ['cancel', () => page.keyboard.press('Escape'), () => page.evaluate(() => document.querySelector('#cm-col').hidden)],
+    ]) {
+      await slideLog();
+      const host = await sampled(page, async () => { await act(); await until(done, name + ': the margin changes'); });
+      const sl = await slideEnd();
+      const rights = sl.map((x) => x.r), steps = rights.slice(1).map((v, i) => v - rights[i]), total = rights[rights.length - 1] - rights[0];
+      const moving = steps.map((d, i) => (Math.abs(d) > 0.01 ? i : -1)).filter((i) => i >= 0);
+      const ms = moving.length ? sl[moving[moving.length - 1] + 1].e - sl[moving[0]].e : 0;
+      const trace = rights.filter((v, i, a) => i === 0 || v !== a[i - 1]).map((v) => v.toFixed(1)).join(' → ');
+      ok(Math.abs(total) > 20, `${name}: the slide moves (${trace})`);
+      ok(steps.every((d) => Math.abs(d) <= 0.01 || Math.sign(d) === Math.sign(total)), `${name}: the slide moves in one direction (${trace})`);
+      ok(ms >= 150 && ms <= 260, `${name}: the slide glides for 150 to 260 ms (${Math.round(ms)} ms: ${trace})`);
+      ok(Math.max(...steps.map(Math.abs)) <= 0.4 * Math.abs(total), `${name}: no frame moves the slide more than 40% of the distance (${trace})`);
+      const end = await f.evaluate(() => document.querySelector('.k-frame.k-cur').getBoundingClientRect().right);
+      near(rights[rights.length - 1], end, 0.5, `${name}: the glide ends at the place of the slide`);
+      if (name === 'cancel') near(end, before, 0.5, 'the slide is back at its place');
+      // A card that shows is never over the slide: compare it with the place of the slide on the frame of that moment.
+      host.forEach((h) => h.cards.filter((c) => c.o > 0.01).forEach((c) => {
+        const at = sl.filter((x) => x.e <= h.e + 1).pop() || sl[0];
+        ok(c.l >= h.x + at.r + 8, `${name}: a card is over the slide (${c.l.toFixed(1)} < ${(h.x + at.r).toFixed(1)} + 8)`);
+      }));
+      console.log(`      deck ${name}: ${Math.round(ms)} ms, ${moving.length} frames: ${trace}`);
+    }
+    await oneScroller(page);
   },
 
   async 'middle width: markers beside the page, the card floats beside its marker'(page) {

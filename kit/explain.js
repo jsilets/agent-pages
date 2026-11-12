@@ -647,7 +647,56 @@ function runDeck(deck) {
     rail.children[S.i]?.scrollIntoView({ block: 'nearest' });
   }
 
+  // A new room for the comments glides, like Google Docs. The slide takes its new place and size at once, so it lays out one
+  // time, and a transform moves and scales it from where it showed (first, last, invert, play). The layers of the marks and
+  // of the cursors get the same transform, and they do not measure until the glide ends.
+  const deckStill = matchMedia('(prefers-reduced-motion: reduce)');
+  let glides = [];
+  function settle() { const g = glides; glides = []; g.forEach((a) => a.finish()); }
+  function room(right, ms) {
+    const cur = frames[S.i], a = ms > 0 && !deckStill.matches && S.view === 'slide' && !S.present ? cur.getBoundingClientRect() : null;
+    const g = glides; glides = []; g.forEach((x) => x.cancel());
+    S.room = right;
+    show();
+    let dx = 0, moved = false;
+    if (a && a.width) {
+      const b = cur.getBoundingClientRect(), k = a.width / b.width, x = a.left - b.left, y = a.top - b.top;
+      dx = Math.round(a.right - b.right);
+      moved = Math.abs(x) > 0.5 || Math.abs(y) > 0.5 || Math.abs(k - 1) > 0.002;
+      if (moved) {
+        // The marks and the cursors take their places for the new layout before the glide starts.
+        dispatchEvent(new Event('k-measure'));
+        GLIDE.on = true;
+        const o = { duration: ms, easing: 'cubic-bezier(0.2, 0, 0, 1)' }, from = `translate(${x}px, ${y}px) scale(${k})`;
+        glides = [cur.animate([{ transform: from, transformOrigin: '0 0' }, { transform: 'none', transformOrigin: '0 0' }], o)];
+        document.querySelectorAll('body > .k-cm, body > .k-pr').forEach((l) => {
+          const r = l.getBoundingClientRect(), at = `${b.left - r.left}px ${b.top - r.top}px`;
+          glides.push(l.animate([{ transform: from, transformOrigin: at }, { transform: 'none', transformOrigin: at }], o));
+        });
+        const mine = glides;
+        glides[0].finished.then(() => {
+          if (glides !== mine && glides.length) return;
+          GLIDE.on = false;
+          dispatchEvent(new Event('k-measure'));
+        }, () => {});
+      }
+    }
+    if (!moved && GLIDE.on && !glides.length) { GLIDE.on = false; dispatchEvent(new Event('k-measure')); }
+    // The viewer moves the cards with the right edge of the slide, from the first frame of the glide. at: the start of the
+    // glide on the clock that the viewer shares (timeOrigin). A first frame that comes late does not jump: the glide starts
+    // with one frame of its time gone at most.
+    const tell = (gone) => parent.postMessage({ ns: 'k-deck', v: 1, type: 'glide', dx: moved ? dx : 0, ms: moved ? ms : 0, at: performance.timeOrigin + performance.now() - gone }, '*');
+    if (!moved) { if (ms > 0) tell(0); return; }
+    const ours = glides;
+    requestAnimationFrame(() => {
+      if (glides !== ours) return;
+      const t = Number(ours[0].currentTime) || 0;
+      if (t > 17) ours.forEach((g) => { g.currentTime = 17; });
+      tell(Math.min(t, 17));
+    });
+  }
   function layout() {
+    settle();
     const rl = railOn(), vw = root.clientWidth - (rl ? RAIL_W : 0), v = S.view;
     const bh = S.present ? 0 : BAR_H, vh = root.clientHeight - bh, pad = S.present ? 0 : vw < 700 ? 12 : 32;
     if (rl) root.dataset.kRail = ''; else delete root.dataset.kRail;
@@ -724,7 +773,7 @@ function runDeck(deck) {
     // The host makes the frame full screen itself, so it tells the deck when that starts and ends.
     if (d.type === 'present') { S.present = !!d.on; if (S.present && S.view !== 'slide') { S.view = 'slide'; autoView = false; } show(); }
     if (d.type === 'view' && ['slide', 'scroll'].includes(d.view) && !(locked && d.view === 'scroll')) setView(d.view);
-    if (d.type === 'room') { const r = Number(d.right); S.room = Number.isFinite(r) ? Math.max(0, Math.min(2000, Math.round(r))) : 0; show(); }
+    if (d.type === 'room') { const r = Number(d.right), ms = Number(d.glide); room(Number.isFinite(r) ? Math.max(0, Math.min(2000, Math.round(r))) : 0, Number.isFinite(ms) ? Math.max(0, Math.min(400, ms)) : 0); }
     if (d.type === 'audit') parent.postMessage({ ns: 'k-deck', v: 1, type: 'audit', report: window.kDeck?.report || null }, '*');
   });
 
@@ -877,6 +926,9 @@ function lines(g) {
    the page which part of it shows with { type: 'view', top, h }. The page asks the viewer to scroll with
    { type: 'goto', y, smooth } and reports its height with { type: 'size', h }. A deck keeps its own fixed view. */
 const HOST = { on: false, top: 0, h: 0 };
+// on: the slide of a deck glides to a new place (runDeck, room). Its rectangles are not at their places until it ends, so the
+// marks and the cursors do not measure. The event 'k-measure' makes them measure at once.
+const GLIDE = { on: false };
 const viewTop = () => (HOST.on ? HOST.top : scrollY);
 const viewH = () => (HOST.on ? HOST.h || innerHeight : innerHeight);
 /** Scrolls the page so that y, in pixels from the top of the document, is at the top of the view. */
@@ -1037,6 +1089,7 @@ function startPresence() {
   }
   /** Puts the cursor in the text, or in the dock. A change of place glides: first, last, invert, play. */
   function place(r, glide) {
+    if (GLIDE.on) return;
     const first = r.cur.isConnected && glide && !still.matches ? r.cur.getBoundingClientRect() : null;
     const at = caret(r);
     if (at) {
@@ -1149,6 +1202,7 @@ function startPresence() {
   }
   const wake = () => { if (!tick) tick = setInterval(redraw, 120); };
   new ResizeObserver(() => requestAnimationFrame(() => runs.forEach((r) => place(r)))).observe(document.documentElement);
+  addEventListener('k-measure', () => runs.forEach((r) => place(r)));
 
   const readStep = (t) => (t && typeof t === 'object' && typeof t.quote === 'string' && t.quote ? { quote: str(t.quote, 600), text: str(t.text, 2000), before: str(t.before, 200), anchor: str(t.anchor, 200) } : null);
   return {
@@ -1415,7 +1469,7 @@ function startComments() {
   });
 
   // One measure for each frame at most. A change of the page text finds each place again; a change of size only measures.
-  const queue = () => { if (!queued) queued = requestAnimationFrame(() => { queued = 0; if (stale) resolveAll(); measure(); }); };
+  const queue = () => { if (!queued) queued = requestAnimationFrame(() => { queued = 0; if (GLIDE.on) return; if (stale) resolveAll(); measure(); }); };
   new MutationObserver((list) => {
     if (list.some((m) => { const el = m.target.nodeType === 1 ? m.target : m.target.parentElement; return !el || !el.closest(OWN); })) stale = true;
     queue();
@@ -1423,6 +1477,7 @@ function startComments() {
   const sized = new ResizeObserver(queue);
   sized.observe(root); sized.observe(document.body);
   addEventListener('k-layout', queue);
+  addEventListener('k-measure', () => { if (stale) resolveAll(); measure(); });
   addEventListener('load', queue);
   if (document.fonts) document.fonts.ready.then(queue, () => {});
   // A web font that loads later moves the text on its line, and the size of the page can stay the same.

@@ -127,7 +127,32 @@ const Margin = (() => {
     return { frame: Math.max(0, Math.floor(frame)), x: Math.round(right + gap) };
   }
 
-  const pure = { layoutCards, readSelect, readAnchors, frameHeight, mentionAt, assistantStates, person, placeMargin };
+  /**
+   * The width and the shift of the frame for the frame width that placeMargin gives. A column that keeps its width keeps a
+   * frame as wide as the view, and the frame moves left by a shift: the page does not lay out again, and a transform can
+   * glide it. Only a column that must get narrower gets a narrower frame. doc is the width of the column, or 0.
+   */
+  function stageOf(body, doc, frame) {
+    if (frame >= body) return { width: body, shift: 0 };
+    if (doc > 0 && frame >= doc) return { width: body, shift: Math.round((frame - body) / 2) };
+    return { width: frame, shift: 0 };
+  }
+
+  /**
+   * How the frame glides from where it shows now to a new place. now is { width, x }: its width and the left edge where it
+   * shows, with the shift of a glide that runs. to is { width, shift } from stageOf. The column is in the middle of the
+   * frame, so the glide keeps the middle of the column. A narrower frame takes its width at the start, so the text never
+   * goes under the cards; a wider frame takes its width at the end, so the text never goes past the view. The text lays out
+   * one time at most. Returns { width, from, to, end }: the width now, the shift from and to, and { width, shift } for the
+   * end, or null.
+   */
+  function glidePlan(now, to) {
+    const mid = now.x + now.width / 2;
+    if (to.width <= now.width) return { width: to.width, from: mid - to.width / 2, to: to.shift, end: null };
+    return { width: now.width, from: now.x, to: to.shift + (to.width - now.width) / 2, end: to };
+  }
+
+  const pure = { layoutCards, readSelect, readAnchors, frameHeight, mentionAt, assistantStates, person, placeMargin, stageOf, glidePlan };
   if (typeof document === 'undefined') return pure;
 
   // ─── The viewer part ─────────────────────────────────────
@@ -140,7 +165,7 @@ const Margin = (() => {
   const scroller = $('#scroll'), body = $('#body'), stage = $('.v-stage'), col = $('#cm-col'), pins = $('#cm-pins'), rail = $('#cm-rail'), sheet = $('#cm-sheet'), add = $('#cm-add');
   const modeOf = () => (innerWidth >= 1000 ? 'wide' : innerWidth >= 700 ? 'mid' : 'narrow');
   // threads: the open threads. anchors: the place of each one in the page. draft: the comment that the person writes now.
-  const S = { threads: [], resolved: [], anchors: new Map(), deck: null, ready: false, settled: false, kit: false, active: '', hover: '', sel: null, draft: null, mode: modeOf(), pinsH: 0, side: [], ensure: '', back: null };
+  const S = { threads: [], resolved: [], anchors: new Map(), deck: null, ready: false, settled: false, kit: false, active: '', hover: '', sel: null, draft: null, mode: modeOf(), pinsH: 0, side: [], shown: [], ensure: '', back: null };
   // quiet: the open threads when the page loads. Their cards show with no animation.
   const cards = new Map(), seen = new Set(), fresh = new Set(), unread = new Set(), quiet = new Set();
   let loaded = '', first = true, draftCard = null, warmedAt = 0, laid = 0, sentList = '', autoAt = 0, viewTick = 0;
@@ -183,28 +208,112 @@ const Margin = (() => {
   // The cards in the wide layout: their width, the room between the column of the page and the cards, and the room at the
   // right edge of the view. The kit reports the width of the column with ROOM px on each side (explain.js, measure()).
   const CARD = 280, GAP = 28, EDGE = 16, ROOM = 56;
+  // The glide of the page when the margin opens or closes, like Google Docs: the same curve as the entrance of a card.
+  const GLIDE = 200, EASE = 'cubic-bezier(0.2, 0, 0, 1)';
   let sentRoom = -1;
   /**
    * The page stays where it is with no card: in the middle of the view. The cards go in the room to its right (placeMargin).
    * A deck keeps its whole frame, and it moves its slide out of the room of the cards itself, only when it must.
+   * glide: the margin opened or closed now, so the page glides to its new place. Any other change (a resize, the width
+   * that the page reports, another layout) puts the page at its place at once.
    */
-  function group() {
+  function group(glide = false) {
     const wide = !col.hidden && S.mode === 'wide', B = body.clientWidth;
-    let fw = '', x = '';
+    const w = sizes.get(frame)?.w || 0, doc = deck ? 0 : w > 2 * ROOM ? w - 2 * ROOM : 0;
+    let x = '', to = { width: B, shift: 0 };
     if (wide) {
-      const w = sizes.get(frame)?.w || 0, p = deck ? { frame: B, x: B - CARD - EDGE } : placeMargin(B, w > 2 * ROOM ? w - 2 * ROOM : 0, { card: CARD, gap: GAP, edge: EDGE });
-      if (p.frame < B) fw = p.frame + 'px';
+      const p = deck ? { frame: B, x: B - CARD - EDGE } : placeMargin(B, doc, { card: CARD, gap: GAP, edge: EDGE });
+      to = stageOf(B, doc, p.frame);
       x = p.x + 'px';
     }
     if (col.style.getPropertyValue('--cm-x') !== x) col.style.setProperty('--cm-x', x);
-    if (stage.style.maxWidth !== fw) { stage.style.maxWidth = fw; schedule(); }
-    if (deck) sendRoom(wide ? GAP + CARD + EDGE : 0);
+    moveStage(to, doc > 0 && glide && !still.matches ? GLIDE : 0, glide && !col.hidden);
+    if (deck) sendRoom(wide ? GAP + CARD + EDGE : 0, false, glide && !still.matches ? GLIDE : 0);
   }
-  /** Tells a deck how much room at its right edge the cards take. */
-  function sendRoom(px, force = false) {
+
+  // ─── The glide of the page ───
+  // The frame of the page moves with a transform on its wrapper (.v-stage), so the browser only composites each frame and
+  // the page in the frame does not lay out again. The marks, the Comment button and the cursor of an assistant are in the
+  // wrapper, so they move with the text. The cards move with the same transform from the same distance, so they are beside
+  // the column in each frame and never over its text. A new glide starts from where the page shows at that moment.
+  // want: the place that the frame has, or glides to. run: the glide that runs.
+  let want = null, run = null;
+  const tx = (v) => (Math.abs(v) < 0.01 ? 'none' : 'translateX(' + v + 'px)');
+  function setStage(width, shift) {
+    const fw = width < body.clientWidth ? width + 'px' : '';
+    if (stage.style.maxWidth !== fw) { stage.style.maxWidth = fw; schedule(); }
+    stage.style.transform = shift ? tx(shift) : '';
+  }
+  /**
+   * The cards ride with the page: they start the same distance to the right and glide with it, so they are never over its
+   * text. Cards that come in now (op: 0) stay clear until at most 8 px of them is past the right edge of the view, then they
+   * fade in for the rest of the glide, so the edge of the view never cuts a card that shows. op: the opacity of the cards
+   * at the start; cards that show already (op: 1) do not fade.
+   */
+  function ride(d, op) {
+    if (op >= 1) return [{ transform: tx(d) }, { transform: 'none' }];
+    const clear = op > 0 ? 0 : Math.min(0.85, Math.max(0, 1 - 24 / Math.abs(d || 1)));
+    return [{ transform: tx(d), opacity: op }, { opacity: op, offset: clear }, { transform: 'none', opacity: 1 }];
+  }
+  /**
+   * The frame that a glide starts in can come late: the new card and its layout are work for the browser. A glide never
+   * starts with more than one frame of its time gone, so its first frame never jumps. late gets the time that it waits.
+   */
+  function firstFrame(anims, live, late = () => {}) {
+    requestAnimationFrame(() => {
+      if (!live()) return;
+      const t = Number(anims[0].currentTime) || 0;
+      if (t > 17) { anims.forEach((a) => { a.currentTime = 17; }); late(t - 17); }
+    });
+  }
+  /** come: the margin opens now, so its cards fade in. */
+  function moveStage(to, ms, come = false) {
+    if (want && want.width === to.width && want.shift === to.shift) return;
+    want = to;
+    // A change while a glide runs (a resize, for example) goes to the new place in the time that the glide has left.
+    if (run && !ms) ms = Math.max(0, run.endAt - performance.now());
+    const b = body.getBoundingClientRect(), r = stage.getBoundingClientRect(), now = { width: stage.offsetWidth, x: r.left - b.left };
+    const op = come ? 0 : run ? Number(getComputedStyle(col).opacity) : 1;
+    if (run) { run.anims.forEach((a) => a.cancel()); run = null; }
+    if (ms < 20) { setStage(to.width, to.shift); return; }
+    const plan = glidePlan(now, to);
+    setStage(plan.width, plan.to);
+    if (Math.abs(plan.from - plan.to) < 0.5) { if (plan.end) setStage(plan.end.width, plan.end.shift); return; }
+    const o = { duration: ms, easing: EASE }, anims = [stage.animate([{ transform: tx(plan.from) }, { transform: tx(plan.to) }], o)];
+    if (!col.hidden) anims.push(col.animate(ride(plan.from - plan.to, op), o));
+    const mine = (run = { anims, endAt: performance.now() + ms });
+    firstFrame(anims, () => run === mine, (late) => { mine.endAt += late; });
+    anims[0].finished.then(() => {
+      if (run !== mine) return;
+      run = null;
+      if (plan.end) setStage(plan.end.width, plan.end.shift);
+    }, () => {});
+  }
+
+  // A deck moves its slide itself. When it glides, it answers with the distance that the right edge of the slide moves,
+  // and the cards move with it. Until it answers, the cards wait, so they never show over the slide.
+  let deckWait = 0;
+  function deckGlide(d) {
+    if (!deckWait) return;
+    clearTimeout(deckWait); deckWait = 0;
+    col.style.opacity = '';
+    const dx = num(d && d.dx, -4000, 4000) || 0, ms = num(d && d.ms, 0, 400) || 0, at = num(d && d.at, 0, 1e15);
+    const gone = at == null ? 0 : Math.min(ms, Math.max(0, performance.timeOrigin + performance.now() - at));
+    if (Math.abs(dx) < 0.5 || ms - gone < 20 || col.hidden) return;
+    const a = col.animate(ride(dx, 0), { duration: ms, easing: EASE });
+    a.currentTime = gone;
+  }
+  /** Tells a deck how much room at its right edge the cards take. ms: the room opens or closes with a glide. */
+  function sendRoom(px, force = false, ms = 0) {
     if (px === sentRoom && !force) return;
     sentRoom = px;
-    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ ns: 'k-deck', v: 1, type: 'room', right: px }, '*');
+    if (!frame || !frame.contentWindow) return;
+    if (ms && px && !col.hidden) {
+      clearTimeout(deckWait);
+      col.style.opacity = '0';
+      deckWait = setTimeout(() => deckGlide(null), 150);
+    }
+    frame.contentWindow.postMessage({ ns: 'k-deck', v: 1, type: 'room', right: px, ...(ms ? { glide: ms } : {}) }, '*');
   }
   new ResizeObserver(() => group()).observe(scroller);
   /** The part of the page that shows, for the cursor of an assistant and the scroll to a comment. */
@@ -259,6 +368,7 @@ const Margin = (() => {
   // A message from the frame is not trusted: the page in it can send anything. readSelect and readAnchors check each value.
   addEventListener('message', (e) => {
     const d = e.data;
+    if (d && d.ns === 'k-deck' && d.v === 1 && d.type === 'glide' && frame && e.source === frame.contentWindow) { deckGlide(d); return; }
     if (!d || d.ns !== 'k-cm' || d.v !== 1) return;
     // The next version of the page reports its height before it shows. Nothing else from it counts until then.
     const next = $$('iframe', stage).find((x) => x !== frame && x.contentWindow === e.source);
@@ -758,6 +868,12 @@ const Margin = (() => {
     const any = top.length + side.length > 0 || (readOnly && !!$('#cm-ro') && S.threads.length > 0);
     const was = col.hidden;
     col.hidden = !any;
+    // The page glides when the margin opens for a card that comes in now (a new comment, the box for a new comment, a thread
+    // that opens again), and when it closes because its last card went (resolved, deleted, cancelled). The cards that the
+    // page has when it loads, and the cards of another slide, show with no glide.
+    const ids = [...top, ...side].map((c) => c.id);
+    const glide = was !== col.hidden && (any ? [...top, ...side].some((c) => c.enter) : S.shown.some((id) => (id === DRAFT ? !S.draft : !S.threads.some((t) => t.id === id))));
+    S.shown = ids;
     const sheetWas = sheet.hidden;
     sheet.hidden = !inSheet.length;
     $('#cm-sheet-h').textContent = S.draft && S.active === DRAFT ? 'New comment' : 'Comment';
@@ -767,7 +883,7 @@ const Margin = (() => {
     $('b', res).textContent = n;
     res.setAttribute('aria-label', n + (n === 1 ? ' resolved thread' : ' resolved threads'));
     if (!$('#pop-res').hidden) { if (n) drawResolved(); else closePop(); }
-    group();
+    group(glide);
     if (was !== col.hidden) fit();
     layout();
     schedule();

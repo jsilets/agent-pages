@@ -20,6 +20,8 @@ const M = new Function(`${marginJs}\nreturn Margin;`)() as {
   mentionAt: (value: string, caret: number) => { from: number; query: string } | null;
   assistantStates: (threads: unknown[], handled: string[]) => Record<string, string>;
   placeMargin: (body: number, doc: number, opt?: { card?: number; gap?: number; edge?: number }) => { frame: number; x: number };
+  stageOf: (body: number, doc: number, frame: number) => { width: number; shift: number };
+  glidePlan: (now: { width: number; x: number }, to: { width: number; shift: number }) => { width: number; from: number; to: number; end: { width: number; shift: number } | null };
 };
 
 /** The text nodes of an HTML fragment, in order, as a browser makes them. */
@@ -156,6 +158,38 @@ describe('placeMargin', () => {
   });
   it('gives the room to the cards when the page does not report its column', () => {
     expect(M.placeMargin(1440, 0)).toEqual({ frame: 1440 - 324, x: 1440 - 296 });
+  });
+});
+
+describe('the glide of the page', () => {
+  // The middle of a column that is in the middle of a frame of this width and shift.
+  const mid = (width: number, shift: number) => shift + width / 2;
+  const place = (body: number) => M.stageOf(body, 760, M.placeMargin(body, 760, { card: 280, gap: 28, edge: 16 }).frame);
+  it('keeps a frame as wide as the view and shifts it while the column keeps its width', () => {
+    expect(place(1440)).toEqual({ width: 1440, shift: 0 });
+    // 1280: the column moves 64 px left. Its right edge is 324 px from the right edge of the view, as placeMargin says.
+    expect(place(1280)).toEqual({ width: 1280, shift: -64 });
+    expect(mid(1280, -64) + 380).toBe(1280 - 324);
+    expect(place(1100)).toEqual({ width: 1100, shift: -154 });
+  });
+  it('gives a narrower frame, with no shift, only when the column must get narrower', () => {
+    expect(place(1040)).toEqual({ width: 1040 - 324, shift: 0 });
+    expect(M.stageOf(1440, 0, 1116)).toEqual({ width: 1116, shift: 0 });
+  });
+  it('glides from where the page shows now, and keeps the width when the column keeps its width', () => {
+    expect(M.glidePlan({ width: 1280, x: 0 }, { width: 1280, shift: -64 })).toEqual({ width: 1280, from: 0, to: -64, end: null });
+    // Interrupted halfway: the next glide starts at the place of that moment.
+    expect(M.glidePlan({ width: 1280, x: -30 }, { width: 1280, shift: 0 })).toEqual({ width: 1280, from: -30, to: 0, end: null });
+  });
+  it('makes a frame narrower at the start and wider at the end, and keeps the middle of the column', () => {
+    // Narrower: the new width at once, at the place where the middle of the column was. Then the glide.
+    const n = M.glidePlan({ width: 1040, x: 0 }, { width: 716, shift: 0 });
+    expect(n).toEqual({ width: 716, from: 162, to: 0, end: null });
+    expect(mid(716, n.from)).toBe(mid(1040, 0));
+    // Wider: the old width glides to the place of the new middle, then the new width, with the same middle.
+    const w = M.glidePlan({ width: 716, x: 0 }, { width: 1040, shift: 0 });
+    expect(w).toEqual({ width: 716, from: 0, to: 162, end: { width: 1040, shift: 0 } });
+    expect(mid(716, w.to)).toBe(mid(1040, 0));
   });
 });
 

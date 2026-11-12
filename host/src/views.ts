@@ -161,7 +161,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
    margin side by side, and its scroll bar is the only one, at the right edge of the window, under the bar. A deck frame is
    as tall as the view and sticks to its top. margin.js sets the height of the frame. */
 .v-scroll { position: relative; flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior-y: contain; background: var(--bg); }
-.v-body { position: relative; display: flex; min-height: 100%; }
+/* While the page glides (margin.js), the frame and the cards go past the edges of the view for a moment. clip, not hidden:
+   the view never gets a horizontal scroll position from them. */
+.v-body { position: relative; display: flex; min-height: 100%; overflow-x: clip; }
 .v-stage { position: relative; flex: 1; min-width: 0; }
 .v-stage > .v-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 .v-body[data-kind="deck"] .v-stage > .v-frame, .v-stage > .v-frame.is-self { position: sticky; top: 0; }

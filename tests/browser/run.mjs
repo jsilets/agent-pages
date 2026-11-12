@@ -458,8 +458,22 @@ const TESTS = {
   async 'drag across inline elements, Comment button, post, card aligned'(page) {
     const slug = await fresh('doc');
     await openViewer(page, slug);
+    // Record the Comment button on each frame: it must rise out of the selection, never come from a corner of the window.
+    await page.evaluate(() => {
+      const log = (window.__add = []), b = document.querySelector('#cm-add');
+      const tick = () => { if (!b.hidden) { const r = b.getBoundingClientRect(); log.push({ t: performance.now(), x: r.left + r.width / 2, y: r.top + r.height / 2, o: +getComputedStyle(b).opacity }); } if (!window.__addStop) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
     await drag(page, await textPoint(page, '#p-first', 'bold words'), await textPoint(page, '#p-first', 'inline code', true));
     await until(() => page.isVisible('#cm-add'), 'the Comment button shows at the selection');
+    await sleep(400);
+    const rise = await page.evaluate(() => { window.__addStop = true; return window.__add; });
+    const end = rise[rise.length - 1], far = Math.max(...rise.map((s) => Math.hypot(s.x - end.x, s.y - end.y)));
+    ok(rise.length > 3, `the Comment button was sampled (${rise.length} frames)`);
+    ok(far <= 8, `the Comment button is never more than 8 px from its place (${far.toFixed(1)} px)`);
+    ok(rise.every((s) => Math.abs(s.x - end.x) <= 1), 'the Comment button does not move sideways');
+    ok(rise.every((s) => s.y >= end.y - 0.5), 'the Comment button rises from the selection: it starts below its place, not above');
+    ok(end.o === 1 && rise.find((s) => s.o === 1).t - rise[0].t <= 260, 'the Comment button is fully visible in 260 ms');
     const btn = await rect(page, '#cm-add'), line = await pageTop(page, '#p-first');
     ok(btn.bottom <= line + 2 && btn.bottom > line - 60, 'the Comment button sits just above the selection');
     await clickAdd(page);

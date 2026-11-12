@@ -293,12 +293,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-slot > .cm-card textarea { font-size: 16px; }
 /* The button at a selection in the page. The layer lies over the frame and takes no pointer events itself. */
 .cm-over { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
-.cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 9px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); animation: cm-add 0.14s ease-out; }
+.cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 9px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); transform-origin: 50% 100%; animation: cm-add 0.16s cubic-bezier(0.2, 0, 0, 1); }
+.cm-add[data-side="below"] { transform-origin: 50% 0; animation-name: cm-add-down; }
 .cm-add[hidden] { display: none; }
 .cm-add:hover { background: var(--press); }
 .cm-add svg { width: 15px; height: 15px; }
 .cm-add kbd { height: 17px; box-shadow: none; background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; opacity: 0.8; font-size: 10.5px; }
-@keyframes cm-add { from { opacity: 0; scale: 0.92; } }
+@keyframes cm-add { from { opacity: 0; transform: translateY(6px) scale(0.96); } }
+@keyframes cm-add-down { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
 .v-body.is-ro .cm-add, .v-body.is-ro .cm-done { display: none; }
 /* A bar button with a count: the icon and the text on one line, with the height, the corners and the states of an icon button. */
 .v-icon.v-count { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 10px 0 8px; font: 500 12.5px/1 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap; }

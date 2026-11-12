@@ -404,7 +404,11 @@ const Margin = (() => {
     // Above the first line. With no room there, below the last line.
     const above = a[1] + dy - h - 8, top = above >= scroller.scrollTop + 6 ? above : z[1] + z[3] + dy + 8;
     const mid = top === above ? a[0] + a[2] / 2 : z[0] + z[2] / 2;
-    add.style.transform = 'translate(' + Math.round(Math.max(8, Math.min(stage.clientWidth - w - 8, mid - w / 2))) + 'px,' + Math.round(top) + 'px)';
+    // left and top place the button, so the entrance (a scale and a small rise) stays at the selection.
+    // A transform for the place would be scaled by the entrance, and the button would come in from the top left.
+    add.style.left = Math.round(Math.max(8, Math.min(stage.clientWidth - w - 8, mid - w / 2))) + 'px';
+    add.style.top = Math.round(top) + 'px';
+    add.dataset.side = top === above ? 'above' : 'below';
     if (was) { add.style.animation = 'none'; void add.offsetWidth; add.style.animation = ''; }
   }
   // The button never takes the focus, so the selection in the page stays as it is.

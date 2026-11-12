@@ -61,7 +61,7 @@ export default defineConfig(({ mode }: ConfigContext) => {
         ACCESS_AUD: bindings.text(profile.accessAud),
         // Development only: sandbox/local-runner.mjs. Production has no runner until a person decides where it runs.
         ...(!production && process.env.SANDBOX_RUNNER_URL ? { SANDBOX_RUNNER_URL: bindings.text(process.env.SANDBOX_RUNNER_URL) } : {}),
-        // Development only: the mentions that the runner handles. Default: claude. Example: SANDBOX_AGENTS=claude,chatgpt.
+        // Development only: the mentions that the runner handles. Default: claude,chatgpt. Example: SANDBOX_AGENTS=claude.
         ...(!production && process.env.SANDBOX_AGENTS ? { SANDBOX_AGENTS: bindings.text(process.env.SANDBOX_AGENTS) } : {}),
       },
     },

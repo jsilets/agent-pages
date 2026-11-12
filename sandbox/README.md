@@ -2,7 +2,7 @@
 
 A person writes `@claude` in a comment. The host starts the unmodified Claude Code program in a sandbox. Claude Code uses the Claude sign-in of that person. It reads the comment through the MCP connector, edits the page, and replies.
 
-With `SANDBOX_AGENTS=claude,chatgpt`, a comment with `@chatgpt` starts the unmodified Codex program in the same way. Codex uses the ChatGPT sign-in of that person. See "The Codex engine" below.
+A comment with `@chatgpt` starts the unmodified Codex program in the same way. Codex uses the ChatGPT sign-in of that person. See "The Codex engine" below.
 
 This folder is a test. It proves the loop on one machine and measures the time. `CLOUD.md` describes where the sandbox can run later.
 
@@ -70,12 +70,9 @@ The time limit is 180 seconds. `RUN_TIMEOUT_MS` changes it.
 
 ## The Codex engine
 
-Product reason: a `@chatgpt` comment must also work for a person whose ChatGPT plan has no MCP Events. Codex signs in with the ChatGPT plan of the person.
+A comment with `@chatgpt` always goes to the runner. Codex signs in with the ChatGPT plan of the person.
 
-The host sends a `@chatgpt` comment to the runner only when both conditions are true:
-
-1. `SANDBOX_AGENTS` has `chatgpt`. The default is `claude` alone.
-2. No active MCP Events subscription matches the comment. If one matches, the comment goes to the subscriber and no run starts. The host does not start a run when that delivery fails.
+The host sends a `@chatgpt` comment to the runner when `SANDBOX_AGENTS` has `chatgpt`. The default is `claude,chatgpt`.
 
 `run-comment.mjs` asks Codex if it has a sign-in (`codex login status`). Then it starts `codex exec` with the same fixed prompt:
 
@@ -124,7 +121,7 @@ Host mode uses the `claude` and the `codex` that are installed and signed in on 
 # 1. The host, with its own state folder and the runner URL
 cd host
 bunx cf d1 migrations apply 00000000-0000-4000-8000-00000000a271 --local --persist-to .cloudflare/state-sandbox --dir migrations
-CF_STATE_DIR=.cloudflare/state-sandbox SANDBOX_RUNNER_URL=http://localhost:8811/run SANDBOX_AGENTS=claude,chatgpt bunx vite --port 8802 --strictPort
+CF_STATE_DIR=.cloudflare/state-sandbox SANDBOX_RUNNER_URL=http://localhost:8811/run bunx vite --port 8802 --strictPort
 
 # 2. The runner, in a second terminal
 node sandbox/local-runner.mjs --mode host

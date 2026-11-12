@@ -8,7 +8,6 @@ vi.mock('../../brand/apple-touch-icon.png?inline', () => ({ default: 'data:image
 
 const ORIGIN = 'https://pages.test';
 const RUNNER = 'http://runner.test/run';
-const HOOK = 'https://hooks.example.com/cb';
 const page = (title: string) => `<html><head><title>${title}</title></head><body><main class="k-page"><p>First words.</p></main></body></html>`;
 
 interface Job {
@@ -20,12 +19,11 @@ interface Job {
   comment_id: string;
 }
 
-/** A Worker with local storage. `jobs` has each job the Worker sent to the runner, and `hooks` each event webhook. */
+/** A Worker with local storage. `jobs` has each job the Worker sent to the runner. */
 function host(vars: Record<string, string> = {}) {
   const files = new Map<string, string>();
   const tasks: Promise<unknown>[] = [];
   const jobs: Job[] = [];
-  const hooks: string[] = [];
   const env = {
     ENVIRONMENT: 'development', ACCESS_AUD: '', ACCESS_TEAM: '', SANDBOX_RUNNER_URL: RUNNER, ...vars,
     DB: testDb(),
@@ -39,7 +37,7 @@ function host(vars: Record<string, string> = {}) {
   };
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     if (url === RUNNER) return jobs.push(JSON.parse(init.body as string)), new Response(null, { status: 202 });
-    return hooks.push(init.body as string), new Response('{}');
+    return new Response('{}');
   });
   const ctx = { waitUntil: (p: Promise<unknown>) => void tasks.push(p), passThroughOnException() {} } as unknown as ExecutionContext;
   /** One request. It returns after each waitUntil task of the request has ended. */
@@ -54,7 +52,7 @@ function host(vars: Record<string, string> = {}) {
   const mcp = (mcp_url: string, method: string, params?: unknown) => call('POST', new URL(mcp_url).pathname, { jsonrpc: '2.0', id: 1, method, params });
   const tool = async (mcp_url: string, name: string, args: unknown = {}) => (await mcp(mcp_url, 'tools/call', { name, arguments: args })).body.result as { isError?: boolean; content: { text: string }[]; structuredContent?: any };
   const rows = async (sql: string) => (await env.DB.prepare(sql).all()).results as any[];
-  return { call, publish, comment, mcp, tool, rows, jobs, hooks, env };
+  return { call, publish, comment, mcp, tool, rows, jobs, env };
 }
 
 afterEach(() => {
@@ -134,15 +132,6 @@ describe('the connector token of a run', () => {
     expect((await h.tool(job.mcp_url, 'reply_to_comment', { comment_id: mine.id, body: 'Done.', resolve: true })).structuredContent).toMatchObject({ slug: 'team/a', author: 'claude', resolved: true });
   });
 
-  it('gets no events methods and no events capability', async () => {
-    const { h, job } = await twoPages();
-    for (const method of ['events/list', 'events/subscribe', 'events/unsubscribe']) {
-      expect((await h.mcp(job.mcp_url, method, { name: 'comment.created', delivery: { url: HOOK, secret: 'whsec_' + btoa('k'.repeat(32)) } })).body.error).toEqual({ code: -32600, message: 'a connector token with a page scope cannot use the events methods' });
-    }
-    expect(await h.rows('SELECT id FROM event_subscriptions')).toEqual([]);
-    expect((await h.mcp(job.mcp_url, 'initialize', {})).body.result.capabilities).toEqual({ tools: {} });
-  });
-
   it('stops with a 404 when the run reports its result, and the token row is gone', async () => {
     const { h, job } = await twoPages();
     expect((await h.mcp(job.mcp_url, 'ping')).status).toBe(200);
@@ -176,25 +165,16 @@ describe('the connector token of a run', () => {
 });
 
 describe('@chatgpt and the runner', () => {
-  /** An MCP Events subscription of an unscoped token, as events/subscribe stores it. */
-  const subscribe = async (h: ReturnType<typeof host>, args: string, expires = '2999-01-01T00:00:00.000Z') => {
-    const t = (await h.call('POST', '/api/connector-tokens', { label: 'chatgpt' })).body;
-    await h.env.DB.prepare("INSERT INTO event_subscriptions (id, token, event, arguments, callback_url, secret, verified_at, expires_at, created_at) VALUES (?, ?, 'comment.created', ?, ?, ?, ?, ?, ?)")
-      .bind(`sub_${t.id}`, t.token, args, HOOK, 'whsec_' + btoa('k'.repeat(32)), '2026-01-01T00:00:00.000Z', expires, '2026-01-01T00:00:00.000Z')
-      .run();
-    return t;
-  };
-
-  it('starts no run for @chatgpt unless SANDBOX_AGENTS has chatgpt', async () => {
-    const h = host();
+  it('starts no run for @chatgpt when SANDBOX_AGENTS does not have chatgpt', async () => {
+    const h = host({ SANDBOX_AGENTS: 'claude' });
     await h.publish('team/a');
     await h.comment('team/a', '@chatgpt shorten it');
     expect(h.jobs).toEqual([]);
     expect((await h.call('GET', '/api/pages/team/a/comments')).body[0].run).toBe(null);
   });
 
-  it('sends @chatgpt to the runner with the codex engine, and @claude with the claude engine', async () => {
-    const h = host({ SANDBOX_AGENTS: 'claude, chatgpt' });
+  it('sends @chatgpt to the runner with the codex engine, and @claude with the claude engine, with no SANDBOX_AGENTS', async () => {
+    const h = host();
     await h.publish('team/a');
     const c = await h.comment('team/a', '@chatgpt shorten it');
     await h.comment('team/a', '@claude shorten it');
@@ -212,52 +192,24 @@ describe('@chatgpt and the runner', () => {
     await h.comment('team/a', '@claude shorten it');
     expect(h.jobs).toEqual([]);
   });
-
-  it('lets an active MCP Events subscription win: the comment goes to the subscriber, and no run starts', async () => {
-    const h = host({ SANDBOX_AGENTS: 'claude,chatgpt' });
-    await h.publish('team/a');
-    await subscribe(h, '{"mention":"chatgpt"}');
-    const c = await h.comment('team/a', '@chatgpt shorten it');
-    expect(h.jobs).toEqual([]);
-    expect(h.hooks.map((b) => JSON.parse(b).data.comment_id)).toEqual([c.id]);
-    // The subscription is for @chatgpt, so @claude still goes to the runner.
-    await h.comment('team/a', '@claude shorten it');
-    expect(h.jobs.map((j) => j.engine)).toEqual(['claude']);
-  });
-
-  it('starts the run when the subscription does not match the comment, has expired, or lost its token', async () => {
-    const h = host({ SANDBOX_AGENTS: 'claude,chatgpt' });
-    await h.publish('team/a');
-    await subscribe(h, '{"mention":"chatgpt","slug":"team/other"}');
-    await subscribe(h, '{"mention":"claude"}');
-    await subscribe(h, '{"mention":"chatgpt"}', '2020-01-01T00:00:00.000Z');
-    const revoked = await subscribe(h, '{"mention":"chatgpt"}');
-    await h.call('DELETE', `/api/connector-tokens/${revoked.id}`);
-    await h.comment('team/a', '@chatgpt shorten it');
-    expect(h.jobs.map((j) => j.engine)).toEqual(['codex']);
-    expect(h.hooks).toEqual([]);
-  });
 });
 
 describe('page delete', () => {
-  it('deletes the runs, the run tokens and the event subscriptions of the page, and keeps those of other pages', async () => {
+  it('deletes the runs and the run tokens of the page, and keeps those of other pages', async () => {
     const h = host();
     await h.publish('team/a');
     await h.publish('team/b');
     await h.comment('team/a', '@claude shorten it');
     await h.comment('team/b', '@claude shorten it');
-    const t = (await h.call('POST', '/api/connector-tokens', { label: 'chatgpt' })).body;
-    const sub = h.env.DB.prepare("INSERT INTO event_subscriptions (id, token, event, arguments, callback_url, secret, verified_at, expires_at, created_at) VALUES (?, ?, 'comment.created', ?, ?, 's', 'v', '2999-01-01', 'c')");
-    for (const [id, args] of [['sub_a', '{"mention":"chatgpt","slug":"team/a"}'], ['sub_b', '{"mention":"chatgpt","slug":"team/b"}'], ['sub_all', '{"mention":"chatgpt"}']]) await sub.bind(id, t.token, args, HOOK).run();
+    await h.call('POST', '/api/connector-tokens', { label: 'chatgpt' });
     const state = async () => ({
       runs: (await h.rows('SELECT c.slug FROM agent_runs r LEFT JOIN comments c ON c.id = r.comment_id ORDER BY c.slug')).map((r) => r.slug),
       tokens: (await h.rows('SELECT label, slug FROM connector_tokens ORDER BY slug')).map((r) => [r.label, r.slug]),
-      subs: (await h.rows('SELECT id FROM event_subscriptions ORDER BY id')).map((r) => r.id),
     });
-    expect(await state()).toEqual({ runs: ['team/a', 'team/b'], tokens: [['chatgpt', null], ['claude', 'team/a'], ['claude', 'team/b']], subs: ['sub_a', 'sub_all', 'sub_b'] });
+    expect(await state()).toEqual({ runs: ['team/a', 'team/b'], tokens: [['chatgpt', null], ['claude', 'team/a'], ['claude', 'team/b']] });
 
     expect((await h.call('DELETE', '/api/pages/team/a')).status).toBe(204);
-    expect(await state()).toEqual({ runs: ['team/b'], tokens: [['chatgpt', null], ['claude', 'team/b']], subs: ['sub_all', 'sub_b'] });
+    expect(await state()).toEqual({ runs: ['team/b'], tokens: [['chatgpt', null], ['claude', 'team/b']] });
     expect((await h.mcp(h.jobs[0].mcp_url, 'ping')).status).toBe(404);
     expect((await h.mcp(h.jobs[1].mcp_url, 'ping')).status).toBe(200);
     expect((await h.call('GET', '/api/pages/team/b/comments')).body[0].run).toMatchObject({ status: 'running' });

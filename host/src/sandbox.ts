@@ -1,7 +1,6 @@
 // Starts Claude Code or Codex in a sandbox for a comment that mentions @claude or @chatgpt, and records each run in agent_runs.
 // The Worker does not wait for the run. The runner answers 202 at once and reports the result later at
 // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
-import { hasEventSubscriber } from './events';
 import { newToken, newTokenId, readJson, type Mention } from './lib';
 import type { Comment, Env, Thread } from './types';
 
@@ -40,8 +39,8 @@ export interface RunStatus {
 const answer = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex, nofollow' } });
 
-/** The mentions that the runner handles: SANDBOX_AGENTS as a comma list, or 'claude' alone. */
-export const sandboxAgents = (env: Env): string[] => (env.SANDBOX_AGENTS ?? 'claude').split(',').map((a) => a.trim().toLowerCase());
+/** The mentions that the runner handles: SANDBOX_AGENTS as a comma list, or 'claude' and 'chatgpt'. */
+export const sandboxAgents = (env: Env): string[] => (env.SANDBOX_AGENTS ?? 'claude,chatgpt').split(',').map((a) => a.trim().toLowerCase());
 
 /**
  * Makes the connector token of one run. The token reaches only the page of the comment, and it ends after 15 minutes.
@@ -70,12 +69,10 @@ async function finishRun(env: Env, id: string, status: 'done' | 'failed', detail
 
 /**
  * Runs for a comment or a reply that a person wrote with a mention that SANDBOX_AGENTS has. With no SANDBOX_RUNNER_URL it does nothing.
- * For @chatgpt, an active MCP Events subscription wins: the comment goes to the subscriber, and no run starts.
  */
 export async function runSandboxAgent(env: Env, comment: Comment, origin: string): Promise<void> {
   const agent = comment.mention;
   if (!agent || !env.SANDBOX_RUNNER_URL || !sandboxAgents(env).includes(agent)) return;
-  if (agent === 'chatgpt' && (await hasEventSubscriber(env, comment))) return;
   const id = newToken();
   const { token, tokenId } = await runToken(env, agent, comment.slug);
   await env.DB.prepare("INSERT INTO agent_runs (id, comment_id, agent, status, started_at, token_id) VALUES (?, ?, ?, 'running', ?, ?)").bind(id, comment.id, agent, new Date().toISOString(), tokenId).run();

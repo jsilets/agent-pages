@@ -2,7 +2,6 @@
 // Each POST carries one JSON-RPC 2.0 message, and the answer is one JSON body.
 // The connector token is the only check. The tools reach pages and comments, and nothing else.
 import { addComment, getComment, listThreads, resolveThread } from './comments';
-import { eventCapabilities, eventMethods } from './events';
 import { applyEdits, blobKey, isSlug, isToken, readJson, withoutKit, type Edit } from './lib';
 import { RpcError, type Comment, type Env, type Handler, type McpContext, type StoreVersion, type Thread } from './types';
 
@@ -202,22 +201,21 @@ const tools: Record<string, Tool> = {
 // ─── JSON-RPC ───────────────────────────────────────────────────────
 
 /**
- * The JSON-RPC methods. events.ts adds its methods through eventMethods, and the connector's own methods win on a name clash.
+ * The JSON-RPC methods.
  * A method with no handler gets the error -32601. See Handler in types.ts for the signature.
  */
 export function methods(x: ExecutionContext, store: StoreVersion): Record<string, Handler> {
   return {
-    ...eventMethods,
-    async initialize(_env, params, ctx) {
+    async initialize(_env, params) {
       const asked = (params as { protocolVersion?: unknown } | null)?.protocolVersion;
-      return { protocolVersion: LEGACY.includes(asked as string) ? asked : LEGACY[0], capabilities: capabilities(ctx), serverInfo: SERVER_INFO, instructions: INSTRUCTIONS };
+      return { protocolVersion: LEGACY.includes(asked as string) ? asked : LEGACY[0], capabilities: CAPABILITIES, serverInfo: SERVER_INFO, instructions: INSTRUCTIONS };
     },
     async ping() {
       return {};
     },
     /** MCP 2026-07-28: what `initialize` told a client before. A client may call it first, and it does not have to. */
-    async 'server/discover'(_env, _params, ctx) {
-      return { supportedVersions: PROTOCOLS, capabilities: capabilities(ctx), instructions: INSTRUCTIONS, ...CACHE };
+    async 'server/discover'() {
+      return { supportedVersions: PROTOCOLS, capabilities: CAPABILITIES, instructions: INSTRUCTIONS, ...CACHE };
     },
     async 'tools/list'() {
       return { tools: TOOLS, ...CACHE };
@@ -237,8 +235,7 @@ export function methods(x: ExecutionContext, store: StoreVersion): Record<string
   };
 }
 
-/** A token with a page scope gets no events: a subscription outlives the run that the token is for. */
-const capabilities = (ctx: McpContext) => ({ tools: {}, ...(ctx.slug ? {} : eventCapabilities) });
+const CAPABILITIES = { tools: {} };
 
 /** Runs one JSON-RPC message. Returns the response object, or null for a notification or a response, which get no answer. */
 export async function rpc(handlers: Record<string, Handler>, env: Env, msg: unknown, ctx: McpContext): Promise<object | null> {
@@ -249,12 +246,11 @@ export async function rpc(handlers: Record<string, Handler>, env: Env, msg: unkn
   if (typeof m.method !== 'string') return note || 'result' in m || 'error' in m ? null : rpcError(m.id, -32600, 'the message has no method');
   const handler = Object.hasOwn(handlers, m.method) ? handlers[m.method] : null;
   if (!handler) return note ? null : rpcError(m.id, -32601, `no such method: ${m.method}`);
-  if (ctx.slug && m.method.startsWith('events/')) return note ? null : rpcError(m.id, -32600, 'a connector token with a page scope cannot use the events methods');
   try {
     const result = await handler(env, m.params, ctx);
     return note ? null : { jsonrpc: '2.0', id: m.id, result };
   } catch (e) {
-    if (e instanceof RpcError) return note ? null : rpcError(m.id, e.code, e.message, e.data);
+    if (e instanceof RpcError) return note ? null : rpcError(m.id, e.code, e.message);
     console.error('mcp', m.method, e);
     return note ? null : rpcError(m.id, -32603, 'internal error');
   }

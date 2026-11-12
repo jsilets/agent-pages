@@ -92,12 +92,12 @@ describe('withRuns', () => {
 
 describe('runSandboxAgent', () => {
   const env = (db: ReturnType<typeof fakeDb>, url?: string) => ({ DB: db.DB, SANDBOX_RUNNER_URL: url }) as unknown as Env;
-  it('does nothing for a comment with no @claude, and nothing with no runner URL', async () => {
+  it('does nothing for a comment with no mention, for a mention that SANDBOX_AGENTS does not have, and with no runner URL', async () => {
     const fetched = vi.fn();
     vi.stubGlobal('fetch', fetched);
     const db = fakeDb();
     await runSandboxAgent(env(db, 'http://runner/run'), comment({ mention: null }), ORIGIN);
-    await runSandboxAgent(env(db, 'http://runner/run'), comment({ mention: 'chatgpt' }), ORIGIN);
+    await runSandboxAgent({ ...env(db, 'http://runner/run'), SANDBOX_AGENTS: 'claude' }, comment({ mention: 'chatgpt' }), ORIGIN);
     await runSandboxAgent(env(db), comment(), ORIGIN);
     expect(fetched).not.toHaveBeenCalled();
     expect(db.ran).toEqual([]);

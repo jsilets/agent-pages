@@ -10,7 +10,7 @@ export interface Env {
   ACCESS_AUD: string;
   /** Development only: the URL of the sandbox runner that starts Claude Code for a comment. Not set means no runs. */
   SANDBOX_RUNNER_URL?: string;
-  /** Development only: the mentions that the runner handles, as a comma list of 'claude' and 'chatgpt'. Default: 'claude'. */
+  /** Development only: the mentions that the runner handles, as a comma list of 'claude' and 'chatgpt'. Default: 'claude,chatgpt'. */
   SANDBOX_AGENTS?: string;
 }
 
@@ -75,9 +75,9 @@ export interface McpContext {
  */
 export type Handler = (env: Env, params: unknown, ctx: McpContext) => Promise<unknown>;
 
-/** A JSON-RPC error that a Handler throws. -32602 means bad params. data, when set, is the `data` member of the error. */
+/** A JSON-RPC error that a Handler throws. -32602 means bad params. */
 export class RpcError extends Error {
-  constructor(public code: number, message: string, public data?: unknown) {
+  constructor(public code: number, message: string) {
     super(message);
   }
 }

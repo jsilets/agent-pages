@@ -279,7 +279,6 @@ async function deletePage(env: Env, slug: string) {
     // The runs go first, because a run finds its page through its comment.
     env.DB.prepare('DELETE FROM agent_runs WHERE comment_id IN (SELECT id FROM comments WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM connector_tokens WHERE slug = ?').bind(slug),
-    env.DB.prepare("DELETE FROM event_subscriptions WHERE json_extract(arguments, '$.slug') = ?").bind(slug),
     env.DB.prepare('DELETE FROM comments WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM versions WHERE slug = ?').bind(slug),

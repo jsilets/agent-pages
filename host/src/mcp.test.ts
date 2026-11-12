@@ -54,7 +54,7 @@ describe('rpc', () => {
     expect(await call({ jsonrpc: '2.0', id: 'a', method: 'initialize', params: { protocolVersion: '2024-11-05' } })).toMatchObject({ id: 'a', result: { protocolVersion: '2025-06-18' } });
     // 2026-07-28 has no initialize, so a client that starts with initialize gets a version that has it.
     expect(await call({ jsonrpc: '2.0', id: 'b', method: 'initialize', params: { protocolVersion: '2026-07-28' } })).toMatchObject({ id: 'b', result: { protocolVersion: '2025-06-18' } });
-    expect(await call({ jsonrpc: '2.0', id: 2, method: 'initialize' })).toMatchObject({ result: { protocolVersion: PROTOCOLS[0], capabilities: { tools: {}, events: {} } } });
+    expect(await call({ jsonrpc: '2.0', id: 2, method: 'initialize' })).toMatchObject({ result: { protocolVersion: PROTOCOLS[0], capabilities: { tools: {} } } });
   });
   it('answers ping with an empty result', async () => {
     expect(await call({ jsonrpc: '2.0', id: 7, method: 'ping' })).toEqual({ jsonrpc: '2.0', id: 7, result: {} });
@@ -113,22 +113,22 @@ describe('rpc', () => {
   it('runs an added method with the params and the caller, and turns its errors into JSON-RPC errors', async () => {
     const seen: unknown[] = [];
     const added: Record<string, Handler> = {
-      async 'events/subscribe'(_env, params, c) {
+      async 'added/echo'(_env, params, c) {
         seen.push(params, c);
         return { ok: true };
       },
-      async 'events/refuse'() {
+      async 'added/refuse'() {
         throw new RpcError(-32602, 'bad url');
       },
-      async 'events/crash'() {
+      async 'added/crash'() {
         throw new Error('secret detail');
       },
     };
     const env = fakeEnv().env;
-    expect(await call({ jsonrpc: '2.0', id: 1, method: 'events/subscribe', params: { url: 'u' } }, env, added)).toEqual({ jsonrpc: '2.0', id: 1, result: { ok: true } });
+    expect(await call({ jsonrpc: '2.0', id: 1, method: 'added/echo', params: { url: 'u' } }, env, added)).toEqual({ jsonrpc: '2.0', id: 1, result: { ok: true } });
     expect(seen).toEqual([{ url: 'u' }, ctx]);
-    expect(await call({ jsonrpc: '2.0', id: 2, method: 'events/refuse' }, env, added)).toEqual({ jsonrpc: '2.0', id: 2, error: { code: -32602, message: 'bad url' } });
-    expect(await call({ jsonrpc: '2.0', id: 3, method: 'events/crash' }, env, added)).toEqual({ jsonrpc: '2.0', id: 3, error: { code: -32603, message: 'internal error' } });
+    expect(await call({ jsonrpc: '2.0', id: 2, method: 'added/refuse' }, env, added)).toEqual({ jsonrpc: '2.0', id: 2, error: { code: -32602, message: 'bad url' } });
+    expect(await call({ jsonrpc: '2.0', id: 3, method: 'added/crash' }, env, added)).toEqual({ jsonrpc: '2.0', id: 3, error: { code: -32603, message: 'internal error' } });
   });
 });
 
@@ -202,13 +202,13 @@ describe('MCP 2026-07-28', () => {
     post(TOKEN, { jsonrpc: '2.0', id: 1, method, params: { _meta: meta, ...params } }, env(), { 'mcp-protocol-version': V, 'mcp-method': method, ...headers }).then(async (res) => ({ status: res.status, body: (await res.json()) as any }));
   const serverInfo = { 'io.modelcontextprotocol/serverInfo': { name: 'agent-pages', title: 'Agent Pages', version: '0.1.0' } };
 
-  it('answers server/discover with the versions, the tools and events capabilities, and the server identity', async () => {
+  it('answers server/discover with the versions, the tools capability, and the server identity', async () => {
     const out = await send('server/discover');
     expect(out.status).toBe(200);
     expect(out.body.result).toEqual({
       resultType: 'complete',
       supportedVersions: ['2025-06-18', '2025-03-26', '2026-07-28'],
-      capabilities: { tools: {}, events: {} },
+      capabilities: { tools: {} },
       instructions: expect.stringContaining('get_page'),
       ttlMs: 300000,
       cacheScope: 'public',

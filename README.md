@@ -60,7 +60,7 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `PUT`, `DELETE /api/pages/<group>/<name>/pin` | Access | Pin or unpin a page |
 | `POST /api/pages/<group>/<name>/refresh` | Access | Index the latest version and take its thumbnails again |
 | `PUT /api/pages/<group>/<name>` | Access | Store a new version. The body is the HTML. |
-| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links, its comments and its runs. The route also deletes the connector tokens that have this page as their scope, and the event subscriptions whose arguments name this page. |
+| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links, its comments and its runs. The route also deletes the connector tokens that have this page as their scope. |
 | `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
 | `DELETE /api/shares/<token>` | Access | Revoke a share link |
 | `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies and with `run`, the latest sandbox run of the thread or `null`. `?status=open` or `?status=resolved` keeps one status. |
@@ -79,7 +79,7 @@ The connector speaks MCP Streamable HTTP with no session and no SSE. It supports
 
 A client of `2025-06-18` or `2025-03-26` starts with `initialize`. A client of `2026-07-28` sends no `initialize`. The connector applies the rules of `2026-07-28` to a request that has that version in the `MCP-Protocol-Version` header or in `params._meta`:
 
-- `server/discover` returns `supportedVersions`, the capabilities (`tools` and `events`), the instructions and the server identity.
+- `server/discover` returns `supportedVersions`, the capabilities (`tools`), the instructions and the server identity.
 - `params._meta` must have `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities`. If one is missing, the connector answers 400 with the error `-32602`.
 - The headers `MCP-Protocol-Version` and `Mcp-Method` must match the body. For `tools/call`, `Mcp-Name` must match the tool name. If a header is missing or different, the connector answers 400 with the error `-32020`.
 - A version that the connector does not speak gets 400 with the error `-32022` and the list of supported versions. A method that the connector does not have gets 404 with the error `-32601`. `initialize` and `ping` are not methods of this version.
@@ -100,7 +100,6 @@ Each tool has a `title` and MCP tool `annotations`. The three read tools have `r
 A connector token can have a page scope (`slug`) and an end time (`expires_at`). The API makes tokens with no scope and no end time. The host makes a scoped token for each sandbox run.
 
 - A token with a scope sees only its page in `list_pages` and `list_comments`. A tool call for another page, or for a comment on another page, returns a tool error.
-- A token with a scope cannot use the `events/*` methods, and its capabilities have no `events`.
 - After `expires_at`, the connector answers 404, the same as for an unknown token.
 
 Make a connector token, then call the connector:
@@ -112,33 +111,13 @@ curl -X POST <mcp_url> -H 'content-type: application/json' -d '{"jsonrpc":"2.0",
 
 On the deployed host, the first command needs the Access service token headers too. The second command needs no headers for Access.
 
-After a person writes a comment, the Worker calls `onCommentCreated` in `host/src/agents.ts`. That function calls `notifyEventSubscribers` in `events.ts` and `runSandboxAgent` in `sandbox.ts`. `events.ts` can also add JSON-RPC methods to the connector through `eventMethods`, and capabilities through `eventCapabilities`.
+After a person writes a comment, the Worker calls `onCommentCreated` in `host/src/agents.ts`. That function calls `runSandboxAgent` in `sandbox.ts`.
 
-For a comment with `@claude`, `runSandboxAgent` sends a job to the sandbox runner at `SANDBOX_RUNNER_URL` and records the run in `agent_runs`. The runner starts Claude Code with the sign-in of the person, and Claude Code answers through the connector. Only development sets `SANDBOX_RUNNER_URL`. See `sandbox/README.md` for the test and `sandbox/CLOUD.md` for the cloud research.
+For a comment with `@claude` or `@chatgpt`, `runSandboxAgent` sends a job to the sandbox runner at `SANDBOX_RUNNER_URL` and records the run in `agent_runs`. For `@claude`, the runner starts Claude Code with the Claude sign-in of the person. For `@chatgpt`, the runner starts Codex with the ChatGPT sign-in of the person. The assistant answers through the connector. Only development sets `SANDBOX_RUNNER_URL`. See `sandbox/README.md` for the test and `sandbox/CLOUD.md` for the cloud research.
 
-`SANDBOX_AGENTS` is a comma list of the mentions that the runner handles. The default is `claude`. With `SANDBOX_AGENTS=claude,chatgpt`, a comment with `@chatgpt` starts Codex with the ChatGPT sign-in of the person. An active MCP Events subscription that matches the comment wins: the comment goes to the subscriber, and no run starts.
+`SANDBOX_AGENTS` is a comma list of the mentions that the runner handles. The default is `claude,chatgpt`. With `SANDBOX_AGENTS=claude`, a comment with `@chatgpt` starts no run.
 
 Each run gets its own connector token. The token has the page of the comment as its scope, and it ends after 15 minutes. The host deletes the token when the runner reports the result of the run.
-
-### MCP Events
-
-The connector implements the server side of [MCP Events](https://developers.openai.com/plugins/build/mcp-events), so ChatGPT can subscribe to new comments. The `initialize` result declares the `events` capability.
-
-| Method | Does |
-|---|---|
-| `events/list` | Lists the one event, `comment.created`. Its arguments are `slug` (one page, optional) and `mention` (`claude` or `chatgpt`, default `chatgpt`). |
-| `events/subscribe` | Creates or refreshes a webhook subscription. The request carries `delivery.url` and a `whsec_` signing secret. The Worker first sends a signed verification challenge to the URL. The result has the subscription `id`, `refreshBefore`, and `cursor: null`. |
-| `events/unsubscribe` | Deletes the subscription with the same event name, arguments and callback URL |
-
-When a person writes a comment that matches a subscription, the Worker POSTs one event to the callback URL. The event has `eventId`, `name`, `timestamp`, `data` and `cursor: null`. `data` has `comment_id`, `slug`, `text`, `quote`, `author`, `url` and `thread_id`. The request has the Standard Webhooks headers `webhook-id`, `webhook-timestamp` and `webhook-signature`, and `X-MCP-Subscription-Id`.
-
-- The subscription id is a hash of the connector token, the callback URL, the event name and the arguments.
-- A subscription lasts 24 hours by default, 5 minutes at least and 30 days at most. A revoked connector token stops its subscriptions.
-- A callback URL must use `https` and must not name a private or local address. The Worker follows no redirect. A Worker cannot look up a host name, so it does not check the address behind a public name.
-- A failed verification gets the error `-32015` with `data.reason`.
-- A delivery that gets a 5xx answer or no answer gets one retry. The subscription row records the last delivery in `last_delivery_at` and `last_status`.
-
-`host/tools/fake-chatgpt.mjs` is a stand-in for ChatGPT for the local test: `node tools/fake-chatgpt.mjs <mcp_url>`. Development allows a callback on `http://localhost` and `http://127.0.0.1`. [docs/chatgpt-events-test.md](docs/chatgpt-events-test.md) has the test with the real ChatGPT.
 
 ## Deploy the host
 

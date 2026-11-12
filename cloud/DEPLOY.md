@@ -182,7 +182,6 @@ Ask before you do any of these:
       "ssh": { "enabled": false }
     }
   ],
-  "durable_objects": { "bindings": [{ "name": "USER_RUNNER", "class_name": "UserRunner" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserRunner"] }],
   "r2_buckets": [{ "binding": "CREDENTIALS", "bucket_name": "agent-pages-runner-credentials" }],
   "services": [{ "binding": "HOST", "service": "agent-pages" }],

@@ -1,6 +1,6 @@
 # Cloud runner
 
-This folder holds the production runner for the sandbox agents on Cloudflare. It serves the same job contract as `sandbox/local-runner.mjs`, so the host only needs a service binding (`HOST-PATCH.md`). `DEPLOY.md` is the runbook. `COST.md` has the cost tables.
+This folder holds the production runner for the sandbox agents on Cloudflare. It serves the same job contract as `sandbox/local-runner.mjs`, so the host only needs a service binding. `DEPLOY.md` is the runbook. `COST.md` has the cost tables.
 
 Evidence labels: READ means that a primary doc says it, with the URL. GUESS means that no doc says it, and a deploy must check it. MEASURED means that a local run produced it.
 

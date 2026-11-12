@@ -34,9 +34,9 @@ const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCI
 // The brand mark on its tile, the same cut as the favicon (brand/mark-small.svg).
 const MARK = `<svg class="h-mark" viewBox="0 0 256 256" aria-hidden="true">
     <rect class="h-tile" width="256" height="256" rx="48"/>
-    <path fill="#6b6962" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
-    <path fill="#b3b0a6" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
-    <path fill="#f7f6f3" fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
+    <path class="h-m1" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
+    <path class="h-m2" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
+    <path class="h-m3" fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
   </svg>`;
 
 const LIB_CSS = `
@@ -51,9 +51,13 @@ body:has(> .l) { height: 100%; overflow: hidden; }
 .l-brand { color: var(--p); text-decoration: none; display: flex; align-items: center; gap: 9px; flex: none; height: 44px; margin-bottom: 6px; padding: 0 6px; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; }
 .l-brand:hover { text-decoration: none; }
 .h-mark { flex: none; width: 20px; height: 20px; stroke: none; }
-/* The tile is the favicon's: near black in both themes, with no ring. */
-.h-tile { fill: #1a1a1a; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .l-nav[aria-current="page"] { background: var(--bg3); } }
+/* The favicon's colours in light mode. Dark mode inverts them: a light tile with a dark page. */
+.h-tile { fill: #1a1a1a; } .h-m1 { fill: #6b6962; } .h-m2 { fill: #b3b0a6; } .h-m3 { fill: #f7f6f3; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .h-tile { fill: #f7f6f3; } :root:not([data-theme="light"]) .h-m1 { fill: #b3b0a6; } :root:not([data-theme="light"]) .h-m2 { fill: #6b6962; } :root:not([data-theme="light"]) .h-m3 { fill: #1a1a1a; }
+  :root:not([data-theme="light"]) .l-nav[aria-current="page"] { background: var(--bg3); }
+}
+:root[data-theme="dark"] .h-tile { fill: #f7f6f3; } :root[data-theme="dark"] .h-m1 { fill: #b3b0a6; } :root[data-theme="dark"] .h-m2 { fill: #6b6962; } :root[data-theme="dark"] .h-m3 { fill: #1a1a1a; }
 :root[data-theme="dark"] .l-nav[aria-current="page"] { background: var(--bg3); }
 .l-nav { position: relative; display: flex; align-items: center; gap: 9px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--s); font: 500 13px var(--sans); text-decoration: none; cursor: pointer; }
 .l-nav:hover { background: color-mix(in oklab, var(--bg3) 55%, var(--side)); color: var(--p); text-decoration: none; }

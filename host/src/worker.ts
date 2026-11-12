@@ -111,6 +111,32 @@ async function listPages(env: Env) {
   return results;
 }
 
+// ─── Activity ────────────────────────────────────────────
+
+/** One thing that happened to a page: a new version, or an assistant run that a comment started. */
+export type ActivityRow =
+  | { kind: 'version'; slug: string; version: number; at: string }
+  | { kind: 'run'; slug: string; at: string; agent: string; status: string; ms: number | null; detail: string | null;
+      request: string; author: string; quote: string | null; on_version: number; finished_at: string | null };
+
+/**
+ * The newest versions and assistant runs, newest first. Runs come from the comments and agent_runs tables.
+ * A database without those tables has versions only.
+ */
+async function listActivity(env: Env, limit = 60): Promise<ActivityRow[]> {
+  const { results: versions } = await env.DB.prepare('SELECT slug, version, created_at AS at FROM versions ORDER BY created_at DESC LIMIT ?').bind(limit).all<{ slug: string; version: number; at: string }>();
+  let runs: ActivityRow[] = [];
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT c.slug, r.started_at AS at, r.agent, r.status, r.ms, r.detail, c.body AS request, c.author, c.quote, c.version AS on_version, r.finished_at
+       FROM agent_runs r JOIN comments c ON c.id = r.comment_id ORDER BY r.started_at DESC LIMIT ?`).bind(limit).all<Omit<Extract<ActivityRow, { kind: 'run' }>, 'kind'>>();
+    runs = results.map((r) => ({ kind: 'run' as const, ...r }));
+  } catch {
+    // No comments or agent_runs table in this database.
+  }
+  return [...runs, ...versions.map((v) => ({ kind: 'version' as const, ...v }))].sort((x, y) => (x.at < y.at ? 1 : -1)).slice(0, limit);
+}
+
 // ─── Folders ─────────────────────────────────────────────
 
 const FOLDER_COLUMNS = 'id, name, parent_id, color, created_at, updated_at';
@@ -429,7 +455,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'kit-css':
       return css();
     case 'library':
-      return page(libraryHtml(await listPages(env), await listFolders(env), nonce), nonce);
+      return page(libraryHtml(await listPages(env), await listFolders(env), await listActivity(env), nonce), nonce);
     case 'view': {
       const p = await getPage(env, r.slug);
       if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);

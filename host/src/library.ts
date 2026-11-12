@@ -3,6 +3,7 @@
 // moving a page, pinning and searching all redraw without a reload.
 
 import { COMMON_SCRIPT, ICON, KIT, appearance, data, icon, shell, type PageRow } from './views';
+import type { ActivityRow } from './worker';
 
 export interface FolderRow {
   id: string;
@@ -27,8 +28,15 @@ const LUCIDE: Record<string, string> = {
   panel: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+  inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+  send: '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
 };
+// The assistants' own marks (Simple Icons, CC0). Shown only where the assistant is the one acting.
+const AGENT_MARKS = { claude: "m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z", chatgpt: "M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" };
 const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCIDE[name]}</svg>`;
 
 // The brand mark without its tile, drawn in the text colour: dark on light, white on dark. The tile is for tabs and home screens.
@@ -262,17 +270,123 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
 @media (prefers-reduced-motion: reduce) {
   .fo-sheet, .fo-front, .l-caret, .l-side, .h-thumb { transition: none; }
 }
+
+/* ─── Layout options and Activity ───────────────────────── */
+.l-body { flex: 1; min-height: 0; display: flex; }
+.l-body > .h-scroll { flex: 1; min-width: 0; }
+.l-rail { display: none; }
+.l-shells { display: flex; gap: 4px; padding: 0 6px 6px; }
+.l-shells a { flex: 1; padding: 6px 4px; border-radius: 8px; text-align: center; font: 500 12px var(--sans); color: var(--s); text-decoration: none; box-shadow: inset 0 0 0 0.5px var(--b2); }
+.l-shells a[aria-current="true"] { background: var(--p); color: var(--bg); box-shadow: none; }
+
+/* Status: amber waits for you, a pulse means an assistant is working, red failed. */
+.st { --st: var(--t); display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--st); }
+.st.is-needs { --st: #d99a1e; }
+.st.is-failed { --st: #d6453d; }
+.st.is-running { --st: var(--link); animation: st-pulse 1.6s ease-in-out infinite; }
+@keyframes st-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--st) 45%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--st) 0%, transparent); } }
+.l-nav .st { margin-left: auto; }
+.l-nav .st + .l-n { margin-left: 6px; }
+.l-nav .l-n.is-on { opacity: 1; color: var(--p); }
+.fo-name .st { margin: 0 0 1px 7px; vertical-align: middle; }
+.h-badge { position: absolute; left: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 6px; border-radius: 999px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 2px 6px rgba(0, 0, 0, 0.12); font: 500 11.5px var(--sans); color: var(--p); }
+.h-badge .a-mark { width: 12px; height: 12px; }
+.h-thumb { position: relative; }
+
+/* An activity item: who did what, on which page, because of which request. */
+.a-mark { flex: none; width: 15px; height: 15px; fill: currentColor; }
+.a-list { display: flex; flex-direction: column; gap: 10px; max-width: 880px; }
+.a-item { display: grid; grid-template-columns: minmax(0, 1fr) 132px; gap: 4px 18px; padding: 14px 16px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2); }
+.a-item.is-done.is-new { box-shadow: 0 0 0 1px color-mix(in srgb, #d99a1e 70%, var(--b2)); }
+.a-who { display: flex; align-items: center; gap: 7px; min-width: 0; font: 500 13px/20px var(--sans); color: var(--s); }
+.a-who b { font-weight: 600; color: var(--p); }
+.a-who .a-when { margin-left: auto; font-size: 12px; color: var(--t); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a-page { display: block; margin: 2px 0 0; font: 600 15px/21px var(--sans); color: var(--p); text-decoration: none; }
+.a-page:hover { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.a-req { margin: 6px 0 0; padding: 0 0 0 10px; border-left: 2px solid var(--b2); font: 13.5px/1.5 var(--sans); color: var(--p); }
+.a-req .a-on { display: block; margin-top: 2px; font-size: 12px; color: var(--t); }
+.a-out { margin: 8px 0 0; font: 13.5px/1.5 var(--sans); color: var(--s); }
+.a-out.is-failed { color: #c23b33; }
+.a-live { display: flex; align-items: center; gap: 8px; margin-top: 8px; font: 500 12.5px var(--sans); color: var(--link); font-variant-numeric: tabular-nums; }
+.a-bar { flex: 1; max-width: 160px; height: 3px; border-radius: 3px; background: color-mix(in srgb, var(--link) 16%, transparent); overflow: hidden; }
+.a-bar::after { content: ""; display: block; width: 36%; height: 100%; border-radius: 3px; background: var(--link); animation: a-slide 1.6s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@keyframes a-slide { from { transform: translateX(-100%); } to { transform: translateX(280%); } }
+.a-acts { display: flex; gap: 6px; margin-top: 12px; }
+.a-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 8px; background: var(--bg2); color: var(--p); font: 500 12.5px var(--sans); text-decoration: none; cursor: pointer; }
+.a-btn:hover { background: var(--bg3); text-decoration: none; }
+.a-btn.is-main { background: var(--p); color: var(--bg); }
+.a-btn svg { width: 14px; height: 14px; }
+.a-shot { grid-column: 2; grid-row: 1 / span 6; align-self: start; display: block; border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 0.5px var(--b2); }
+.a-shot .h-thumb { border-radius: 0; box-shadow: none; }
+.a-ver { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font: 13px var(--sans); color: var(--s); border-bottom: 0.5px solid var(--b); }
+.a-ver b { font-weight: 500; color: var(--p); }
+.a-ver a { color: inherit; text-decoration: none; }
+.a-ver .a-when { margin-left: auto; color: var(--t); font-size: 12px; }
+.a-none { margin: 0; font-size: 13px; color: var(--t); }
+
+/* Option A: an inbox at the top of the sidebar. Home shows what waits for you before the folders. */
+.l-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.l-strip .a-item { grid-template-columns: minmax(0, 1fr); }
+.l-strip .a-shot { display: none; }
+
+/* Option B: folders are spaces. A rail beside the content shows the activity of the current space and asks in it. */
+[data-shell="b"] .l-rail { display: flex; flex-direction: column; flex: none; width: 340px; min-height: 0; overflow: auto; border-left: 0.5px solid var(--b); background: color-mix(in oklab, var(--bg2) 40%, var(--bg)); }
+.r-ask { position: sticky; top: 0; z-index: 1; padding: 14px 14px 12px; background: inherit; border-bottom: 0.5px solid var(--b); }
+.r-scope { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font: 500 12px var(--sans); color: var(--s); }
+.r-scope b { font-weight: 600; color: var(--p); }
+.r-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 8px 12px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2); }
+.r-box textarea { min-height: 44px; padding: 0; border: 0; resize: none; background: transparent; color: var(--p); font: 13.5px/1.45 var(--sans); outline: none; }
+.r-box textarea::placeholder { color: var(--t); }
+.r-row { display: flex; align-items: center; gap: 6px; }
+.r-who { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: var(--bg2); color: var(--s); font: 500 12px var(--sans); cursor: pointer; }
+.r-who[aria-pressed="true"] { background: var(--p); color: var(--bg); }
+.r-who .a-mark { width: 12px; height: 12px; }
+.r-send { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; }
+.r-feed { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+.r-feed h3 { display: flex; align-items: center; gap: 6px; margin: 6px 2px 2px; font: 600 12.5px var(--sans); color: var(--s); }
+.r-feed .a-item { grid-template-columns: minmax(0, 1fr); padding: 12px 13px; }
+.r-feed .a-shot { display: none; }
+.r-feed .a-page { font-size: 13.5px; line-height: 19px; }
+.r-feed .a-req, .r-feed .a-out { font-size: 12.5px; }
+[data-shell="b"] .l-side .l-nav[data-nav="recent"], [data-shell="b"] .l-side .l-nav[data-nav="pinned"], [data-shell="b"] .l-side .l-nav[data-nav="shared"] { display: none; }
+[data-shell="b"] .l-tree .l-nav { height: 34px; }
+[data-shell="b"] .l-tree .l-glyph { width: 18px; height: 18px; }
+
+/* Option C: no fixed sidebar. Home is a desk: what moved since you last looked, then the shelf of folders. */
+[data-shell="c"] .l { grid-template-columns: minmax(0, 1fr); }
+[data-shell="c"] .l-side { position: fixed; inset: 0 auto 0 0; z-index: 40; width: 272px; transform: translateX(-100%); transition: transform 0.26s cubic-bezier(0.25, 1, 0.5, 1); }
+[data-shell="c"] .l.is-drawer .l-side { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, 0.2); }
+[data-shell="c"] .l.is-drawer .l-scrim { display: block; position: fixed; inset: 0; z-index: 39; background: rgba(0, 0, 0, 0.24); }
+[data-shell="c"] #menu { display: inline-grid; }
+[data-shell="c"] .l-bar { grid-template-columns: auto minmax(0, 1fr) minmax(0, 560px) minmax(0, 1fr); padding-left: 10px; }
+[data-shell="c"] .l-bar > #menu + .l-crumb { grid-column: 2; }
+[data-shell="c"] .h-main { max-width: 1320px; margin: 0 auto; }
+.d-head { margin: 8px 0 26px; }
+.d-head h1 { margin: 0; font: 600 26px/32px var(--sans); letter-spacing: -0.02em; }
+.d-head p { margin: 6px 0 0; font-size: 13.5px; color: var(--s); }
+.d-desk { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+.d-col h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font: 600 14px/20px var(--sans); }
+.d-col h2 .l-n { font: 500 12px var(--sans); color: var(--t); }
+.d-col .a-list { max-width: none; }
+.d-col + .d-col .a-item { grid-template-columns: minmax(0, 1fr); }
+.d-col + .d-col .a-shot { display: none; }
+.d-shelf { display: grid; grid-auto-flow: column; grid-auto-columns: 168px; gap: 18px; overflow-x: auto; padding: 14px 2px 6px; scrollbar-width: thin; }
+.d-shelf .fo { max-width: none; }
+@media (max-width: 1100px) { .d-desk { grid-template-columns: minmax(0, 1fr); } [data-shell="b"] .l-rail { width: 300px; } }
+@media (max-width: 760px) { [data-shell="b"] .l-rail { display: none; } .a-item { grid-template-columns: minmax(0, 1fr); } .a-shot { display: none; } [data-shell="c"] .l-bar { grid-template-columns: auto minmax(0, 1fr) auto; } }
+
 `;
 
 /**
  * The library. The script draws it from the JSON block. The address keeps the view:
  * `/` is Home, `/?f=<folder id>` a folder, `/?v=recent|pinned|shared` a list.
  */
-export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: string) {
+export function libraryHtml(pages: PageRow[], folders: FolderRow[], activity: ActivityRow[], nonce: string) {
   const body = `<style>${LIB_CSS}</style>
 <div class="l" id="app">
   <aside class="l-side" id="side" aria-label="Library">
     <a class="l-brand" href="/">${MARK}Pages</a>
+    <div id="side-top"></div>
     <a class="l-nav" href="/" data-nav="home">${lu('home')}Home</a>
     <a class="l-nav" href="/?v=recent" data-nav="recent">${lu('clock')}Recent</a>
     <a class="l-nav" href="/?v=pinned" data-nav="pinned">${icon('pin')}Pinned<span class="l-n" id="n-pinned"></span></a>
@@ -296,6 +410,9 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
       <div class="v-pop" id="pop-more" hidden>
         ${appearance()}
         <div class="v-hr"></div>
+        <div class="v-label">Layout option</div>
+        <div class="l-shells" id="shells"><a href="/?shell=a">A. Inbox</a><a href="/?shell=b">B. Spaces</a><a href="/?shell=c">C. Desk</a></div>
+        <div class="v-hr"></div>
         <div class="v-label">Keyboard</div>
         <dl class="h-keys">
           <dt><kbd>/</kbd></dt><dd>Search</dd>
@@ -306,7 +423,7 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
         </dl>
       </div>
     </header>
-    <div class="h-scroll" id="scroll"><main class="h-main" id="main"></main></div>
+    <div class="l-body"><div class="h-scroll" id="scroll"><main class="h-main" id="main"></main></div><aside class="l-rail" id="rail" aria-label="Activity here"></aside></div>
   </div>
 </div>
 <div class="v-pop" id="pop-card" data-anchor hidden>
@@ -323,7 +440,7 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
   <button type="button" class="v-item is-danger" id="fdelete" hidden>${icon('trash')}Delete folder, keep its pages</button>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc } })}</script>`;
+<script type="application/json" id="data">${data({ pages, folders, activity, kit: KIT, marks: AGENT_MARKS, icons: { inbox: LUCIDE.inbox, activity: LUCIDE.activity, send: LUCIDE.send, check: LUCIDE.check, alert: LUCIDE.alert, home: LUCIDE.home, open: ICON.open, more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -347,7 +464,7 @@ function placeFromUrl() {
   const f = u.get('f');
   if (f && folders.some((x) => x.id === f)) return { folder: f };
   const v = u.get('v');
-  return { list: v === 'recent' || v === 'pinned' || v === 'shared' ? v : 'home' };
+  return { list: v === 'recent' || v === 'pinned' || v === 'shared' || v === 'activity' ? v : 'home' };
 }
 let place = placeFromUrl();
 const urlOf = (p) => p.folder ? '/?f=' + encodeURIComponent(p.folder) : p.list === 'home' ? '/' : '/?v=' + p.list;
@@ -381,6 +498,7 @@ function renderTree() {
     return '<a class="l-nav ' + ramp(f) + '" href="' + urlOf({ folder: f.id }) + '" data-go-folder="' + f.id + '" style="--d:' + d + '"' + (here === f.id ? ' aria-current="page"' : '') + '>'
       + '<span class="l-caret' + (kids.length ? (open ? ' is-open' : '') : ' is-none') + '" data-caret="' + f.id + '">' + svg('right') + '</span>'
       + '<svg class="l-glyph fo" viewBox="0 0 24 24" aria-hidden="true">' + D.icons.folder + '</svg>' + h(f.name)
+      + (SHELL === 'b' || SHELL === 'a' ? dot(folderState(f.id), STATE_LABEL[folderState(f.id)]) : '')
       + '<span class="l-n">' + pagesUnder(f.id).length + '</span></a>'
       + (open ? kids.map((k) => row(k, d + 1)).join('') : '');
   };
@@ -426,7 +544,7 @@ const where = (p) => { const f = folderOf(p.folder_id); return f ? f.name : 'Not
 // Outside a folder, a card says which folder holds the page. Inside one, it says when it was published.
 const subText = (p) => place.folder ? 'Published ' + ago(p.updated_at) : where(p) + ', ' + ago(p.updated_at);
 const card = (p) => '<article class="h-card" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="/p/' + p.slug + '" draggable="false">'
-  + thumb(p, Math.min(2, p.latest - 1)) + '<span class="h-title">' + h(p.title) + '</span>'
+  + thumb(p, Math.min(2, p.latest - 1)).replace(/<\\/span>$/, (() => { const r = working().find((x) => x.slug === p.slug); return r ? '<span class="h-badge">' + markOf(r.agent) + AGENT[r.agent] + ' is working</span></span>' : '</span>'; })()) + '<span class="h-title">' + h(p.title) + '</span>'
   + '<span class="h-sub">' + access(p) + kind(p) + '<span>' + h(subText(p)) + '</span><span class="h-v">v' + p.latest + '</span></span></a>' + menu(p) + '</article>';
 const row = (p) => '<article class="h-row" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="/p/' + p.slug + '" draggable="false">'
   + thumb(p, 0) + '<span class="h-title">' + h(p.title) + ' ' + kind(p) + '</span><span class="h-where">' + svg('folder') + '<span>' + h(where(p)) + '</span></span>'
@@ -449,7 +567,7 @@ function folderCard(f) {
   const when = inside[0] ? ago(inside[0].updated_at) : '';
   return '<a class="fo ' + ramp(f) + '" href="' + urlOf({ folder: f.id }) + '" data-folder="' + f.id + '">'
     + '<span class="fo-obj">' + FOLDER_BACK + sheets + '<span class="fo-front"></span></span>'
-    + '<span class="fo-label"><span class="fo-text"><span class="fo-name">' + h(f.name) + '</span><span class="fo-meta">' + h(bits.join(', ')) + (when ? ', ' + h(when) : '') + '</span></span>'
+    + '<span class="fo-label"><span class="fo-text"><span class="fo-name">' + h(f.name) + dot(folderState(f.id), STATE_LABEL[folderState(f.id)]) + '</span><span class="fo-meta">' + h(bits.join(', ')) + (when ? ', ' + h(when) : '') + '</span></span>'
     + '<button type="button" class="v-icon fo-menu" data-edit="' + f.id + '" aria-label="Edit ' + h(f.name) + '" data-tip="Edit" data-tip-end aria-expanded="false">' + svg('more') + '</button></span></a>';
 }
 
@@ -474,7 +592,7 @@ function renderCrumb() {
   if (place.folder) {
     const path = pathOf(place.folder);
     html = '<a href="/" data-crumb="">Home</a>' + path.map((f, i) => '<span class="l-sep">' + svg('right') + '</span>' + (i === path.length - 1 ? '<span class="l-here">' + h(f.name) + '</span>' : '<a href="' + urlOf({ folder: f.id }) + '" data-crumb="' + f.id + '">' + h(f.name) + '</a>')).join('');
-  } else html = '<span class="l-here">' + ({ home: 'Home', recent: 'Recent', pinned: 'Pinned', shared: 'Shared by link' })[place.list] + '</span>';
+  } else html = '<span class="l-here">' + ({ home: SHELL === 'b' ? 'Everything' : 'Home', recent: 'Recent', pinned: 'Pinned', shared: 'Shared by link', activity: 'Activity' })[place.list] + '</span>';
   c.innerHTML = html;
 }
 $('#crumb').addEventListener('click', (e) => {
@@ -489,6 +607,8 @@ function render() {
   $$('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   renderTree();
   renderCrumb();
+  renderSideTop();
+  renderRail();
   if (hits) {
     main.innerHTML = hits.length
       ? '<div class="l-head"><h2>' + hits.length + (hits.length === 1 ? ' page matches' : ' pages match') + '</h2></div><div class="h-hits">' + hits.map(hit).join('') + '</div>'
@@ -506,17 +626,139 @@ function render() {
     document.title = 'Pages';
     const pinned = pages.filter((p) => p.pinned_at).sort((a, b) => b.pinned_at.localeCompare(a.pinned_at));
     const recent = [...pages].sort(byNew);
-    if (place.list === 'recent') main.innerHTML = block('Recent', recent);
+    if (place.list === 'activity') { document.title = 'Activity \u2013 Pages'; main.innerHTML = '<div class="l-title"><h1>Activity</h1><p>Requests you made to assistants in page comments, and what came of them.</p></div>' + activityHtml(null); }
+    else if (place.list === 'recent') main.innerHTML = block('Recent', recent);
     else if (place.list === 'pinned') main.innerHTML = pinned.length ? block('Pinned', pinned) : '<div class="l-empty"><b>No pinned pages</b><span>Pin a page from its menu, or press p.</span></div>';
     else if (place.list === 'shared') { const s = recent.filter((p) => p.shared); main.innerHTML = s.length ? block('Shared by link', s) : '<div class="l-empty"><b>No shared pages</b><span>A page shows here once it has a share link.</span></div>'; }
     else {
       const top = childrenOf(null);
-      main.innerHTML = (top.length ? folderBlock(top, 'Folders') : '')
+      const n = needs();
+      if (SHELL === 'c') main.innerHTML = deskHtml();
+      else main.innerHTML = (SHELL === 'a' && n.length ? '<section class="l-block"><div class="l-head"><h2>' + dot('needs', '') + 'Needs you</h2><button type="button" class="l-more" data-see="activity">Open Activity</button></div><div class="l-strip">' + n.slice(0, 3).map(actItem).join('') + '</div></section>' : '')
+        + (top.length ? folderBlock(top, 'Folders') : '')
         + (pinned.length ? block(svg('pin') + 'Pinned', pinned) : '')
         + block('Recent', recent.slice(0, 12), recent.length > 12 ? '<button type="button" class="l-more" data-see="recent">See all ' + recent.length + '</button>' : '');
     }
   }
   select(Math.min(sel, entries().length - 1), false);
+}
+
+// ─── Layout option. ?shell=a|b|c picks one, and the choice is kept in this browser. ───
+const SHELL = (() => {
+  const q = new URLSearchParams(location.search).get('shell');
+  try { if (q) localStorage.setItem('ap-shell', q); return ['a', 'b', 'c'].includes(q) ? q : (localStorage.getItem('ap-shell') || 'a'); } catch { return q || 'a'; }
+})();
+document.body.dataset.shell = SHELL;
+$$('#shells a').forEach((a) => a.setAttribute('aria-current', String(a.getAttribute('href').endsWith(SHELL))));
+
+// ─── Activity: assistant runs (from comments) and published versions ───
+const AGENT = { claude: 'Claude', chatgpt: 'ChatGPT' };
+const markOf = (a) => '<svg class="a-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="' + (D.marks[a] || '') + '"/></svg>';
+const runs = D.activity.filter((a) => a.kind === 'run');
+const versionsAct = D.activity.filter((a) => a.kind === 'version');
+const runKey = (r) => r.slug + '@' + r.at;
+const reviewed = (() => { try { return new Set(JSON.parse(localStorage.getItem('ap-reviewed') || '[]')); } catch { return new Set(); } })();
+const saveReviewed = () => { try { localStorage.setItem('ap-reviewed', JSON.stringify([...reviewed])); } catch {} };
+const isNeeds = (r) => r.status === 'failed' || (r.status === 'done' && !reviewed.has(runKey(r)));
+const needs = () => runs.filter(isNeeds);
+const working = () => runs.filter((r) => r.status === 'running');
+function slugState(slug) {
+  const rs = runs.filter((r) => r.slug === slug);
+  return rs.some((r) => r.status === 'running') ? 'running' : rs.some((r) => r.status === 'failed') ? 'failed' : rs.some(isNeeds) ? 'needs' : '';
+}
+function folderState(id) {
+  const st = pagesUnder(id).map((p) => slugState(p.slug));
+  return st.includes('running') ? 'running' : st.includes('failed') ? 'failed' : st.includes('needs') ? 'needs' : '';
+}
+const dot = (st, label) => st ? '<span class="st is-' + st + '" title="' + label + '"></span>' : '';
+const STATE_LABEL = { running: 'An assistant is working here', needs: 'A change waits for your review', failed: 'A request failed' };
+function dur(ms) { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; }
+function actItem(r) {
+  const p = pageOf(r.slug);
+  const title = p ? p.title : r.slug;
+  const verb = r.status === 'running' ? 'is working on' : r.status === 'failed' ? 'could not finish' : 'changed';
+  const when = r.status === 'running' ? '' : '<span class="a-when">' + ago(r.finished_at || r.at) + '</span>';
+  let out = '';
+  if (r.status === 'running') out = '<div class="a-live" data-since="' + r.at + '"><span class="a-bar"></span><span class="a-t">' + dur(Date.now() - Date.parse(r.at)) + '</span></div>';
+  else if (r.status === 'failed') out = '<p class="a-out is-failed">' + h(r.detail && r.detail.startsWith('not_signed_in') ? AGENT[r.agent] + ' is not connected, so the request did not run.' : (r.detail || 'The run failed.')) + '</p>';
+  else out = '<p class="a-out">' + h(r.detail || '') + (r.ms ? ' Took ' + dur(r.ms) + '.' : '') + '</p>';
+  const acts = r.status === 'done' && isNeeds(r)
+    ? '<div class="a-acts"><a class="a-btn is-main" href="/p/' + r.slug + '">Review the change</a><button type="button" class="a-btn" data-reviewed="' + h(runKey(r)) + '">' + svg('check') + 'Mark reviewed</button></div>'
+    : r.status === 'failed' ? '<div class="a-acts"><button type="button" class="a-btn is-main" data-connect="' + r.agent + '">Connect ' + AGENT[r.agent] + '</button><a class="a-btn" href="/p/' + r.slug + '">Open the comment</a></div>' : '';
+  return '<article class="a-item is-' + r.status + (isNeeds(r) ? ' is-new' : '') + '">'
+    + '<div class="a-who">' + markOf(r.agent) + '<span><b>' + AGENT[r.agent] + '</b> ' + verb + '</span>' + when + '</div>'
+    + '<a class="a-page" href="/p/' + r.slug + '">' + h(title) + '</a>'
+    + '<blockquote class="a-req">' + h(r.request.replace(/^@\\w+\\s*/, '')) + '<span class="a-on">You asked' + (r.quote ? ' about \u201c' + h(r.quote) + '\u201d' : '') + ', ' + ago(r.at) + '</span></blockquote>'
+    + out + acts
+    + (p ? '<a class="a-shot" href="/p/' + r.slug + '" tabindex="-1" aria-hidden="true">' + thumb(p) + '</a>' : '')
+    + '</article>';
+}
+const verRow = (v) => { const p = pageOf(v.slug); return p ? '<div class="a-ver">' + svg('activity') + '<a href="/p/' + v.slug + '"><b>' + h(p.title) + '</b>, version ' + v.version + ' published</a><span class="a-when">' + ago(v.at) + '</span></div>' : ''; };
+const listOr = (items, none) => items.length ? '<div class="a-list">' + items.join('') + '</div>' : '<p class="a-none">' + none + '</p>';
+function activityHtml(scope) {
+  const inScope = (x) => !scope || pagesUnder(scope).some((p) => p.slug === x.slug);
+  const n = needs().filter(inScope), w = working().filter(inScope);
+  const done = runs.filter((r) => !isNeeds(r) && r.status !== 'running' && inScope(r));
+  return '<section class="l-block"><div class="l-head"><h2>' + dot(n.length ? 'needs' : '', '') + 'Needs you</h2></div>' + listOr(n.map(actItem), 'Nothing waits for you.') + '</section>'
+    + '<section class="l-block"><div class="l-head"><h2>' + dot(w.length ? 'running' : '', '') + 'Working now</h2></div>' + listOr(w.map(actItem), 'No assistant is working.') + '</section>'
+    + '<section class="l-block"><div class="l-head"><h2>Earlier</h2></div>' + listOr(done.map(actItem), 'No earlier requests.') + '<div style="margin-top:14px">' + versionsAct.filter(inScope).slice(0, 12).map(verRow).join('') + '</div></section>';
+}
+// Running timers tick once a second.
+setInterval(() => $$('.a-live[data-since]').forEach((el) => { el.querySelector('.a-t').textContent = dur(Date.now() - Date.parse(el.dataset.since)); }), 1000);
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-reviewed]');
+  if (b) { reviewed.add(b.dataset.reviewed); saveReviewed(); render(); toast('Marked reviewed'); return; }
+  const c = e.target.closest('[data-connect]');
+  if (c) toast('Connecting an assistant is not built in this prototype');
+});
+
+// Option A: the inbox rows at the top of the sidebar.
+function renderSideTop() {
+  const el = $('#side-top');
+  if (SHELL !== 'a') { el.innerHTML = ''; return; }
+  const n = needs().length, w = working().length, on = place.list === 'activity';
+  el.innerHTML = '<a class="l-nav" href="/?v=activity" data-nav="activity"' + (on ? ' aria-current="page"' : '') + '>' + svg('inbox') + 'Needs you' + dot(n ? 'needs' : '', '') + '<span class="l-n is-on">' + (n || '') + '</span></a>'
+    + '<a class="l-nav" href="/?v=activity#working" data-nav="activity">' + svg('activity') + 'Working now' + dot(w ? 'running' : '', '') + '<span class="l-n is-on">' + (w || '') + '</span></a>'
+    + '<div style="height:12px"></div>';
+}
+
+// Option B: the rail. Its scope follows where you are: everything at Home, one folder inside a folder.
+function renderRail() {
+  const el = $('#rail');
+  if (SHELL !== 'b') { el.innerHTML = ''; return; }
+  const f = place.folder ? folderOf(place.folder) : null;
+  const n = needs().filter((r) => !f || pagesUnder(f.id).some((p) => p.slug === r.slug));
+  const w = working().filter((r) => !f || pagesUnder(f.id).some((p) => p.slug === r.slug));
+  const rest = runs.filter((r) => !isNeeds(r) && r.status !== 'running' && (!f || pagesUnder(f.id).some((p) => p.slug === r.slug)));
+  el.innerHTML = '<div class="r-ask"><p class="r-scope">Ask in <b>' + (f ? h(f.name) : 'all pages') + '</b></p>'
+    + '<div class="r-box"><textarea id="ask" placeholder="' + (f ? 'Make a page from the notes in this folder\u2026' : 'Ask for a new page or a change\u2026') + '"></textarea>'
+    + '<div class="r-row"><button type="button" class="r-who" aria-pressed="true">' + markOf('claude') + 'Claude</button><button type="button" class="r-who" aria-pressed="false">' + markOf('chatgpt') + 'ChatGPT</button>'
+    + '<button type="button" class="v-icon r-send" id="ask-send" aria-label="Send">' + svg('send') + '</button></div></div></div>'
+    + '<div class="r-feed">'
+    + (n.length ? '<h3>' + dot('needs', '') + 'Needs you</h3>' + n.map(actItem).join('') : '')
+    + (w.length ? '<h3>' + dot('running', '') + 'Working now</h3>' + w.map(actItem).join('') : '')
+    + (rest.length ? '<h3>Earlier</h3>' + rest.map(actItem).join('') : '')
+    + (!n.length && !w.length && !rest.length ? '<p class="a-none">No requests in this folder yet.</p>' : '')
+    + '</div>';
+}
+document.addEventListener('click', (e) => {
+  const w = e.target.closest('.r-who');
+  if (w) { $$('.r-who').forEach((x) => x.setAttribute('aria-pressed', String(x === w))); return; }
+  if (e.target.closest('#ask-send')) toast('Sending a request from here is not built in this prototype');
+});
+
+// Option C: the desk.
+function deskHtml() {
+  const n = needs(), w = working();
+  const top = childrenOf(null);
+  const recent = [...pages].sort(byNew);
+  const count = n.length + w.length;
+  return '<div class="d-head"><h1>' + (count ? (n.length ? n.length + (n.length === 1 ? ' change waits' : ' changes wait') + ' for you' : 'Nothing waits for you') : 'All caught up') + '</h1>'
+    + '<p>' + (w.length ? w.length + (w.length === 1 ? ' assistant is' : ' assistants are') + ' working. ' : '') + pages.length + ' pages in ' + folders.length + ' folders.</p></div>'
+    + '<div class="d-desk"><div class="d-col"><h2>' + dot(n.length ? 'needs' : '', '') + 'Needs you<span class="l-n">' + (n.length || '') + '</span></h2>' + listOr(n.slice(0, 3).map(actItem), 'Nothing waits for you.') + (n.length > 3 ? '<button type="button" class="l-more" data-see="activity" style="margin-top:10px">See all ' + n.length + '</button>' : '') + '</div>'
+    + '<div class="d-col"><h2>' + dot(w.length ? 'running' : '', '') + 'Working now<span class="l-n">' + (w.length || '') + '</span></h2>' + listOr(w.map(actItem), 'No assistant is working.') + '</div></div>'
+    + '<section class="l-block" style="margin-top:40px"><div class="l-head"><h2>Folders</h2></div><div class="d-shelf">' + top.map(folderCard).join('') + '</div></section>'
+    + block('Recent', recent.slice(0, 12), recent.length > 12 ? '<button type="button" class="l-more" data-see="recent">See all ' + recent.length + '</button>' : '');
 }
 const entries = () => $$('#main [data-slug]');
 function select(i, scroll = true) {

@@ -52,6 +52,8 @@ const MCP_URL = `http://127.0.0.1:${PROXY_PORT}/mcp`;
  * exists that could renew it apart from the volume. Cloudflare has no such volume, and the Durable Object never sets this.
  */
 const PERSISTENT = E.AGENTD_DIR_PERSISTENT === '1';
+// The folder where the programs run. A test on a machine with no /work sets another folder.
+const WORK = E.AGENTD_WORK || '/work';
 
 /** The allow lists. sandbox/egress-proxy.mjs has them; the fallback is the list of commit 23cbb93. test/agentd.test.mjs checks both. */
 export const ALLOW = {
@@ -118,7 +120,7 @@ export function programEnv(engine = ENGINE) {
 /** Each program runs as uid 10001 in its own process group, so a kill reaches its children too. */
 const asUser = () => (isRoot() ? { uid: UID, gid: GID } : {});
 export const exec = (engine, args, { cwd } = {}) => {
-  const child = spawn(BIN[engine === 'codex' ? 'codex' : 'claude'], args, { cwd: cwd || '/work', env: programEnv(engine), stdio: ['pipe', 'pipe', 'pipe'], detached: true, ...asUser() });
+  const child = spawn(BIN[engine === 'codex' ? 'codex' : 'claude'], args, { cwd: cwd || WORK, env: programEnv(engine), stdio: ['pipe', 'pipe', 'pipe'], detached: true, ...asUser() });
   procs.add(child);
   child.on('close', () => procs.delete(child));
   return child;
@@ -207,7 +209,7 @@ export async function save(why) {
 
 /** Starts the Claude process that waits for the next job, when the folder has a sign-in and nothing else runs. */
 function prewarm() {
-  if (ENGINE !== 'claude' || !S.prewarm || !S.signedIn || S.run || S.login || (S.warm && !S.warm.dead)) return;
+  if (ENGINE !== 'claude' || !S.prewarm || !S.signedIn || S.run || S.login?.status === 'pending' || (S.warm && !S.warm.dead)) return;
   S.warm = RC.warmClaude({ exec, mcp: RC.mcpConfig(MCP_URL), model: S.model, effort: S.effort });
   log({ ev: 'prewarm', model: S.model ?? 'default' });
 }
@@ -253,7 +255,8 @@ async function init(b) {
 
 function startRun(b) {
   if (S.run) return [409, { error: 'a run is running' }];
-  if (S.login) return [409, { error: 'a sign-in is running' }];
+  // Only a sign-in that still waits blocks a run. A sign-in that ended stays in S.login for its status.
+  if (S.login?.status === 'pending') return [409, { error: 'a sign-in is running' }];
   const nonce = String(b.nonce ?? '');
   if (!/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) return [400, { error: 'nonce must be 16 to 64 URL characters' }];
   const job = { ...b.job, engine: ENGINE, mcp_url: MCP_URL, callback_url: `${UPSTREAM}/cb/${nonce}` };
@@ -269,7 +272,7 @@ function startRun(b) {
   run.done = (async () => {
     let out;
     try {
-      out = await RC.runJob(job, { exec: (e, a, o) => (run.child = exec(e, a, o)), mcpUrl: MCP_URL, warm, cwd: '/work', timeoutMs: TIMEOUT_MS, post, postProgress: (url, body) => post(url, body, 2000), kill: () => { run.killed = true; if (run.child) killGroup(run.child); } });
+      out = await RC.runJob(job, { exec: (e, a, o) => (run.child = exec(e, a, o)), mcpUrl: MCP_URL, warm, cwd: WORK, timeoutMs: TIMEOUT_MS, post, postProgress: (url, body) => post(url, body, 2000), kill: () => { run.killed = true; if (run.child) killGroup(run.child); } });
     } catch (e) {
       out = { ok: false, status: 'failed', error: String(e.message || e).slice(0, 300) };
       await post(job.callback_url, { status: 'failed', detail: `agentd: ${out.error}` }).catch(() => null);

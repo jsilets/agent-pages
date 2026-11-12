@@ -250,7 +250,7 @@ Each person connects Claude and ChatGPT with their own plan. The sandbox runner 
 The ⋯ menu in the bar and the `@` list in a comment box open "Assistants". The library shows the state of each assistant in a row at the bottom of its sidebar. The viewer shows it in a chip in the bar. Under 761 px the library has no sidebar, so its bar shows the chip. A click on the row or on the chip opens "Assistants" too. It shows the state of each assistant, a Connect or Disconnect button, and the models.
 
 - Connect opens one main button, "Continue to Claude" or "Continue to ChatGPT". It opens the page of the provider in a new tab. The person signs in there.
-- Claude then shows a code. The person pastes it into the dialog, with Cmd+V or with the Paste button. The dialog sends a pasted code at once.
+- Claude then shows a code. The person pastes it into the dialog. The dialog sends a pasted code at once.
 - ChatGPT needs a short code that the dialog shows in large letters, with a Copy button. The dialog asks for the state every 2 seconds until it says "Connected".
 - Disconnect needs a second click to confirm.
 - The models come from the runner, for example "Faster" and "More careful". The default has a tag. A click saves the choice at once, and each job of that person carries `model`.

@@ -14,6 +14,14 @@ const upstream = createServer((req, res) => { const b = []; req.on('data', (d) =
 await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
 process.env.AGENTD_UPSTREAM = `http://127.0.0.1:${upstream.address().port}`;
 process.env.AGENTD_PROXY_PORT = '0';
+// A stand-in for the Claude program: it prints the sign-in URL, waits for one line, and exits with 1.
+const fakeBin = join(mkdtempSync(join(tmpdir(), 'agentd-bin-')), 'claude');
+writeFileSync(fakeBin, `#!${process.execPath}
+if (process.argv.includes('login')) { console.log('Open https://claude.com/cai/oauth/authorize?code=true&state=x'); console.log('Paste code here if prompted >'); process.stdin.once('data', () => process.exit(1)); }
+else { console.log('{"loggedIn":false}'); }
+`, { mode: 0o755 });
+process.env.CLAUDE_BIN = fakeBin;
+process.env.AGENTD_WORK = mkdtempSync(join(tmpdir(), 'agentd-work-'));
 const A = await import('../agentd/agentd.mjs');
 after(() => upstream.close());
 
@@ -108,4 +116,25 @@ test('the proxy: /mcp goes to the Durable Object with the token of agentd; CONNE
 test('rootMount reads the source and the type of the last mount on /', () => {
   assert.deepEqual(A.rootMount('none / tmpfs rw 0 0\noverlay / overlay rw,relatime,lowerdir=/x 0 0\ntmpfs /tmp tmpfs rw 0 0\n'), { source: 'overlay', type: 'overlay' });
   assert.equal(A.rootMount('tmpfs /tmp tmpfs rw 0 0\n'), null);
+});
+
+test('control: a sign-in that ended does not block a run; a sign-in that waits does', async () => {
+  const server = A.control();
+  const port = await listen(server);
+  const token = 't'.repeat(40);
+  const call = (path, body) => fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-agentd-token': token }, body: JSON.stringify(body) });
+  try {
+    await call('/init', { token, key: Buffer.alloc(32, 3).toString('base64'), aad: 'u/claude', archive: null, prewarm: false });
+    const login = await call('/login', {});
+    assert.equal(login.status, 200);
+    const { id } = await login.json();
+    const busy = await call('/run', { nonce: 'n'.repeat(20), job: {} });
+    assert.equal(busy.status, 409);
+    assert.equal((await busy.json()).error, 'a sign-in is running');
+    await call('/login/code', { id, code: 'abcdefgh1234' });
+    for (let i = 0; i < 100; i++) { const st = await (await call('/login/status', { id })).json(); if (st.status !== 'pending') break; await new Promise((r) => setTimeout(r, 50)); }
+    // The sign-in ended. The run now gets the answer for its own fault (a job with no fields), not the sign-in answer.
+    const after = await call('/run', { nonce: 'n'.repeat(20), job: {} });
+    assert.equal(after.status, 400);
+  } finally { server.close(); }
 });

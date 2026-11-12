@@ -120,6 +120,22 @@ describe('runSandboxAgent', () => {
       expect(db.ran.some((r) => r.q.startsWith('UPDATE agent_runs'))).toBe(false);
     }
   });
+  it('sends the runner secret as the header x-runner-secret when the host has one, and no such header with no secret', async () => {
+    for (const secret of ['s3cret', undefined]) {
+      const fetched = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 202 }));
+      vi.stubGlobal('fetch', fetched);
+      await runSandboxAgent({ ...env(fakeDb(), 'http://runner/run'), SANDBOX_RUNNER_SECRET: secret }, comment(), ORIGIN);
+      expect((fetched.mock.calls[0][1].headers as Record<string, string>)['x-runner-secret']).toBe(secret);
+    }
+  });
+  it('records the start of the run as the first event', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 202 })));
+    const db = fakeDb();
+    await runSandboxAgent(env(db, 'http://runner/run'), comment(), ORIGIN);
+    const runId = db.ran.find((r) => r.q.startsWith('INSERT INTO agent_runs'))!.args[0];
+    const event = db.ran.find((r) => r.q.includes('INSERT INTO run_events'))!;
+    expect([event.args[0], event.args[1], event.args[3]]).toEqual([runId, null, 'started']);
+  });
   it('stores a failure when the runner does not take the job', async () => {
     for (const fetched of [vi.fn(async () => new Response('no', { status: 500 })), vi.fn(async () => Promise.reject(new Error('connection refused')))]) {
       vi.stubGlobal('fetch', fetched);
@@ -138,7 +154,10 @@ describe('handleRunResult', () => {
     const out = await post(JSON.stringify({ status: 'not_signed_in', detail: 'Not logged in', ms_total: 900 }));
     expect(out.status).toBe(200);
     expect(out.body).toEqual({ status: 'failed' });
-    expect(out.ran).toHaveLength(2);
+    // The update of the run, the delete of its connector token, and the event that tells the viewer.
+    expect(out.ran).toHaveLength(3);
+    expect(out.ran[2].q).toContain('INSERT INTO run_events');
+    expect(out.ran[2].args.slice(0, 2).concat(out.ran[2].args[3])).toEqual([ID, null, 'failed']);
     expect([out.ran[0].args[0], out.ran[0].args[1], out.ran[0].args[3]]).toEqual([ID, 'failed', 'not_signed_in: Not logged in']);
     expect(out.ran[0].q).toContain("status = 'running'");
   });

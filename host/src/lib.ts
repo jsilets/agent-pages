@@ -98,6 +98,9 @@ export type Route =
   | { kind: 'api-connector-token'; token: string }
   | { kind: 'mcp'; token: string }
   | { kind: 'run-result'; id: string }
+  | { kind: 'run-progress'; id: string }
+  | { kind: 'api-activity'; slug: string }
+  | { kind: 'api-comment-run'; id: string }
   | { kind: 'not-found' };
 
 const NUM = /^[1-9][0-9]{0,8}$/;
@@ -130,14 +133,18 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'pin') return { kind: 'api-pin', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'comments') return { kind: 'api-comments', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'activity') return { kind: 'api-activity', slug: s };
   }
   if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'resolve') return { kind: 'api-comment-resolve', id: p[2] };
+  if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'run') return { kind: 'api-comment-run', id: p[2] };
   if (path === '/api/connector-tokens') return { kind: 'api-connector-tokens' };
   if (p[0] === 'api' && p[1] === 'connector-tokens' && p.length === 3 && (isTokenId(p[2]) || isToken(p[2]))) return { kind: 'api-connector-token', token: p[2] };
   // The MCP connector takes any token text here. So a wrong token gets a 404 from the connector, not an Access error.
   if (p[0] === 's' && p[1] === '_mcp' && p.length === 3) return { kind: 'mcp', token: p[2] };
   // The sandbox runner reports the result of a run here. The run id is a secret, like a connector token.
   if (p[0] === 's' && p[1] === '_run' && p.length === 3 && isToken(p[2])) return { kind: 'run-result', id: p[2] };
+  // The runner reports what the assistant does during the run. The same run id is the only check.
+  if (p[0] === 's' && p[1] === '_run' && p.length === 4 && isToken(p[2]) && p[3] === 'progress') return { kind: 'run-progress', id: p[2] };
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'raw') return { kind: 'share-raw', token: p[1] };

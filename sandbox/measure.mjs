@@ -4,7 +4,8 @@
 //   node sandbox/measure.mjs http://localhost:8802 <group>/<name> "@claude fix the typo in the title"
 //
 // It prints the times from the comment POST, in milliseconds, with the reply of the assistant and the run record.
-// t_post is the time of the comment POST. The runner log has t_first_tool, so the difference is the time to the first tool call.
+// t_post is the time of the comment POST. The runner log has ms_container and ms_first_tool for the run: their sum is the
+// time from the job to the first tool call. PERF.md has the measurements.
 const [base, slug, body] = process.argv.slice(2);
 if (!base || !slug || !body) { console.error('usage: measure.mjs <host URL> <slug> <comment text>'); process.exit(2); }
 const api = async (path, init) => { const r = await fetch(base + path, init); if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`); return r.json(); };

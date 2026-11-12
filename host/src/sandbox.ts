@@ -1,8 +1,9 @@
 // Starts Claude Code or Codex in a sandbox for a comment that mentions @claude or @chatgpt, and records each run in agent_runs.
 // The Worker does not wait for the run. The runner answers 202 at once and reports the result later at
 // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
+import { noteActivity, pruneActivity } from './activity';
 import { newToken, newTokenId, readJson, type Mention } from './lib';
-import type { Comment, Env, Thread } from './types';
+import type { Comment, Env, Refusal, Thread } from './types';
 
 /** The program that the runner starts for each mention. Codex uses the ChatGPT sign-in of the person. */
 const ENGINES = { claude: 'claude', chatgpt: 'codex' } as const;
@@ -10,6 +11,8 @@ const ENGINES = { claude: 'claude', chatgpt: 'codex' } as const;
 export const TOKEN_TTL_MS = 15 * 60 * 1000;
 /** The runner stops the assistant after 180 seconds. A run with no result after this time shows as failed. */
 export const STALE_MS = 5 * 60 * 1000;
+/** The events of a run stay this long after the run ends. A new run on the page deletes the older ones. */
+const ACTIVITY_TTL_MS = 10 * 60 * 1000;
 const MAX_RESULT_BYTES = 64 * 1024;
 const MAX_DETAIL = 500;
 
@@ -28,6 +31,10 @@ export interface Job {
 
 /** The latest run of a thread, as the comments API returns it. */
 export interface RunStatus {
+  /** The public id of the run, as the activity route returns it. */
+  id?: string | null;
+  /** The comment that started the run. */
+  comment_id?: string;
   /** The mention that started the run: 'claude' or 'chatgpt'. */
   agent: string;
   status: 'running' | 'done' | 'failed';
@@ -64,6 +71,8 @@ async function finishRun(env: Env, id: string, status: 'done' | 'failed', detail
     .run();
   if (!res.meta.changes) return false;
   await env.DB.prepare('DELETE FROM connector_tokens WHERE id = (SELECT token_id FROM agent_runs WHERE id = ?)').bind(id).run();
+  // The end is an event too, so a viewer that polls the activity of the page sees it at once.
+  await noteActivity(env, id, status);
   return true;
 }
 
@@ -76,9 +85,12 @@ export async function runSandboxAgent(env: Env, comment: Comment, origin: string
   const id = newToken();
   const { token, tokenId } = await runToken(env, agent, comment.slug);
   await env.DB.prepare("INSERT INTO agent_runs (id, comment_id, agent, status, started_at, token_id) VALUES (?, ?, ?, 'running', ?, ?)").bind(id, comment.id, agent, new Date().toISOString(), tokenId).run();
+  // The first event of the run. The viewer shows the reaction on the comment from it.
+  await pruneActivity(env, comment.slug, new Date(Date.now() - ACTIVITY_TTL_MS).toISOString()).catch((e) => console.error('activity prune', e));
+  await noteActivity(env, id, 'started');
   try {
     const job: Job = { mcp_url: `${origin}/s/_mcp/${token}`, comment_id: comment.id, slug: comment.slug, agent_label: agent, engine: ENGINES[agent], user: comment.author, callback_url: `${origin}/s/_run/${id}` };
-    const res = await fetch(env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
+    const res = await fetch(env.SANDBOX_RUNNER_URL, { method: 'POST', headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) }, body: JSON.stringify(job), signal: AbortSignal.timeout(10_000) });
     if (res.status !== 202) throw new Error(`it answered ${res.status}`);
   } catch (e) {
     await finishRun(env, id, 'failed', `runner: ${e instanceof Error ? e.message : String(e)}`.slice(0, MAX_DETAIL));
@@ -111,20 +123,44 @@ interface RunRow extends RunStatus {
   thread: string;
 }
 
+/** A run that is too old to be running counts as failed. */
+const settled = <T extends RunStatus>(r: T, now: number): T => (r.status === 'running' && now - Date.parse(r.started_at) > STALE_MS ? { ...r, status: 'failed', detail: 'timeout: the runner sent no result' } : r);
+
 /** The latest run of each thread, from rows that are oldest first. A run that is too old to be running counts as failed. */
 export function latestRuns(rows: RunRow[], now: number): Map<string, RunStatus> {
   const out = new Map<string, RunStatus>();
-  for (const { thread, ...r } of rows) out.set(thread, r.status === 'running' && now - Date.parse(r.started_at) > STALE_MS ? { ...r, status: 'failed', detail: 'timeout: the runner sent no result' } : r);
+  for (const { thread, ...r } of rows) out.set(thread, settled(r, now));
   return out;
 }
 
-/** Adds `run` to each thread of a page: the latest run that a comment of the thread started, or null. */
-export async function withRuns(env: Env, slug: string, threads: Thread[]): Promise<(Thread & { run: RunStatus | null })[]> {
+/**
+ * Adds two members to each thread of a page. `run` is the latest run that a comment of the thread started, or null.
+ * `runs` has the latest run of each comment of the thread that started one, by comment id. The viewer shows it on that comment.
+ */
+export async function withRuns(env: Env, slug: string, threads: Thread[]): Promise<(Thread & { run: RunStatus | null; runs: Record<string, RunStatus> })[]> {
   const { results } = await env.DB.prepare(
-    'SELECT COALESCE(c.parent_id, c.id) AS thread, r.agent, r.status, r.started_at, r.detail FROM agent_runs r JOIN comments c ON c.id = r.comment_id WHERE c.slug = ? ORDER BY r.started_at, r.rowid',
+    'SELECT COALESCE(c.parent_id, c.id) AS thread, r.comment_id, r.token_id AS id, r.agent, r.status, r.started_at, r.detail FROM agent_runs r JOIN comments c ON c.id = r.comment_id WHERE c.slug = ? ORDER BY r.started_at, r.rowid',
   )
     .bind(slug)
     .all<RunRow>();
-  const runs = latestRuns(results, Date.now());
-  return threads.map((t) => ({ ...t, run: runs.get(t.id) ?? null }));
+  const now = Date.now();
+  const runs = latestRuns(results, now);
+  const byThread = new Map<string, Record<string, RunStatus>>();
+  for (const { thread, ...r } of results) if (r.comment_id) byThread.set(thread, { ...byThread.get(thread), [r.comment_id]: settled(r, now) });
+  return threads.map((t) => ({ ...t, run: runs.get(t.id) ?? null, runs: byThread.get(t.id) ?? {} }));
+}
+
+/**
+ * Starts a run again for a comment that has a mention: the "Try again" button of the viewer. Returns the reason when no run can start.
+ * A run of the comment that is too old to be running ends as failed first.
+ */
+export async function rerunComment(env: Env, comment: Comment, origin: string): Promise<Refusal | (() => Promise<void>)> {
+  if (!comment.mention) return { status: 400, error: 'the comment has no @claude or @chatgpt' };
+  if (!env.SANDBOX_RUNNER_URL || !sandboxAgents(env).includes(comment.mention)) return { status: 503, error: `no sandbox runner handles @${comment.mention}` };
+  const { results } = await env.DB.prepare("SELECT id, started_at FROM agent_runs WHERE comment_id = ? AND status = 'running'").bind(comment.id).all<{ id: string; started_at: string }>();
+  for (const r of results) {
+    if (Date.now() - Date.parse(r.started_at) <= STALE_MS) return { status: 409, error: 'a run for this comment is running' };
+    await finishRun(env, r.id, 'failed', 'timeout: the runner sent no result');
+  }
+  return () => runSandboxAgent(env, comment, origin);
 }

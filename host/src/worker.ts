@@ -6,11 +6,12 @@ import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
+import { handleRunProgress, pageActivity } from './activity';
 import { onCommentCreated } from './agents';
-import { addComment, listThreads, resolveThread } from './comments';
+import { addComment, getComment, listThreads, resolveThread } from './comments';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, newToken, newTokenId, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, readJson, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { handleMcp } from './mcp';
-import { handleRunResult, withRuns } from './sandbox';
+import { handleRunResult, rerunComment, withRuns } from './sandbox';
 import type { Env, Refusal, Stored } from './types';
 import { KIT, libraryHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
 
@@ -278,6 +279,7 @@ async function deletePage(env: Env, slug: string) {
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
     // The runs go first, because a run finds its page through its comment.
     env.DB.prepare('DELETE FROM agent_runs WHERE comment_id IN (SELECT id FROM comments WHERE slug = ?)').bind(slug),
+    env.DB.prepare('DELETE FROM run_events WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM connector_tokens WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM comments WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
@@ -348,6 +350,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (r.kind === 'mcp') return handleMcp(req, env, ctx, r.token, url.origin, storeVersion);
   // The sandbox runner reports a run here. The secret run id is the only check.
   if (r.kind === 'run-result') return handleRunResult(req, env, r.id);
+  if (r.kind === 'run-progress') return handleRunProgress(req, env, r.id);
 
   const who = await identify(req, env);
   if (!who) return fail(403, 'Cloudflare Access did not sign this request');
@@ -436,6 +439,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'api-comment-resolve':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return (await resolveThread(env, r.id)) ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such thread');
+    case 'api-comment-run': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const c = await getComment(env, r.id);
+      if (!c) return fail(404, 'no such comment');
+      const start = await rerunComment(env, c, url.origin);
+      if (typeof start !== 'function') return fail(start.status, start.error);
+      ctx.waitUntil(start().catch((e) => console.error('rerun', c.id, e)));
+      return json({ started: true }, 202);
+    }
+    case 'api-activity': {
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      const since = +(url.searchParams.get('since') || 0);
+      const a = await pageActivity(env, r.slug, Number.isSafeInteger(since) && since > 0 ? since : 0);
+      return a ? json(a) : fail(404, 'no such page');
+    }
     case 'api-connector-tokens': {
       if (method === 'GET') {
         const at = now();

@@ -1,6 +1,7 @@
 // The MCP connector at POST /s/_mcp/<token>: MCP Streamable HTTP with no session and no SSE.
 // Each POST carries one JSON-RPC 2.0 message, and the answer is one JSON body.
 // The connector token is the only check. The tools reach pages and comments, and nothing else.
+import { editEvents, noteActivity, recordActivity } from './activity';
 import { addComment, getComment, listThreads, resolveThread } from './comments';
 import { applyEdits, blobKey, isSlug, isToken, readJson, withoutKit, type Edit } from './lib';
 import { RpcError, type Comment, type Env, type Handler, type McpContext, type StoreVersion, type Thread } from './types';
@@ -182,10 +183,14 @@ const tools: Record<string, Tool> = {
       comment = await getComment(env, str(args.comment_id, 'comment_id'));
       if (!comment || comment.slug !== p.slug) throw new ToolError(`no comment on ${p.slug} has the id ${args.comment_id}`);
     }
-    const out = applyEdits(await pageHtml(env, p), edits);
+    const before = await pageHtml(env, p);
+    const out = applyEdits(before, edits);
     if ('failed' in out) throw new ToolError(`Edit ${out.failed} of ${edits.length} failed: its old_text has ${out.matches} ${out.matches === 1 ? 'match' : 'matches'} in the HTML, and it must have exactly 1. The tool stored nothing.`);
+    // The viewer shows the cursor at each edit while the host stores the version. These events need no support from the runner.
+    if (ctx.run) for (const e of editEvents(before, edits, new Date().toISOString())) await recordActivity(env, ctx.run, e).catch((err) => console.error('activity edit', err));
     const stored = await store(env, x, p.slug, out.html, ctx.origin);
     if ('error' in stored) throw new ToolError(`The tool stored nothing: ${stored.error}`);
+    await noteActivity(env, ctx.run, 'version', { version: stored.version });
     return { slug: stored.slug, version: stored.version, previous_version: p.latest, url: stored.url, version_url: stored.versionUrl, ...(comment ? { comment_id: comment.id } : {}), ...(stored.audit ? { audit: stored.audit } : {}) };
   },
   async reply_to_comment(env, args, ctx) {
@@ -224,6 +229,7 @@ export function methods(x: ExecutionContext, store: StoreVersion): Record<string
       const { name, arguments: args } = (params ?? {}) as { name?: unknown; arguments?: unknown };
       const tool = typeof name === 'string' && Object.hasOwn(tools, name) ? tools[name] : null;
       if (!tool) throw new RpcError(-32602, `no such tool: ${String(name)}`);
+      await noteActivity(env, ctx.run, 'tool', { tool: name as string });
       try {
         const out = await tool(env, args && typeof args === 'object' ? (args as Args) : {}, ctx, x, store);
         return 'content' in out ? out : { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out };
@@ -298,14 +304,16 @@ function modernError(req: Request, m: Request2026): object | null {
 export async function handleMcp(req: Request, env: Env, x: ExecutionContext, token: string, origin: string, store: StoreVersion): Promise<Response> {
   if (req.method !== 'POST') return reply({ error: 'the connector takes POST only' }, 405, { allow: 'POST' });
   // The token is the primary key, so the database does the comparison. No code path compares it character by character.
-  const row = isToken(token) ? await env.DB.prepare('SELECT label, slug, expires_at FROM connector_tokens WHERE token = ?').bind(token).first<{ label: string; slug?: string | null; expires_at?: string | null }>() : null;
+  const row = isToken(token) ? await env.DB.prepare('SELECT id, label, slug, expires_at FROM connector_tokens WHERE token = ?').bind(token).first<{ id?: string | null; label: string; slug?: string | null; expires_at?: string | null }>() : null;
   if (!row || (row.expires_at && row.expires_at <= new Date().toISOString())) return reply({ error: 'no such connector' }, 404);
   const version = req.headers.get('mcp-protocol-version');
   const msg = await readJson(req, MAX_RPC_BYTES);
   if (msg === undefined) return reply(rpcError(null, -32700, 'the body is not JSON, or it is over 1 MB'), 400);
   const m = msg as Request2026 | null;
   if (version && !PROTOCOLS.includes(version)) return reply(rpcError(m && typeof m === 'object' ? m.id : null, UNSUPPORTED_VERSION, 'Unsupported protocol version', { supported: PROTOCOLS, requested: version }), 400);
-  const ctx: McpContext = { token, label: row.label, origin, ...(row.slug ? { slug: row.slug } : {}) };
+  // A token with a scope and an end time belongs to a sandbox run. The tool calls of that run become its activity.
+  const run = row.id && row.slug && row.expires_at ? await env.DB.prepare("SELECT id FROM agent_runs WHERE token_id = ? AND status = 'running'").bind(row.id).first<{ id: string }>() : null;
+  const ctx: McpContext = { token, label: row.label, origin, ...(row.slug ? { slug: row.slug } : {}), ...(run ? { run: run.id } : {}) };
   // The rules of 2026-07-28 apply to a request. That version defines no notification from a client over HTTP.
   const modern = !!m && typeof m === 'object' && typeof m.method === 'string' && m.id != null && m.method !== 'initialize' && (version === MODERN || m.params?._meta?.[`${META}protocolVersion`] === MODERN);
   if (!modern) {

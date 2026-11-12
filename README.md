@@ -63,13 +63,16 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links, its comments and its runs. The route also deletes the connector tokens that have this page as their scope. |
 | `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
 | `DELETE /api/shares/<token>` | Access | Revoke a share link |
-| `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies and with `run`, the latest sandbox run of the thread or `null`. `?status=open` or `?status=resolved` keeps one status. |
+| `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies. `run` is the latest sandbox run of the thread or `null`. `runs` has the latest run of each comment that started one, by comment id. `?status=open` or `?status=resolved` keeps one status. |
 | `POST /api/pages/<group>/<name>/comments` | Access | Add a comment. Body: `{ "body": "...", "anchor": "...", "quote": "...", "parent_id": "..." }`. Only `body` is necessary. The author is the Access identity. |
 | `PUT /api/comments/<id>/resolve` | Access | Resolve a thread |
+| `POST /api/comments/<id>/run` | Access | Start the run of a comment again. The comment must have `@claude` or `@chatgpt`. The route answers 202, or 409 while a run of the comment is running, or 503 with no sandbox runner. |
+| `GET /api/pages/<group>/<name>/activity?since=<cursor>` | Access | The latest version of the page, a `cursor`, and `runs`: the state of each run that is running or that changed after `since`. The answer has no `runs` when the cursor did not move. |
 | `GET`, `POST /api/connector-tokens` | Access | List or make connector tokens. POST body: `{ "label": "..." }`. The POST response has the `id`, the token and the `mcp_url`. The list has the `id`, the last 4 characters of the token, the `label`, the `slug` scope and `expires_at` of each token. |
 | `DELETE /api/connector-tokens/<id>` | Access | Revoke a connector token by the `id` from the list. The route takes the whole token too. |
 | `POST /s/_mcp/<token>` | Token | The MCP connector: one JSON-RPC 2.0 message for each request, with a JSON answer. `GET` returns 405. |
 | `POST /s/_run/<run id>` | Run id | The sandbox runner reports the result of a run. The run id is a secret. |
+| `POST /s/_run/<run id>/progress` | Run id | The sandbox runner reports one progress event of a run that is running. An unknown run and a run that has ended get 404. |
 | `GET /s/<token>` | Token | The shared page |
 | `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
 
@@ -115,9 +118,65 @@ After a person writes a comment, the Worker calls `onCommentCreated` in `host/sr
 
 For a comment with `@claude` or `@chatgpt`, `runSandboxAgent` sends a job to the sandbox runner at `SANDBOX_RUNNER_URL` and records the run in `agent_runs`. For `@claude`, the runner starts Claude Code with the Claude sign-in of the person. For `@chatgpt`, the runner starts Codex with the ChatGPT sign-in of the person. The assistant answers through the connector. Only development sets `SANDBOX_RUNNER_URL`. See `sandbox/README.md` for the test and `sandbox/CLOUD.md` for the cloud research.
 
+With `SANDBOX_RUNNER_SECRET` set, the host sends that value as the header `x-runner-secret` with each job. Only development reads it, from the environment.
+
 `SANDBOX_AGENTS` is a comma list of the mentions that the runner handles. The default is `claude,chatgpt`. With `SANDBOX_AGENTS=claude`, a comment with `@chatgpt` starts no run.
 
 Each run gets its own connector token. The token has the page of the comment as its scope, and it ends after 15 minutes. The host deletes the token when the runner reports the result of the run.
+
+## Run activity
+
+While an assistant works, the viewer shows it in three places:
+
+- The comment gets a reaction with the name of the assistant. A run that fails shows one line with a "Try again" button. A run with no sign-in shows "not connected" with a "Connect" button.
+- The bar shows a chip, for example "Claude is editing". A click on the chip scrolls the page to the cursor.
+- The page shows a cursor with the name of the assistant. The cursor moves to the text that the assistant replaces, and the page marks that text. Then the new text appears after the old text as a preview. The stored page does not change until `edit_page` stores the new version.
+
+When the page has a new version, the viewer loads it in a second frame with the same sandbox. Then the viewer puts the new frame over the old frame at the same scroll position, and it updates the version in the bar. The viewer does not reload.
+
+### The events
+
+The table `run_events` holds a short list of events for each run. The events come from two senders:
+
+- The host stores an event for the start of a run, for each tool call of the run's connector token, for each edit of an `edit_page` call (with the exact old text and new text), for the stored version, and for the end of the run. These events need no support from the runner.
+- The sandbox runner sends events to `POST /s/_run/<run id>/progress` while the assistant writes the tool call. These events arrive earlier, so the cursor moves earlier.
+
+A progress event is one JSON object of at most 16 KB:
+
+```json
+{ "seq": 1, "at": "2026-01-01T00:00:00.000Z", "kind": "started" }
+{ "seq": 2, "at": "...", "kind": "tool", "tool": "get_page" }
+{ "seq": 5, "at": "...", "kind": "focus", "quote": "<the old_text, at most 500 characters>" }
+{ "seq": 6, "at": "...", "kind": "typing", "quote": "<the old_text>", "text": "<the new_text so far, at most 2000 characters>" }
+```
+
+- `seq` is a whole number from 1 to 5000. It increases with each event of the run. The host ignores an event with a `seq` that is not above the highest `seq` that changed the state. So a late event and a repeated event do not move the cursor back.
+- `at` is optional. `tool` can be the name that Claude Code uses, such as `mcp__pages__edit_page`. The host keeps the part after the last `__`.
+- `quote` and `text` are HTML from the tool call, and they can end in the middle of a tag. The host cuts longer values, converts both to plain text, and stores the plain text. The viewer never gets the HTML.
+- For a `focus` event, the host reads the page and adds the text before the quote and the last element id before the quote. The page uses them to select one of two equal quotes.
+- A run keeps only its newest `typing` event.
+- The route answers 200 with `{ "seq": n }`, 400 for a bad event, and 404 for an unknown run or a run that has ended.
+
+The host does not store the state of a run. `reduceActivity` in `host/src/activity.ts` makes the state from the events: `phase` (`starting`, `reading`, `editing`, `replying`, `done` or `failed`), `tool`, `quote`, `text`, `final`, `before`, `anchor` and `version`. After the host saw the `edit_page` call, `final` is true and the text is exact.
+
+### The transport
+
+The viewer polls `GET /api/pages/<group>/<name>/activity?since=<cursor>`. It polls every 500 ms while a run is running on the page and for 10 seconds after a comment. At other times it polls every 5 seconds. The route makes one query that reads two rows. When the cursor moved, it makes two more queries: the runs of the page and the events of the page. The host uses polling because a Worker has no memory between requests, so Server-Sent Events from a Worker must poll D1 too.
+
+For a run of 20 seconds, one open viewer makes about 40 requests. About 25 of them find new events. One run costs about 1,500 to 2,500 D1 row reads for each open viewer, and about 30 to 45 D1 writes.
+
+### The page side
+
+The viewer sends the state to the page frame with `postMessage`. The frame keeps its sandbox and its opaque origin. The kit runtime in the page (`kit/explain.js`, `runPresence`) listens only to its parent window, and it adds no element until the first message. It shows each text with `textContent`. The viewer accepts a message only from one of its own frames, and it reads only numbers and booleans from it.
+
+`Explain.findQuote` finds the quote in the text of the page. White space does not count, so a quote can cross inline elements and blocks. The start of a quote counts when the end is not in the page text. A quote that occurs two times needs the text before it or an element id. With neither one, the page marks no text and the cursor stays at the top of the window. In a deck, the page shows the slide that has the quote, unless the reader moved the deck in the last 2.5 seconds.
+
+`host/dev/simulate-run.mjs` is a fake runner for work on the viewer. It plays one run with no assistant: it sends the progress events and it calls the real connector, so the page gets a new version and the thread gets a reply.
+
+```bash
+node host/dev/simulate-run.mjs --port 8812
+cd host && SANDBOX_RUNNER_URL=http://localhost:8812/run bunx vite --port 8787
+```
 
 ## Deploy the host
 

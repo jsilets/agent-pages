@@ -12,6 +12,8 @@ export interface Env {
   SANDBOX_RUNNER_URL?: string;
   /** Development only: the mentions that the runner handles, as a comma list of 'claude' and 'chatgpt'. Default: 'claude,chatgpt'. */
   SANDBOX_AGENTS?: string;
+  /** Development only: the shared secret of the sandbox runner. The host sends it as the header x-runner-secret with each job. */
+  SANDBOX_RUNNER_SECRET?: string;
 }
 
 /** One row of the comments table. A reply has parent_id set to the first comment of its thread. */
@@ -66,6 +68,8 @@ export interface McpContext {
   origin: string;
   /** The page scope of the connector token. Not set means every page. */
   slug?: string;
+  /** The secret id of the sandbox run that owns the connector token. Not set for a token that a person made. */
+  run?: string;
 }
 
 /**

@@ -19,15 +19,20 @@ Host mode, Claude Code 2.1.322, model `claude-opus-5-5` (the default of the sign
 - About 3 seconds pass between the stored reply and the end of the run. Claude writes its last line in that time.
 - One small run used 275 MB of memory at its peak and 1.0 s of CPU time in 3.5 s.
 
-Docker, image `agent-pages-sandbox` (Alpine 3.22, Claude Code 2.1.311 from the apk repository):
+These three runs are from the first version of the runner. `PERF.md` has the measurements of the runner as it is now: with the model `sonnet`, a container that waits and a program that waits, the first tool call comes 0.7 to 0.9 s after the comment, and the reply is stored after 4.2 to 5.2 s.
+
+Docker, image `agent-pages-sandbox` (Alpine 3.22, Claude Code 2.1.311 from the apk repository, Codex 0.167.2 from npm):
 
 | Measure | Value |
 |---|---|
-| Image size | 366 MB. The Claude Code binary is 273 MB of it. |
+| Image size | 713 MB. The Claude Code binary is 273 MB of it, and the Codex folder is 392 MB. The image had 366 MB with Node and with no Codex. |
+| Start of the container of a user (`docker run -d`) | 340 to 910 ms |
+| Start of a program in a container that runs (`docker exec`) | about 100 ms |
+| Memory of the container at its peak | 152 to 315 MB with one Claude Code program, 508 MB with a second program that waits |
 | First start to the output of `claude --version` | 519 ms |
 | Later starts to the output of `claude --version` | 320 to 410 ms |
 | Start of an empty command in the container | about 310 ms |
-| A run with no sign-in, from the comment POST to the stored failure | 3.3 s |
+| A run with no sign-in, from the job to the stored failure | 0.6 to 2.4 s for Claude Code, 1.5 s for Codex |
 
 The image was on the local disk for each start. No measurement includes a pull from a registry.
 
@@ -130,7 +135,10 @@ The Sandbox SDK (`@cloudflare/sandbox`) is a layer on Containers with command an
 
 - One Durable Object for each person, named by the Access identity. It owns one container. That gives one sandbox for each person and one run at a time.
 - The Worker calls the Durable Object in place of `SANDBOX_RUNNER_URL`. The Durable Object starts the container, sends the job to `run-comment.mjs`, and writes the result to `agent_runs`. A Durable Object has no 30-second limit, so the callback route is not necessary there.
+- `run-comment.mjs` now runs in the runner and not in the container, and the sandbox image has no Node. The runner reads the output of the program, sends the progress and the result, and holds the connector token. On Cloudflare the Durable Object cannot start a program in the container by itself. So this shape needs a small supervisor in the container that does the work of the runner (the image then needs Node again), or the `exec` API of the Sandbox SDK.
+- The local runner keeps the container of a person for 10 minutes and starts the next Claude Code program before the next job. Both are worth the same on a cloud host: they remove 1.2 to 1.7 s from a run.
 - The container needs outbound access to Anthropic and to the MCP connector. Cloudflare can route outbound traffic of a container through a Worker ("Handle outbound traffic"). Use that to permit only those hosts.
+- `egress-proxy.mjs` shows the rule that the outbound Worker must apply: tunnels to the model hosts only, and the connector through the proxy, so the container never has the token.
 
 ### Instance type
 
@@ -140,7 +148,7 @@ The Sandbox SDK (`@cloudflare/sandbox`) is a layer on Containers with command an
 | basic | 1/4 | 1 GiB | 4 GB |
 | standard-1 | 1/2 | 4 GiB | 8 GB |
 
-Claude Code states "4 GB+ RAM" as its requirement (https://code.claude.com/docs/en/setup.md). `standard-1` meets it. The small run used 275 MB, so `basic` can work, but it is below the stated requirement. `lite` is too small.
+Claude Code states "4 GB+ RAM" as its requirement (https://code.claude.com/docs/en/setup.md). `standard-1` meets it. One program used 152 to 315 MB, and two programs used 508 MB, so `basic` can work, but it is below the stated requirement. `lite` is too small.
 
 ### Disk and the sign-in
 
@@ -156,7 +164,7 @@ Each way must save the folder after each run, because Claude Code refreshes the 
 
 ### Cold start
 
-Cloudflare states: "Container cold starts can often be in the 1-3 second range" (https://developers.cloudflare.com/containers/faq/). The 366 MB image and a restore of the config folder add to that. Nobody measured it. With the measured 9 to 18 seconds for a run, expect 12 to 25 seconds from the comment to the end of a run on a cold container.
+Cloudflare states: "Container cold starts can often be in the 1-3 second range" (https://developers.cloudflare.com/containers/faq/). The 713 MB image and a restore of the config folder add to that. Nobody measured it. With the measured 5 to 6 seconds for a first run with `sonnet`, expect 7 to 10 seconds from the comment to the reply on a cold container, and 3 to 5 seconds on a container that waits.
 
 ### Price for one run
 
@@ -166,7 +174,9 @@ Rates (https://developers.cloudflare.com/containers/pricing/): memory $0.0000025
 |---|---|---|
 | Each second, with the CPU fully active | $0.0000206 | $0.0000078 |
 | Each idle second (memory and disk) | $0.0000106 | $0.0000028 |
-| One run: 3 s start + 18 s work | $0.00043 | $0.00016 |
+| One run: 3 s start + 18 s work (the first measurements) | $0.00043 | $0.00016 |
+| One run: 3 s start + 6 s work (`sonnet`, as measured in `PERF.md`) | $0.00019 | $0.00007 |
+| The same 9 s run, plus 10 minutes idle before sleep | $0.0065 | $0.0018 |
 | The same run, plus 30 s idle before sleep | $0.00075 | $0.00025 |
 
 These are upper limits, because Claude Code waits for the network most of the time. The Workers Paid plan includes 25 GiB-hours of memory, 375 vCPU-minutes and 200 GB-hours of disk each month. On `standard-1` that covers about 1,000 runs of 21 seconds. Worker requests, Durable Object time, R2 storage and logs cost extra, and each is small for this load.
@@ -183,7 +193,8 @@ A real volume (Fly) or a paused sandbox (E2B) fits a credential file that change
 
 ## Not verified
 
-- No signed-in run in docker mode. The test stopped at the sign-in, because the sign-in needs the person.
+- No signed-in Codex run in docker mode. Claude Code has 15 signed-in runs in docker mode (`PERF.md`).
+- The egress controls on a cloud host. `verify-controls.mjs` proves them on OrbStack only.
 - No cloud deployment, no cold start from a registry, and no save or restore of the config folder.
 - The life of a `/login` sign-in. On the test machine `claude auth status` showed an expiry date 16 days after the test, and the date of the sign-in is not known.
 - The answers of Anthropic to the policy points above.

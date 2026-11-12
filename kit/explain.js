@@ -259,7 +259,46 @@ function diagramColor(v) {
 /** The slide layouts the kit draws. A slide names one in data-layout. */
 const DECK_LAYOUTS = ['title', 'section', 'statement', 'bullets', 'split', 'figure', 'table', 'stat', 'quote', 'code'];
 
-globalThis.Explain = { parseFlow, layoutFlow, evalExpr, evalDefs, fmt, dedent, diagramColor, DECK_LAYOUTS };
+/* ─── Presence, the pure part: find a quote in the text of a page ───
+   texts is the text of each text node, in document order. White space does not count, so a quote matches
+   when the page splits it across inline elements, lines or blocks. When the whole quote is not in the page,
+   the longest start of the quote counts, if it is at least 16 characters and half of the quote.
+   A quote that occurs two times needs a place to start from: the text `hint` (the first match at or after
+   it wins), or the text node `fromNode`. With neither one the answer is null, so no wrong text gets a highlight.
+   Returns { a: [node, offset], b: [node, offset], exact } or null. b is the position after the last character. */
+function findQuote(texts, quote, hint, fromNode) {
+  const squash = (t) => String(t ?? '').replace(/\s+/g, '');
+  const need = squash(quote);
+  if (need.length < 4) return null;
+  const chars = [], node = [], off = [];
+  let base = 0;
+  texts.forEach((t, n) => {
+    if (n === fromNode) base = chars.length;
+    for (let i = 0; i < t.length; i++) if (!/\s/.test(t[i])) { chars.push(t[i]); node.push(n); off.push(i); }
+  });
+  const flat = chars.join('');
+  let n = need.length;
+  if (flat.indexOf(need) < 0) {
+    // The start of length lo is in the page, and the start of length hi is not.
+    let lo = 0, hi = need.length;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (flat.indexOf(need.slice(0, mid)) >= 0) lo = mid; else hi = mid; }
+    if (lo < 16 || lo < need.length / 2) return null;
+    n = lo;
+  }
+  const part = need.slice(0, n);
+  let at = flat.indexOf(part);
+  if (flat.indexOf(part, at + 1) >= 0) {
+    const h = squash(hint);
+    let from = h.length >= 4 ? flat.indexOf(h, base) : -1;
+    if (from < 0 && fromNode != null && fromNode >= 0) from = base;
+    at = from < 0 ? -1 : flat.indexOf(part, from);
+    if (at < 0) return null;
+  }
+  const z = at + n - 1;
+  return { a: [node[at], off[at]], b: [node[z], off[z] + 1], exact: n === need.length };
+}
+
+globalThis.Explain = { parseFlow, layoutFlow, evalExpr, evalDefs, fmt, dedent, diagramColor, DECK_LAYOUTS, findQuote };
 if (!HAS_DOM) return;
 
 /* ─── Flow → SVG ───
@@ -648,6 +687,8 @@ function runDeck(deck) {
   }, { passive: false });
   rail.addEventListener('click', (e) => { const t = e.target.closest('.k-thumb'); if (t) go(+t.dataset.i); });
   slides.forEach((s, i) => s.addEventListener('beforematch', () => go(i)));
+  // Presence asks for the slide that an assistant edits, with every build shown.
+  slides.forEach((s, i) => s.addEventListener('k-show', () => { if (i !== S.i || S.b < builds(i)) go(i, builds(i), { scroll: false }); }));
   let tx = null;
   deck.addEventListener('touchstart', (e) => { tx = e.touches[0].clientX; }, { passive: true });
   deck.addEventListener('touchend', (e) => { if (tx === null || S.view !== 'slide') return; const dx = e.changedTouches[0].clientX - tx; tx = null; if (Math.abs(dx) > 50) step(dx < 0 ? 1 : -1); });
@@ -732,8 +773,249 @@ async function auditDeck(slides) {
   root.dataset.kDeck = 'ready';
 }
 
+/* ─── Presence: the cursor of an assistant that edits the page ───────────
+   The host viewer sends the state of each run with postMessage. Nothing here runs, and the page gets no
+   element, until the first message from the parent window. Each text from the viewer is text from an
+   assistant: it goes into the page with textContent only.
+   Messages from the viewer, all { ns: 'k-presence', v: 1, type }:
+     state    runs: [{ id, agent, name, phase, quote, text, final, before, anchor, hint }]. A run that is not in the list leaves.
+     reveal   id. Scroll to the cursor of that run, also when the reader scrolls.
+     where    The page answers { type: 'at', x, y }: its scroll position.
+     restore  x, y, flash: [{ id, agent, name, quote, before, anchor, cursor }]. Scroll there with no animation, mark the
+              new text for a moment, and answer { type: 'restored' }.
+   The page tells the viewer { type: 'busy', on } while a cursor moves or types. */
+function runPresence() {
+  if (parent === window) return;
+  let P = null;
+  addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.ns !== 'k-presence' || d.v !== 1 || e.source !== parent) return;
+    if (!P) P = startPresence();
+    if (d.type === 'state' && Array.isArray(d.runs)) P.state(d.runs);
+    else if (d.type === 'reveal') P.reveal(d.id);
+    else if (d.type === 'where') parent.postMessage({ ns: 'k-presence', v: 1, type: 'at', x: scrollX, y: scrollY }, '*');
+    else if (d.type === 'restore') P.restore(d);
+  });
+}
+function startPresence() {
+  const NAMES = { claude: 'Claude', chatgpt: 'ChatGPT' };
+  const VERBS = { starting: 'starting', reading: 'reading', editing: 'editing', replying: 'replying' };
+  const SKIP = 'script, style, template, noscript, .k-pr, .k-pr-dock, .k-pr-new, .k-rail, .k-deck-bar, .k-err';
+  const POINTER = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.8 13.6 6.6 8.9 8.4 7 13.4z"/></svg>';
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const say = (msg) => parent.postMessage({ ns: 'k-presence', v: 1, ...msg }, '*');
+  const mk = (tag, cls) => { const e = document.createElement(tag); e.className = cls; return e; };
+  // The layer scrolls with the page: highlights and carets. The dock stays at the top: a cursor with no place in the text.
+  const layer = mk('div', 'k-pr'), dock = mk('div', 'k-pr-dock');
+  layer.setAttribute('aria-hidden', 'true'); dock.setAttribute('aria-hidden', 'true');
+  document.body.append(layer, dock);
+  const runs = new Map();
+  // The reader moved the page a moment ago: do not scroll it away.
+  let userAt = 0;
+  ['wheel', 'touchstart', 'touchmove', 'keydown', 'pointerdown'].forEach((t) => addEventListener(t, (e) => { if (e.isTrusted) userAt = Date.now(); }, { passive: true, capture: true }));
+
+  function textNodes() {
+    const out = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest(SKIP)) out.push(n);
+    return out;
+  }
+  /** The range of a quote in the page, or null. */
+  function rangeOf(quote, hint, anchor) {
+    if (!quote) return null;
+    const nodes = textNodes(), el = anchor ? document.getElementById(anchor) : null;
+    const from = el ? nodes.findIndex((n) => el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) : -1;
+    const hit = findQuote(nodes.map((n) => n.data), quote, hint, from < 0 ? undefined : from);
+    if (!hit) return null;
+    const g = document.createRange();
+    g.setStart(nodes[hit.a[0]], hit.a[1]); g.setEnd(nodes[hit.b[0]], hit.b[1]);
+    return g;
+  }
+  const shown = (el) => !!el && (el.checkVisibility ? el.checkVisibility({ visibilityProperty: true }) : getComputedStyle(el).visibility !== 'hidden');
+  const hostOf = (g) => (g.startContainer.nodeType === 1 ? g.startContainer : g.startContainer.parentElement);
+  /** One box for each line of the range, in viewport pixels. */
+  function lines(g) {
+    if (!shown(hostOf(g))) return [];
+    const out = [];
+    [...g.getClientRects()].filter((b) => b.width > 0.5 && b.height > 0.5).sort((a, b) => a.top - b.top || a.left - b.left).forEach((b) => {
+      const l = out[out.length - 1];
+      if (l && Math.abs(b.top - l.top) < Math.max(l.height, b.height) / 2 && b.left <= l.right + 3) {
+        const top = Math.min(l.top, b.top), bottom = Math.max(l.bottom, b.bottom);
+        Object.assign(l, { top, bottom, height: bottom - top, right: Math.max(l.right, b.right) });
+      } else out.push({ left: b.left, right: b.right, top: b.top, bottom: b.bottom, height: b.height });
+    });
+    return out;
+  }
+  function paint(box, list, cls) {
+    const o = layer.getBoundingClientRect();
+    const key = cls + list.map((l) => [l.left - o.left, l.top - o.top, l.right - l.left, l.height].map(Math.round).join(',')).join(';');
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    box.replaceChildren(...list.map((l) => {
+      const i = mk('i', 'k-pr-hl ' + cls);
+      i.style.cssText = `left:${l.left - o.left - 2}px;top:${l.top - o.top}px;width:${l.right - l.left + 4}px;height:${l.height}px`;
+      return i;
+    }));
+  }
+  /** Marks the old text of each run as replaced, where the browser has the CSS Custom Highlight API. */
+  function strike() {
+    if (!globalThis.Highlight || !CSS.highlights) return;
+    const old = [...runs.values()].filter((r) => r.ins && r.range).map((r) => r.range);
+    if (old.length) CSS.highlights.set('k-pr-old', new Highlight(...old)); else CSS.highlights.delete('k-pr-old');
+  }
+
+  function make(id, agent, name) {
+    const cur = mk('div', 'k-pr-cur'), hl = mk('div', 'k-pr-box');
+    cur.dataset.agent = hl.dataset.agent = agent === 'chatgpt' ? 'chatgpt' : 'claude';
+    cur.innerHTML = '<i class="k-pr-bar"></i><span class="k-pr-flag">' + POINTER + '<b></b><span class="k-pr-verb"></span></span>';
+    cur.querySelector('b').textContent = str(name, 24) || NAMES[agent] || 'Assistant';
+    layer.append(hl);
+    return { id, cur, hl, quote: '', key: '', range: null, landed: false, ins: null, target: '', done: 0, note: '', verb: '' };
+  }
+  function unpreview(r) {
+    if (!r.ins) return;
+    const p = r.ins.parentNode;
+    r.ins.remove(); r.ins = null; r.target = ''; r.done = 0;
+    if (p) p.normalize();
+  }
+  /** Puts the cursor in the text, or in the dock. A change of place glides: first, last, invert, play. */
+  function place(r, glide) {
+    const first = r.cur.isConnected && glide && !still.matches ? r.cur.getBoundingClientRect() : null;
+    const list = r.range ? lines(r.range) : [];
+    let at = null;
+    if (r.ins) { const b = [...r.ins.getClientRects()].filter((x) => x.height > 0.5).pop(); if (b) at = { x: b.right, y: b.top, h: b.height }; }
+    if (!at && list.length) { const l = r.landed || r.ins ? list[list.length - 1] : list[0]; at = { x: r.landed || r.ins ? l.right : l.left, y: l.top, h: l.height }; }
+    if (at) {
+      const o = layer.getBoundingClientRect();
+      if (r.cur.parentNode !== layer) layer.append(r.cur);
+      r.cur.dataset.mode = 'caret';
+      r.cur.style.cssText = `transform:translate(${Math.round(at.x - o.left)}px,${Math.round(at.y - o.top)}px);height:${Math.round(at.h)}px`;
+      // The flag sits under the caret at the top edge of the window, and while the caret writes, so it does not cover the new text.
+      r.cur.classList.toggle('k-pr-low', at.y < 26 || !!r.ins);
+    } else {
+      if (r.cur.parentNode !== dock) dock.append(r.cur);
+      r.cur.dataset.mode = 'dock'; r.cur.style.cssText = '';
+    }
+    r.cur.querySelector('.k-pr-verb').textContent = at ? '' : r.verb + (r.note ? ' ' + r.note : '');
+    paint(r.hl, r.landed ? [] : list, r.ins ? 'k-pr-old' : '');
+    if (first) {
+      const last = r.cur.getBoundingClientRect(), dx = first.left - last.left, dy = first.top - last.top;
+      if (Math.abs(dx) + Math.abs(dy) > 2) { r.cur.animate([{ transform: (r.cur.style.transform || '') + ` translate(${dx}px,${dy}px)` }, { transform: r.cur.style.transform || 'none' }], { duration: 420, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }); movedAt = Date.now(); }
+    }
+  }
+  /** Shows the slide and scrolls to the place, unless the reader moved the page in the last seconds. */
+  function show(r, force) {
+    const el = r.range ? hostOf(r.range) : r.spot;
+    if (!el || (!force && Date.now() - userAt < 2500)) return;
+    el.closest('.k-slide')?.dispatchEvent(new CustomEvent('k-show'));
+    const b = r.range ? r.range.getBoundingClientRect() : el.getBoundingClientRect();
+    if (!b.width && !b.height) return;
+    if (b.top < 72 || b.bottom > innerHeight - 96) scrollBy({ top: b.top - innerHeight * 0.32, behavior: still.matches ? 'auto' : 'smooth' });
+  }
+  /** Finds the place of the run again: the old text, or the new text after the page has the new version. */
+  function find(r, s) {
+    unpreview(r);
+    r.range = rangeOf(s.quote, s.before || s.hint, s.anchor); r.landed = false;
+    if (!r.range && s.final && s.text) { r.range = rangeOf(s.text, s.before, s.anchor); r.landed = !!r.range; }
+    r.spot = r.range ? null : (s.anchor && document.getElementById(s.anchor)) || null;
+    // A place on a slide that the deck does not show: the dock names the slide.
+    const slide = (r.range ? hostOf(r.range) : r.spot)?.closest('.k-slide');
+    r.note = slide ? 'slide ' + ([...document.querySelectorAll('main.k-deck > .k-frame > .k-slide')].indexOf(slide) + 1) : '';
+  }
+  let typeTimer = 0, movedAt = 0, busy = false, tick = 0;
+  let typedAt = 0;
+  function type() {
+    // A browser slows the timers of a tab in the background. The text keeps its speed: one step for each 32 ms that passed.
+    const now = Date.now(), steps = Math.max(1, Math.min(60, Math.round((now - (typedAt || now)) / 32)));
+    typedAt = now;
+    let more = false;
+    runs.forEach((r) => {
+      if (!r.ins || r.done >= r.target.length) return;
+      for (let k = 0; k < steps; k++) r.done = still.matches ? r.target.length : Math.min(r.target.length, r.done + Math.max(1, Math.ceil((r.target.length - r.done) / 12)));
+      r.ins.textContent = r.target.slice(0, r.done);
+      place(r);
+      more = more || r.done < r.target.length;
+    });
+    if (!more) { clearInterval(typeTimer); typeTimer = 0; typedAt = 0; movedAt = Date.now(); }
+  }
+  /** Writes the new text after the old text, as a preview. The stored page does not change. */
+  function preview(r, text) {
+    if (!r.range || r.landed) return;
+    const deck = !!hostOf(r.range).closest('.k-slide'), max = deck ? 280 : 700;
+    const target = text.length > max ? text.slice(0, max) + '…' : text;
+    if (!r.ins) {
+      const end = r.range.endContainer, host = end.nodeType === 1 ? end : end.parentElement;
+      if (!host || host.closest('svg, textarea, select, option, button')) return;
+      r.ins = mk('ins', 'k-pr-new'); r.ins.dataset.agent = r.cur.dataset.agent; r.ins.setAttribute('aria-hidden', 'true');
+      const at = r.range.cloneRange(); at.collapse(false); at.insertNode(r.ins);
+      strike();
+    }
+    if (target === r.target) return;
+    // The assistant changed text that the preview has: keep the part that is the same.
+    let same = 0; while (same < r.done && same < target.length && target[same] === r.target[same]) same++;
+    r.target = target; r.done = same; r.ins.textContent = target.slice(0, same);
+    if (!typeTimer) typeTimer = setInterval(type, 32);
+  }
+  function leave(r) {
+    runs.delete(r.id); unpreview(r); strike();
+    r.hl.remove(); r.cur.classList.add('k-pr-out');
+    setTimeout(() => r.cur.remove(), still.matches ? 0 : 320);
+  }
+  function redraw() {
+    runs.forEach((r) => place(r));
+    const on = !!typeTimer || Date.now() - movedAt < 500;
+    if (on !== busy) { busy = on; say({ type: 'busy', on }); }
+    if (!runs.size && !layer.querySelector('.k-pr-flash')) { clearInterval(tick); tick = 0; }
+  }
+  const wake = () => { if (!tick) tick = setInterval(redraw, 200); };
+  new ResizeObserver(() => requestAnimationFrame(redraw)).observe(document.documentElement);
+
+  return {
+    state(list) {
+      const seen = new Set();
+      list.slice(0, 4).forEach((s) => {
+        if (!s || typeof s.id !== 'string' || !s.id || s.id.length > 64) return;
+        seen.add(s.id);
+        let r = runs.get(s.id);
+        if (!r) { r = make(s.id, s.agent, s.name); runs.set(s.id, r); dock.append(r.cur); r.cur.dataset.mode = 'dock'; }
+        const q = { quote: str(s.quote, 600), text: str(s.text, 2000), final: s.final === true, before: str(s.before, 200), hint: str(s.hint, 1000), anchor: str(s.anchor, 200) };
+        r.verb = VERBS[s.phase] || '';
+        const key = q.quote + '\n' + q.anchor + '\n' + q.before;
+        // The place changed, or the old text is gone because the page has the new version.
+        const moved = key !== r.key || (r.range && !r.range.startContainer.isConnected);
+        if (moved) { r.key = key; find(r, q); show(r); movedAt = Date.now(); }
+        if (q.text && q.quote) preview(r, q.text); else if (r.ins && !q.quote) { unpreview(r); strike(); }
+        place(r, moved || (!!r.ins && !r.done));
+      });
+      runs.forEach((r) => { if (!seen.has(r.id)) leave(r); });
+      wake(); redraw();
+    },
+    reveal(id) { const r = runs.get(id); if (r) { show(r, true); place(r); } },
+    async restore(d) {
+      // Web fonts change the height of the text. Wait for them, but not for long.
+      try { await Promise.race([document.fonts.ready, new Promise((ok) => setTimeout(ok, 400))]); } catch {}
+      if (Number.isFinite(d.x) && Number.isFinite(d.y)) scrollTo({ left: d.x, top: d.y, behavior: 'instant' });
+      (Array.isArray(d.flash) ? d.flash : []).slice(0, 8).forEach((f) => {
+        const g = f && rangeOf(str(f.quote, 2000), str(f.before, 200), str(f.anchor, 200));
+        if (!g) return;
+        const list = lines(g);
+        if (!list.length) return;
+        // The mark fades. A run that has ended gets a cursor that fades with it.
+        const ghost = make('', f.agent, f.name), box = mk('div', 'k-pr-box');
+        box.dataset.agent = ghost.cur.dataset.agent; layer.append(box);
+        paint(box, list, 'k-pr-flash');
+        if (f.cursor === true) { ghost.range = g; ghost.landed = true; place(ghost); ghost.cur.classList.add('k-pr-fade'); }
+        setTimeout(() => { box.remove(); ghost.hl.remove(); ghost.cur.remove(); }, 2200);
+      });
+      wake();
+      requestAnimationFrame(() => say({ type: 'restored' }));
+    },
+  };
+}
+
 function init() {
   document.documentElement.classList.remove('no-js');
+  runPresence();
   document.querySelectorAll('main.k-deck').forEach(runDeck);
   document.querySelectorAll('.k-flow').forEach((el) => { try { drawFlow(el); } catch (e) { el.innerHTML = `<div class="k-err">${esc(e.message)}</div>`; } });
   document.querySelectorAll('figure.k-diagram').forEach((el) => { try { drawDiagram(el); } catch (e) { el.insertAdjacentHTML('afterbegin', `<div class="k-err">${esc(e.message)}</div>`); } });

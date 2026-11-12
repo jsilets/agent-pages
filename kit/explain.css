@@ -488,6 +488,44 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 .no-js .k-slide { position: static; transform: none; height: auto; zoom: 0.5; border-bottom: 2px solid var(--b); }
 .no-js .k-build { opacity: 1; }
 
+/* ─── Presence: the cursor of an assistant that edits the page ────────
+   explain.js adds these elements only when the host viewer asks. Each assistant has one color, in both themes.
+   .k-pr scrolls with the page and holds the highlights and the carets. .k-pr-dock stays at the top of the window
+   and holds a cursor that has no place in the text. .k-pr-new is the preview of the new text, inside the page text. */
+.k-pr, .k-pr-dock, .k-pr-new { --c: #C4541C; --c-on: #fff; }
+:is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #0B7F63; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.k-pr, .k-pr-dock, .k-pr-new) { --c: #F0997B; --c-on: #1a1a1a; }
+  :root:not([data-theme="light"]) :is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #5DCAA5; }
+}
+:root[data-theme="dark"] :is(.k-pr, .k-pr-dock, .k-pr-new) { --c: #F0997B; --c-on: #1a1a1a; }
+:root[data-theme="dark"] :is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #5DCAA5; }
+.k-pr { position: absolute; z-index: 6; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+.k-pr-dock { position: fixed; z-index: 6; top: 12px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.k-pr-hl { position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--c) 20%, transparent); animation: k-pr-in 0.24s ease-out; }
+.k-pr-hl.k-pr-old { background: color-mix(in srgb, var(--c) 8%, transparent); animation: none; }
+.k-pr-hl.k-pr-flash { background: color-mix(in srgb, var(--c) 24%, transparent); animation: k-pr-flash 2s ease-out forwards; }
+@keyframes k-pr-in { from { opacity: 0; } }
+@keyframes k-pr-flash { 0%, 30% { opacity: 1; } 100% { opacity: 0; } }
+.k-pr-cur { position: absolute; top: 0; left: 0; font: 600 11.5px/1 var(--sans); letter-spacing: 0; color: var(--c-on); transition: opacity 0.3s; }
+.k-pr-cur.k-pr-out { opacity: 0; }
+.k-pr-cur.k-pr-fade { animation: k-pr-flash 2s ease-out forwards; }
+.k-pr-bar { position: absolute; top: -1px; bottom: -1px; left: -1px; width: 2px; border-radius: 1px; background: var(--c); }
+.k-pr-flag { position: absolute; left: -1px; bottom: calc(100% + 1px); display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px; border-radius: 5px 5px 5px 0; background: var(--c); white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+.k-pr-low .k-pr-flag { top: calc(100% + 1px); bottom: auto; border-radius: 0 5px 5px 5px; }
+.k-pr-flag b { font-weight: 600; }
+.k-pr-flag svg { display: none; width: 11px; height: 11px; fill: currentColor; }
+.k-pr-verb { font-weight: 500; opacity: 0.85; }
+.k-pr-verb:empty { display: none; }
+.k-pr-cur[data-mode="dock"] { position: static; }
+.k-pr-cur[data-mode="dock"] .k-pr-bar { display: none; }
+.k-pr-cur[data-mode="dock"] .k-pr-flag { position: static; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16); animation: k-pr-float 1.6s ease-in-out infinite alternate; }
+.k-pr-cur[data-mode="dock"] .k-pr-flag svg { display: block; }
+@keyframes k-pr-float { to { translate: 0 3px; } }
+.k-pr-new { margin-left: 0.25em; padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--c) 14%, transparent); color: color-mix(in srgb, var(--c) 72%, var(--p)); text-decoration: none; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+/* The old text that the preview replaces. GrayText is for a browser that gives a highlight no custom properties. */
+::highlight(k-pr-old) { color: GrayText; color: var(--t, GrayText); text-decoration: line-through; }
+
 @media print {
   html, body { background: none; }
   :root { --k-s: 1 !important; overflow: visible !important; }
@@ -498,6 +536,6 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
   .k-slide { transform: none !important; border-radius: 0 !important; box-shadow: none !important; outline: none !important; content-visibility: visible !important; }
   .k-slide::after { display: none !important; }
   .k-build { opacity: 1 !important; }
-  .k-deck-bar, .k-rail { display: none !important; }
+  .k-deck-bar, .k-rail, .k-pr, .k-pr-dock, .k-pr-new { display: none !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

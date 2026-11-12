@@ -47,6 +47,7 @@ const ICON: Record<string, string> = {
   pin: '<path d="M9 3.5h6l-.9 6.2 3.4 3.3V15h-11v-2l3.4-3.3z"/><path d="M12 15v5.5"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
   comment: '<path d="M5.5 5h13A1.5 1.5 0 0 1 20 6.5v8a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V16h-2A1.5 1.5 0 0 1 4 14.5v-8A1.5 1.5 0 0 1 5.5 5Z"/>',
+  thumb: '<path d="M7.5 10.5V20"/><path d="M14.3 6.3 13.5 10.5h4.9a1.8 1.8 0 0 1 1.75 2.2l-1.3 5.6A2.2 2.2 0 0 1 16.7 20H5.5A1.5 1.5 0 0 1 4 18.5V12a1.5 1.5 0 0 1 1.5-1.5h2l3.2-6.2a.8.8 0 0 1 .7-.4 2.3 2.3 0 0 1 2.9 2.4Z"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/>',
 };
 const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -168,7 +169,56 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-cmt p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .v-cmt blockquote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--b2); color: var(--s); font-size: 12.5px; overflow-wrap: anywhere; }
 .v-side textarea, .v-side input { display: block; width: 100%; box-sizing: border-box; padding: 7px 9px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px/1.4 var(--sans); resize: vertical; }
-.v-run { margin: 8px 0 0; font-size: 12px; color: var(--t); }
+.v-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Assistants: one color each, for the reaction, the chip in the bar and the cursor in the page. The kit has the same colors. */
+.a-claude { --a: #C4541C; --a-on: #fff; }
+.a-chatgpt { --a: #0B7F63; --a-on: #fff; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .a-claude { --a: #F0997B; --a-on: #1a1a1a; } :root:not([data-theme="light"]) .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; } }
+:root[data-theme="dark"] .a-claude { --a: #F0997B; --a-on: #1a1a1a; }
+:root[data-theme="dark"] .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; }
+
+/* The reaction: the assistant took the comment. The dot shows while the run goes on. */
+.v-react { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-top: 7px; padding: 0 9px 0 7px; box-sizing: border-box; border-radius: 999px; background: color-mix(in srgb, var(--a) 11%, transparent); box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--a) 42%, transparent); color: var(--a); font: 600 11.5px var(--sans); cursor: default; }
+.v-react svg { width: 13px; height: 13px; stroke-width: 1.8; transform-origin: 30% 80%; }
+.v-react.is-new { animation: v-react 0.4s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.v-react.is-new svg { animation: v-thumb 0.5s 0.12s ease-out; }
+.v-react i { width: 5px; height: 5px; margin-left: 1px; border-radius: 50%; background: currentColor; animation: v-live 1.1s ease-in-out infinite alternate; }
+@keyframes v-react { from { opacity: 0; transform: scale(0.7); } }
+@keyframes v-thumb { 40% { transform: rotate(-16deg) scale(1.15); } }
+@keyframes v-live { from { opacity: 0.25; } }
+/* A run that did not finish: one quiet line with one action. */
+.v-runfail { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; font-size: 12px; color: var(--s); }
+.v-link { padding: 0; border: 0; border-radius: 3px; background: none; color: var(--link); font: 600 12px var(--sans); cursor: pointer; }
+.v-link:hover { text-decoration: underline; }
+.v-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+#cbtn.has-new::before { content: ""; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--link); box-shadow: 0 0 0 2px var(--bg); }
+
+/* The assistants that work on this page now, like the avatars of the people in a shared document. */
+.v-who { flex: none; display: flex; align-items: center; gap: 4px; margin-right: 8px; }
+.v-who:empty { display: none; }
+.v-whochip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 4px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--a) 11%, transparent); color: var(--p); font: 500 12px var(--sans); white-space: nowrap; cursor: pointer; animation: v-pop 0.18s ease-out; }
+.v-whochip:hover { background: color-mix(in srgb, var(--a) 18%, transparent); }
+.v-whochip b { font-weight: 600; color: var(--a); }
+.v-ava { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--a); color: var(--a-on); animation: v-ring 1.8s ease-out infinite; }
+.v-ava svg { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+@keyframes v-ring { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--a) 45%, transparent); } to { box-shadow: 0 0 0 6px transparent; } }
+.v-ver.is-bump { animation: v-bump 0.9s ease-out; }
+@keyframes v-bump { 0%, 30% { background: color-mix(in srgb, var(--link) 16%, transparent); border-color: var(--link); } }
+
+/* The page and, for a moment, the next version of it on top. */
+.v-stage { position: relative; flex: 1; min-width: 0; }
+.v-stage > .v-frame { position: absolute; inset: 0; width: 100%; height: 100%; }
+.v-frame.is-in { z-index: 1; opacity: 0; pointer-events: none; }
+.v-frame.is-in.is-on { opacity: 1; transition: opacity 0.24s ease; }
+
+.v-dlg { width: 360px; max-width: calc(100vw - 32px); padding: 18px; box-sizing: border-box; border: 0.5px solid var(--b2); border-radius: 14px; background: var(--bg); color: var(--p); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.22); }
+.v-dlg::backdrop { background: rgba(0, 0, 0, 0.3); }
+.v-dlg h2 { margin: 0 0 6px; font: 600 15px var(--sans); }
+.v-dlg p { margin: 0 0 10px; font-size: 13px; line-height: 1.5; color: var(--s); }
+.v-dlg-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.v-dlg-acts .v-btn, .v-dlg-acts .v-create { width: auto; height: 32px; padding: 0 14px; align-self: auto; }
+.v-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .v-acts { display: flex; gap: 6px; margin-top: 8px; }
 .v-acts textarea { flex: 1; min-width: 0; }
 .v-btn { flex: none; align-self: flex-start; height: 30px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
@@ -187,10 +237,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-share svg { display: block; }
   .v-sharepop { width: calc(100vw - 16px); }
   .v-body { position: relative; }
-  .v-side { position: absolute; inset: 0; width: auto; border-left: 0; }
+  .v-side { position: absolute; z-index: 2; inset: 0; width: auto; border-left: 0; }
+  .v-who { margin-right: 4px; }
+  .v-whochip { padding: 0 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after { animation: none; }
+  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump { animation: none; }
+  .v-frame.is-in.is-on { transition: none; }
 }
 
 /* ─── Library ───────────────────────────────────────────── */
@@ -655,26 +708,29 @@ $$('[data-pdf]').forEach((button) => button.addEventListener('click', async () =
 }));
 
 // Publish times, in the reader's time zone: "Today, 9:41 PM" or "Oct 9, 9:41 PM".
-$$('time[datetime]').forEach((t) => {
+function stamp(t) {
   const d = new Date(t.dateTime), now = new Date();
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const same = (a, b) => a.toDateString() === b.toDateString();
   const y = new Date(now); y.setDate(now.getDate() - 1);
   t.textContent = (same(d, now) ? 'Today' : same(d, y) ? 'Yesterday' : d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) })) + ', ' + time;
   t.title = d.toLocaleString();
-});
+}
+$$('time[datetime]').forEach(stamp);
 
-const frame = $('iframe');
+// The viewer swaps this frame for a new one when the page gets a new version.
+let frame = $('iframe');
 let theme = 'auto';
 try { theme = localStorage.getItem('theme') || 'auto'; } catch {}
 function applyTheme() {
   if (theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
   $$('[data-theme-set]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === theme)));
   if (!frame) return;
-  // A search result links to /p/<slug>#claim-2. The hash goes to the frame, which scrolls to that claim.
-  const src = frame.dataset.src + (theme === 'auto' ? '' : '&theme=' + theme) + location.hash;
+  const src = srcOf(frame);
   if (frame.getAttribute('src') !== src) frame.src = src;
 }
+// A search result links to /p/<slug>#claim-2. The hash goes to the frame, which scrolls to that claim.
+const srcOf = (f) => f.dataset.src + (theme === 'auto' ? '' : '&theme=' + theme) + location.hash;
 
 // A deck keeps its slide in the hash. It reports each change, so a reload or a copied link opens the same slide.
 const toDeck = (msg) => frame && frame.contentWindow.postMessage({ ns: 'k-deck', v: 1, ...msg }, '*');
@@ -719,6 +775,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
 <header class="v-bar">
   <a class="v-icon" href="/" data-tip="All pages" data-tip-start aria-label="All pages">${icon('grid')}</a>
   <div class="v-crumb">${repo ? `<span class="v-repo">${esc(repo)}</span><span class="v-slash">/</span>` : ''}<span class="v-title">${esc(title)}</span></div>
+  <div class="v-who" id="who"></div>
   <div class="v-ver${old ? ' c-amber is-old' : ''}">
     ${step('left', n - 1, 'Previous version')}
     <button type="button" class="v-cur" data-pop="pop-ver" aria-label="Version ${n} of ${latest}. Show all versions"><b>v${n}</b><span class="v-of">/${latest}</span>${icon('down')}</button>
@@ -756,7 +813,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   </div>
 </header>
 <div class="v-body">
-<iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
+<div class="v-stage"><iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe></div>
 <aside class="v-side" id="side" aria-label="Comments" hidden>
   <div class="v-side-head"><h2>Comments</h2><button type="button" class="v-icon" id="cclose" aria-label="Close comments">${icon('x')}</button></div>
   <div class="v-threads" id="threads"></div>
@@ -769,7 +826,15 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
 </aside>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ slug, version: n, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x } })}</script>`;
+<div class="v-sr" id="live" role="status" aria-live="polite"></div>
+<dialog class="v-dlg" id="connect" aria-labelledby="connect-h">
+  <h2 id="connect-h">Connect <span data-who>Claude</span></h2>
+  ${/* TODO: replace this text with the sign-in step when the host has one. */ ''}
+  <p><span data-who>Claude</span> works with your own subscription. You sign in one time, and Pages uses that sign-in for each comment that asks <span data-who>Claude</span>.</p>
+  <p>This build has no sign-in step in the viewer yet. Sign in on the machine that runs the sandbox runner, then choose Try again.</p>
+  <div class="v-dlg-acts"><button type="button" class="v-btn" id="connect-close">Close</button><button type="button" class="v-create" id="connect-retry">Try again</button></div>
+</dialog>
+<script type="application/json" id="data">${data({ slug, version: n, latest, kit: KIT, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x, thumb: ICON.thumb } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -841,27 +906,63 @@ const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls)
 const when = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 // The reply drafts, by thread id. A refresh draws the list again, and the drafts go back in.
 const drafts = {};
-let shown = null;
-function comment(c) {
+let shown = null, answered = null;
+// The assistants. A name from the API is text for a label and never markup.
+const AGENTS = { claude: 'Claude', chatgpt: 'ChatGPT' };
+const nameOf = (a) => AGENTS[a] || 'Assistant';
+const tone = (a) => 'a-' + (a === 'chatgpt' ? 'chatgpt' : 'claude');
+const say = (text) => { $('#live').textContent = text; };
+// The reactions that the reader has seen. A new one pops in one time, and a refresh of the list draws it still.
+const reacted = new Set();
+// What the assistant did with the comment: a reaction while it works and after it answered, or one quiet line when it did not finish.
+function reaction(r) {
+  if (!r) return [];
+  const who = nameOf(r.agent);
+  if (r.status === 'failed') {
+    const off = (r.detail || '').startsWith('not_signed_in');
+    const row = el('div', 'v-runfail'), b = el('button', 'v-link', off ? 'Connect' : 'Try again');
+    row.append(el('span', '', off ? who + ': not connected' : who + ' did not finish'), b);
+    if (!off) row.title = r.detail || '';
+    b.type = 'button';
+    b.onclick = () => (off ? connect(r) : retry(r.comment_id, b));
+    return [row];
+  }
+  const on = r.status === 'running', chip = el('span', 'v-react ' + tone(r.agent)), label = who + (on ? ' is working on this comment' : ' took this comment');
+  chip.innerHTML = svg('thumb');
+  chip.append(el('span', '', who));
+  if (on) chip.append(el('i'));
+  chip.setAttribute('role', 'img'); chip.setAttribute('aria-label', label); chip.title = label;
+  const key = r.id || r.comment_id + r.started_at;
+  if (!reacted.has(key)) { reacted.add(key); chip.classList.add('is-new'); }
+  return [chip];
+}
+async function retry(id, b) {
+  if (b) b.disabled = true;
+  try { await api('/api/comments/' + id + '/run', { method: 'POST' }); boost(); }
+  catch (err) { toast('Could not start the run: ' + err.message); if (b) b.disabled = false; }
+}
+const dlg = $('#connect');
+let connectFor = null;
+function connect(r) {
+  connectFor = r;
+  $$('[data-who]', dlg).forEach((n) => { n.textContent = nameOf(r.agent); });
+  dlg.showModal();
+}
+$('#connect-close').addEventListener('click', () => dlg.close());
+$('#connect-retry').addEventListener('click', () => { dlg.close(); if (connectFor) retry(connectFor.comment_id); });
+
+function comment(c, run) {
   const d = el('div', 'v-cmt'), head = el('div', 'v-cmt-head');
   head.append(el('b', '', c.author), el('span', '', when(c.created_at)));
   if (c.mention) head.append(el('span', 'v-tag', '@' + c.mention));
   d.append(head);
   if (c.quote) d.append(el('blockquote', '', c.quote));
-  d.append(el('p', '', c.body));
+  d.append(el('p', '', c.body), ...reaction(run));
   return d;
 }
-// One line for the latest run of the thread: the assistant works on it, or the run failed. A run that is done shows nothing.
-function runLine(r) {
-  if (!r || r.status === 'done') return [];
-  const off = (r.detail || '').startsWith('not_signed_in');
-  const who = r.agent === 'chatgpt' ? 'ChatGPT' : 'Claude';
-  const p = el('p', 'v-run', r.status === 'running' ? who + ' is working…' : off ? who + ': not connected' : who + ' did not finish.');
-  if (r.status === 'failed' && !off) p.title = r.detail || '';
-  return [p];
-}
 function thread(t) {
-  const a = el('article', 'v-thread'), acts = el('div', 'v-acts');
+  const a = el('article', 'v-thread'), acts = el('div', 'v-acts'), runs = t.runs || {};
+  a.dataset.thread = t.id;
   const box = el('textarea'); box.rows = 1; box.maxLength = 4000; box.placeholder = 'Reply'; box.setAttribute('aria-label', 'Reply'); box.dataset.id = t.id; box.value = drafts[t.id] || '';
   box.oninput = () => { drafts[t.id] = box.value; };
   const send = () => post({ body: box.value, parent_id: t.id }, () => { delete drafts[t.id]; });
@@ -870,7 +971,7 @@ function thread(t) {
   const done = el('button', 'v-btn', 'Resolve'); done.type = 'button';
   done.onclick = async () => { try { await api('/api/comments/' + t.id + '/resolve', { method: 'PUT' }); toast('Thread resolved'); await loadComments(); } catch (err) { toast('Could not resolve: ' + err.message); } };
   acts.append(box, reply, done);
-  a.append(comment(t), ...t.replies.map(comment), ...runLine(t.run), acts);
+  a.append(comment(t, runs[t.id]), ...t.replies.map((c) => comment(c, runs[c.id])), acts);
   return a;
 }
 async function loadComments(force) {
@@ -881,16 +982,19 @@ async function loadComments(force) {
   const at = document.activeElement && document.activeElement.dataset.id;
   $('#threads').replaceChildren(...list.map(thread));
   if (at) $$('#threads textarea').find((b) => b.dataset.id === at)?.focus();
+  // The thread that an assistant answered a moment ago comes into view.
+  if (answered) { $$('#threads .v-thread').find((a) => a.dataset.thread === answered)?.scrollIntoView({ block: 'nearest' }); answered = null; }
 }
 async function post(c, sent) {
   if (!c.body.trim()) return;
-  try { await api('/api/pages/' + D.slug + '/comments', { method: 'POST', body: JSON.stringify(c) }); sent(); await loadComments(true); }
+  try { await api('/api/pages/' + D.slug + '/comments', { method: 'POST', body: JSON.stringify(c) }); sent(); boost(); await loadComments(true); }
   catch (err) { toast('Could not send the comment: ' + err.message); }
 }
 function showSide(on) {
   side.hidden = !on;
   cbtn.setAttribute('aria-expanded', String(on));
   keep('comments:', on ? '1' : '');
+  if (on) cbtn.classList.remove('has-new');
   if (on) loadComments().catch((err) => toast('Could not load the comments: ' + err.message));
 }
 cbtn.addEventListener('click', () => showSide(side.hidden));
@@ -899,19 +1003,183 @@ const sendNew = () => post({ body: cbody.value, quote: $('#cquote').value }, () 
 $('#csend').addEventListener('click', sendNew);
 cbody.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendNew(); });
 cbody.addEventListener('input', () => keep('draft:', cbody.value));
-// A new version loads the viewer again. The panel and the comment draft come back from sessionStorage.
+// The panel and the comment draft come back from sessionStorage after a reload.
 cbody.value = kept('draft:');
 if (kept('comments:')) showSide(true);
+// Other people write comments too, so the open panel loads its threads every 5 seconds.
+setInterval(() => { if (!document.hidden && !side.hidden) loadComments().catch(() => {}); }, 5000);
 
-// Every 5 seconds: the open panel loads its threads, and a viewer that follows the latest version asks for the latest number.
-// An assistant that answers a comment stores a new version, so the page and the reply show with no reload by hand.
-setInterval(async () => {
-  if (document.hidden) return;
+// ─── Activity: what the assistants do on this page ───
+// The viewer asks the host for the activity of the page: every 500 ms while a run goes on, and every 5 seconds at other times.
+// It shows each run three times: as the reaction on the comment, as a chip in the bar, and as a cursor in the page.
+const VERBS = { starting: 'is starting', reading: 'is reading', editing: 'is editing', replying: 'is replying' };
+const POINTER = '<span class="v-ava"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.8 13.6 6.6 8.9 8.4 7 13.4z"/></svg></span>';
+const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const stage = $('.v-stage');
+// runs: the runs that are running, by public id. landed: the new text of each edit, to mark it in the next version.
+const runs = new Map(), landed = new Map(), chips = new Map();
+let cursor = 0, latest = D.latest, boostUntil = 0, pollTimer = 0, frameBusy = false, calmAt = 0, sent = false, swapping = false;
+
+// The frame has no origin, so the target origin is '*'. The page in it gets text only, and it shows it with textContent.
+const toFrame = (msg, f = frame) => { if (f.contentWindow) f.contentWindow.postMessage({ ns: 'k-presence', v: 1, ...msg }, '*'); };
+function sendPresence() {
+  // An old version does not have the text that the assistant edits, so it shows no cursor.
+  const show = D.followsLatest || D.version >= latest;
+  const list = show ? [...runs.values()].map((r) => ({ id: r.id, agent: r.agent, name: nameOf(r.agent), phase: r.phase, quote: r.quote || '', text: r.text || '', final: r.final === true, before: r.before || '', anchor: r.anchor || (r.hint && r.hint.anchor) || '', hint: (r.hint && r.hint.quote) || '' })) : [];
+  if (!list.length && !sent) return;
+  sent = list.length > 0;
+  toFrame({ type: 'state', runs: list });
+  calmAt = Date.now() + 800;
+}
+// A message from a frame is not trusted: the page in it can send anything. The viewer reads numbers and booleans only.
+const waiters = [];
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.ns !== 'k-presence' || d.v !== 1) return;
+  const f = $$('iframe', stage).find((x) => x.contentWindow === e.source);
+  if (!f) return;
+  if (d.type === 'busy' && f === frame) frameBusy = d.on === true;
+  const i = waiters.findIndex((w) => w.f === f && w.type === d.type);
+  if (i >= 0) waiters.splice(i, 1)[0].ok(d);
+});
+// Sends a message to a frame and waits for the answer of the given type. No answer in time gives null.
+const ask = (f, msg, type, ms) => new Promise((ok) => {
+  const w = { f, type, ok };
+  waiters.push(w);
+  setTimeout(() => { const i = waiters.indexOf(w); if (i >= 0) { waiters.splice(i, 1); ok(null); } }, ms);
+  toFrame(msg, f);
+});
+// A frame that loads again (a new theme) lost its cursors.
+const wire = (f) => f.addEventListener('load', () => { if (f === frame && runs.size) { sent = false; sendPresence(); } });
+wire(frame);
+
+function drawWho() {
+  const who = $('#who');
+  chips.forEach((b, id) => { if (!runs.has(id)) { b.remove(); chips.delete(id); } });
+  runs.forEach((r) => {
+    let b = chips.get(r.id);
+    if (!b) {
+      b = el('button', 'v-whochip ' + tone(r.agent)); b.type = 'button';
+      b.innerHTML = POINTER;
+      b.append(el('span', 'v-lbl'));
+      b.onclick = () => toFrame({ type: 'reveal', id: r.id });
+      chips.set(r.id, b); who.append(b);
+    }
+    const text = nameOf(r.agent) + ' ' + (VERBS[r.phase] || 'is working');
+    if (b.dataset.text === text) return;
+    b.dataset.text = text;
+    b.lastChild.replaceChildren(el('b', '', nameOf(r.agent)), ' ' + (VERBS[r.phase] || 'is working'));
+    b.title = text + '. Show the cursor in the page.';
+    b.setAttribute('aria-label', b.title);
+  });
+}
+
+async function pollActivity() {
+  const a = await api('/api/pages/' + D.slug + '/activity?since=' + cursor);
+  latest = Math.max(latest, a.latest);
+  let changed = false;
+  if (a.runs) {
+    cursor = a.cursor;
+    let refresh = false;
+    for (const r of a.runs) {
+      const was = runs.get(r.id), who = nameOf(r.agent);
+      if (r.final && r.text && r.version) landed.set(r.id, { id: r.id, agent: r.agent, name: who, version: r.version, quote: r.text, before: r.before || '', anchor: r.anchor || '' });
+      if (r.status === 'running') {
+        runs.set(r.id, r);
+        if (!was) { refresh = true; say(who + ' started to work on a comment.'); }
+        else if (was.phase !== r.phase && r.phase === 'editing') say(who + ' is editing the page.');
+      } else {
+        runs.delete(r.id);
+        refresh = true;
+        if (was) say(r.status === 'done' ? who + ' answered the comment.' : (r.detail || '').startsWith('not_signed_in') ? who + ' is not connected.' : who + ' did not finish.');
+        if (side.hidden && r.status === 'done') cbtn.classList.add('has-new');
+        answered = r.thread;
+      }
+    }
+    changed = true;
+    if (refresh && !side.hidden) loadComments().catch(() => {});
+  }
+  // A run with no result after 5 minutes is not running. The comments API shows it as failed.
+  runs.forEach((r, id) => { if (Date.now() - Date.parse(r.started_at) > 300000) { runs.delete(id); changed = true; } });
+  if (changed) { drawWho(); sendPresence(); }
+  if (D.followsLatest && latest > D.version) swapTo(latest);
+}
+async function tick() {
+  try { if (!document.hidden) await pollActivity(); } catch {}
+  pollTimer = setTimeout(tick, runs.size || Date.now() < boostUntil ? 500 : 5000);
+}
+// A comment or a retry may start a run. The host records it after the response, so the viewer polls fast for a moment.
+function boost() { boostUntil = Date.now() + 10000; clearTimeout(pollTimer); pollTimer = setTimeout(tick, 300); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { clearTimeout(pollTimer); tick(); } });
+tick();
+
+// ─── A new version, with no reload ───
+// The next version loads in a second frame under the same sandbox. When it is ready and the cursor in the old frame is
+// still, the new frame takes the scroll position, fades in on top, and the old frame goes. The bar gets the new version.
+async function swapTo(v) {
+  if (swapping || document.fullscreenElement) return;
+  swapping = true;
+  const next = frame.cloneNode(false);
   try {
-    if (!side.hidden) await loadComments();
-    if (D.followsLatest && (await api('/api/pages/' + D.slug)).latest !== D.version) location.reload();
-  } catch {}
-}, 5000);
+    next.removeAttribute('src');
+    next.dataset.src = '/raw/' + D.slug + '/' + v + '?k=' + D.kit;
+    next.classList.add('is-in'); next.setAttribute('aria-hidden', 'true'); next.tabIndex = -1;
+    const loaded = new Promise((ok, no) => { next.addEventListener('load', ok, { once: true }); next.addEventListener('error', no, { once: true }); setTimeout(no, 15000); });
+    next.src = srcOf(next);
+    stage.append(next);
+    await loaded;
+    // Let the cursor finish its text, so the reader sees what changes. Then wait no more than 5 seconds.
+    const until = Date.now() + 5000;
+    while ((frameBusy || Date.now() < calmAt) && Date.now() < until) await wait(100);
+    const at = await ask(frame, { type: 'where' }, 'at', 400);
+    const flash = [...landed.values()].filter((f) => f.version > D.version && f.version <= v).map((f) => ({ ...f, cursor: !runs.has(f.id) }));
+    await ask(next, { type: 'restore', x: at && Number.isFinite(at.x) ? at.x : 0, y: at && Number.isFinite(at.y) ? at.y : 0, flash }, 'restored', 1500);
+    next.classList.add('is-on');
+    await wait(matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 260);
+    const focused = document.activeElement === frame, old = frame;
+    frame = next; wire(next);
+    old.remove();
+    next.classList.remove('is-in', 'is-on'); next.removeAttribute('aria-hidden'); next.removeAttribute('tabindex');
+    if (focused) next.focus();
+    landed.forEach((f, id) => { if (f.version <= v) landed.delete(id); });
+    setVersion(v);
+    frameBusy = false; sent = false; sendPresence();
+  } catch {
+    // The frame did not load. A reload shows the new version, or the error.
+    next.remove();
+    location.reload();
+    return;
+  }
+  swapping = false;
+  if (latest > D.version) swapTo(latest);
+}
+// The bar, the version list and the links, for the version that the frame shows now.
+function setVersion(v) {
+  const was = D.version, path = (n) => '/p/' + D.slug + (n === v ? '' : '/v/' + n), raw = '/raw/' + D.slug + '/' + v + '?k=' + D.kit;
+  D.version = v; D.latest = latest = Math.max(latest, v);
+  $('.v-cur b').textContent = 'v' + v;
+  $('.v-of').textContent = '/' + v;
+  $('.v-cur').setAttribute('aria-label', 'Version ' + v + ' of ' + v + '. Show all versions');
+  const prev = $('.v-step');
+  prev.href = path(was); prev.removeAttribute('aria-disabled');
+  const pop = $('#pop-ver'), items = $$('.v-vitem', pop);
+  $('.v-label', pop).textContent = items.length + 1 + ' versions';
+  items.forEach((a) => { a.removeAttribute('aria-current'); $('.v-tag', a)?.remove(); if (a.getAttribute('href') === '/p/' + D.slug) a.href = path(was); });
+  const item = el('a', 'v-item v-vitem'), time = el('time', 'v-meta');
+  item.href = path(v); item.setAttribute('aria-current', 'page');
+  time.dateTime = new Date().toISOString(); stamp(time);
+  item.append(el('span', 'v-num', 'v' + v), el('span', 'v-tag', 'Latest'), time);
+  (items[0] || $('.v-label', pop)).before(item);
+  if (!items.length) pop.append(item);
+  $('[data-pdf]').dataset.pdf = '/pdf/' + D.slug + '/' + v;
+  $$('#pop-more a').forEach((a) => { a.href = raw; if (a.hasAttribute('download')) a.download = D.slug.replace('/', '-') + '-v' + v + '.html'; });
+  const only = $$('[data-target]').find((b) => b.dataset.target !== 'latest');
+  if (target !== 'latest') target = String(v);
+  only.dataset.target = v; only.textContent = 'Only v' + v;
+  const pill = $('.v-ver');
+  pill.classList.remove('is-bump'); void pill.offsetWidth; pill.classList.add('is-bump');
+  say('The page shows version ' + v + '.');
+}
 `;
   return shell(title, nonce, body, script);
 }

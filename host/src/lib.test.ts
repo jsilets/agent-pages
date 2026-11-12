@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { auditFromHtml, auditLines, blobKey, ftsQuery, isSlug, isToken, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseTheme, pdfKey, plainText, route, thumbKey, withKit, withTheme } from './lib';
+import { auditFromHtml, auditLines, blobKey, ftsQuery, isFolderColor, isFolderId, isSlug, isToken, newFolderId, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseTheme, pdfKey, plainText, route, thumbKey, withKit, withTheme } from './lib';
 
 describe('isSlug', () => {
   it('takes <group>/<name>', () => {
@@ -204,3 +204,24 @@ describe('auditFromHtml with an inlined kit', () => {
     expect(auditFromHtml(html)).toEqual({ pass: true, slides: [] });
   });
 });
+
+describe('folders', () => {
+  it('routes the folder API', () => {
+    const id = newFolderId();
+    expect(route('/api/folders')).toEqual({ kind: 'api-folders' });
+    expect(route(`/api/folders/${id}`)).toEqual({ kind: 'api-folder', id });
+    expect(route('/api/pages/g/n/folder')).toEqual({ kind: 'api-page-folder', slug: 'g/n' });
+    expect(route('/api/folders/short')).toEqual({ kind: 'not-found' });
+    expect(route(`/api/folders/${id}/x`)).toEqual({ kind: 'not-found' });
+  });
+  it('makes ids that it accepts, and refuses other shapes', () => {
+    for (let i = 0; i < 20; i++) expect(isFolderId(newFolderId())).toBe(true);
+    for (const s of ['', 'abc', 'A'.repeat(15), 'A'.repeat(17), 'AAAAAAAAAAAAAAA/', '../AAAAAAAAAAAAA']) expect(isFolderId(s)).toBe(false);
+  });
+  it('takes only the kit ramps as colors', () => {
+    expect(isFolderColor('blue')).toBe(true);
+    expect(isFolderColor('chartreuse')).toBe(false);
+    expect(isFolderColor(null)).toBe(false);
+  });
+});
+

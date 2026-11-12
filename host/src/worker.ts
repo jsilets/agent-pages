@@ -6,8 +6,9 @@ import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
-import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
-import { KIT, libraryHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
+import { KIT, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { libraryHtml, type FolderRow } from './library';
 
 interface Env {
   DB: D1Database;
@@ -99,7 +100,7 @@ async function identify(req: Request, env: Env): Promise<Identity | null> {
   return verifyAccessJwt(req.headers.get('cf-access-jwt-assertion'), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD });
 }
 
-const PAGE_COLUMNS = 'slug, title, repo, kind, latest, updated_at, pinned_at, thumb, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
+const PAGE_COLUMNS = 'slug, title, repo, kind, latest, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
 
 async function getPage(env: Env, slug: string) {
   return env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages WHERE slug = ?`).bind(slug).first<PageRow>();
@@ -108,6 +109,83 @@ async function getPage(env: Env, slug: string) {
 async function listPages(env: Env) {
   const { results } = await env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages ORDER BY updated_at DESC`).all<PageRow>();
   return results;
+}
+
+// ─── Folders ─────────────────────────────────────────────
+
+const FOLDER_COLUMNS = 'id, name, parent_id, color, created_at, updated_at';
+
+async function listFolders(env: Env) {
+  const { results } = await env.DB.prepare(`SELECT ${FOLDER_COLUMNS} FROM folders ORDER BY name COLLATE NOCASE`).all<FolderRow>();
+  return results;
+}
+
+const getFolder = (env: Env, id: string) => env.DB.prepare(`SELECT ${FOLDER_COLUMNS} FROM folders WHERE id = ?`).bind(id).first<FolderRow>();
+
+/** A folder name: trimmed, 1 to 80 characters, no slash. */
+function folderName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const name = v.trim().replace(/\s+/g, ' ');
+  return name && name.length <= 80 && !name.includes('/') ? name : null;
+}
+
+/** True when `id` is `ancestor` or sits anywhere below it. Moving a folder under itself would make a loop. */
+async function isWithin(env: Env, id: string | null, ancestor: string) {
+  for (let at = id, hops = 0; at && hops < 64; hops++) {
+    if (at === ancestor) return true;
+    at = (await env.DB.prepare('SELECT parent_id FROM folders WHERE id = ?').bind(at).first<{ parent_id: string | null }>())?.parent_id ?? null;
+  }
+  return false;
+}
+
+async function createFolder(req: Request, env: Env) {
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; parent_id?: unknown; color?: unknown };
+  const name = folderName(body.name);
+  if (!name) return fail(400, 'name must be 1 to 80 characters with no slash');
+  const parent = body.parent_id ?? null;
+  if (parent !== null && (typeof parent !== 'string' || !(await getFolder(env, parent)))) return fail(400, 'no such parent folder');
+  const color = body.color ?? null;
+  if (color !== null && !isFolderColor(color)) return fail(400, 'unknown color');
+  const id = newFolderId(), at = now();
+  await env.DB.prepare('INSERT INTO folders (id, name, parent_id, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, name, parent, color, at, at).run();
+  return json(await getFolder(env, id), 201);
+}
+
+async function updateFolder(req: Request, env: Env, id: string) {
+  const f = await getFolder(env, id);
+  if (!f) return fail(404, 'no such folder');
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; parent_id?: unknown; color?: unknown };
+  const name = body.name === undefined ? f.name : folderName(body.name);
+  if (!name) return fail(400, 'name must be 1 to 80 characters with no slash');
+  const parent = body.parent_id === undefined ? f.parent_id : body.parent_id;
+  if (parent !== null) {
+    if (typeof parent !== 'string' || !(await getFolder(env, parent))) return fail(400, 'no such parent folder');
+    if (await isWithin(env, parent, id)) return fail(400, 'a folder cannot move into itself');
+  }
+  const color = body.color === undefined ? f.color : body.color;
+  if (color !== null && !isFolderColor(color)) return fail(400, 'unknown color');
+  await env.DB.prepare('UPDATE folders SET name = ?, parent_id = ?, color = ?, updated_at = ? WHERE id = ?').bind(name, parent, color, now(), id).run();
+  return json(await getFolder(env, id));
+}
+
+/** Deletes the folder only. Its pages and folders move up to its parent, so nothing is lost. */
+async function deleteFolder(env: Env, id: string) {
+  const f = await getFolder(env, id);
+  if (!f) return fail(404, 'no such folder');
+  await env.DB.batch([
+    env.DB.prepare('UPDATE pages SET folder_id = ? WHERE folder_id = ?').bind(f.parent_id, id),
+    env.DB.prepare('UPDATE folders SET parent_id = ? WHERE parent_id = ?').bind(f.parent_id, id),
+    env.DB.prepare('DELETE FROM folders WHERE id = ?').bind(id),
+  ]);
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+async function movePage(req: Request, env: Env, slug: string) {
+  const body = (await req.json().catch(() => ({}))) as { folder_id?: unknown };
+  const target = body.folder_id ?? null;
+  if (target !== null && (typeof target !== 'string' || !isFolderId(target) || !(await getFolder(env, target)))) return fail(400, 'no such folder');
+  const res = await env.DB.prepare('UPDATE pages SET folder_id = ? WHERE slug = ?').bind(target, slug).run();
+  return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such page');
 }
 
 /** Replaces the page's search rows with the text of this version. The title goes only on the first row, so a title match opens the top of the page. */
@@ -351,7 +429,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'kit-css':
       return css();
     case 'library':
-      return page(libraryHtml(await listPages(env), nonce), nonce);
+      return page(libraryHtml(await listPages(env), await listFolders(env), nonce), nonce);
     case 'view': {
       const p = await getPage(env, r.slug);
       if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);
@@ -381,6 +459,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       const res = await env.DB.prepare('UPDATE pages SET pinned_at = ? WHERE slug = ?').bind(method === 'PUT' ? now() : null, r.slug).run();
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such page');
     }
+    case 'api-folders':
+      if (method === 'GET') return json(await listFolders(env));
+      if (method === 'POST') return createFolder(req, env);
+      return fail(405, 'method not allowed');
+    case 'api-folder':
+      if (method === 'PATCH') return updateFolder(req, env, r.id);
+      if (method === 'DELETE') return deleteFolder(env, r.id);
+      return fail(405, 'method not allowed');
+    case 'api-page-folder':
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      return movePage(req, env, r.slug);
     case 'api-refresh':
       if (method !== 'POST') return fail(405, 'method not allowed');
       return refresh(env, r.slug);

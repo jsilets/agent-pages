@@ -54,6 +54,21 @@ export function isToken(s: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(s);
 }
 
+/** A folder id: 12 random bytes in base64url. */
+export function newFolderId(): string {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+export function isFolderId(s: string): boolean {
+  return /^[A-Za-z0-9_-]{16}$/.test(s);
+}
+
+/** The kit's color ramps. A folder takes one of them, or none. */
+export const FOLDER_COLORS = ['blue', 'teal', 'green', 'amber', 'coral', 'pink', 'purple', 'red', 'gray'] as const;
+export type FolderColor = (typeof FOLDER_COLORS)[number];
+export const isFolderColor = (v: unknown): v is FolderColor => (FOLDER_COLORS as readonly unknown[]).includes(v);
+
 export type Route =
   | { kind: 'library' }
   | { kind: 'view'; slug: string; version: number | null }
@@ -68,6 +83,9 @@ export type Route =
   | { kind: 'api-pin'; slug: string }
   | { kind: 'api-refresh'; slug: string }
   | { kind: 'api-search' }
+  | { kind: 'api-folders' }
+  | { kind: 'api-folder'; id: string }
+  | { kind: 'api-page-folder'; slug: string }
   | { kind: 'thumb'; slug: string; version: number; theme: Theme }
   | { kind: 'pdf'; slug: string; version: number }
   | { kind: 'share-view'; token: string }
@@ -97,6 +115,8 @@ export function route(path: string): Route {
   if (p[0] === 'pdf' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'pdf', slug, version: +p[3] };
   if (p[0] === 't' && ok && p.length === 5 && NUM.test(p[3]) && (p[4] === 'light.webp' || p[4] === 'dark.webp')) return { kind: 'thumb', slug, version: +p[3], theme: p[4] === 'light.webp' ? 'light' : 'dark' };
   if (path === '/api/search') return { kind: 'api-search' };
+  if (path === '/api/folders') return { kind: 'api-folders' };
+  if (p[0] === 'api' && p[1] === 'folders' && p.length === 3 && isFolderId(p[2])) return { kind: 'api-folder', id: p[2] };
   if (p[0] === 'api' && p[1] === 'pages') {
     const s = p.length >= 4 ? `${p[2]}/${p[3]}` : '';
     if (p.length === 2) return { kind: 'api-list' };
@@ -104,6 +124,7 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'shares') return { kind: 'api-shares', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'pin') return { kind: 'api-pin', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'folder') return { kind: 'api-page-folder', slug: s };
   }
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };

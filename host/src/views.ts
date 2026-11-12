@@ -19,13 +19,13 @@ export const esc = (s: string | number | null | undefined) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** JSON for a <script type="application/json"> block. */
-const data = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
+export const data = (v: unknown) => JSON.stringify(v).replace(/</g, '\\u003c');
 
 /** "Oct 11" in UTC, for the version list. */
 const shortDay = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 
 // ─── Icons: 24-unit grid, drawn with the current text color ──────────
-const ICON: Record<string, string> = {
+export const ICON: Record<string, string> = {
   grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
   left: '<path d="M14.5 17 9.5 12l5-5"/>',
   right: '<path d="m9.5 17 5-5-5-5"/>',
@@ -48,7 +48,7 @@ const ICON: Record<string, string> = {
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/>',
 };
-const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
+export const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
 
 const HOST_CSS = `
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--p); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
@@ -97,6 +97,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-present { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; margin-left: 6px; padding: 0 12px 0 10px; border: 0.5px solid var(--b2); border-radius: 999px; background: transparent; color: var(--p); font: 600 13px var(--sans); cursor: pointer; }
 .v-present:hover { background: var(--bg2); }
 .v-present svg { width: 14px; height: 14px; fill: currentColor; stroke: none; }
+/* The message page: not found, link revoked. */
+.h-empty { display: grid; justify-items: center; gap: 4px; margin: 14vh auto 0; text-align: center; font-size: 13.5px; color: var(--s); }
 .h-kind { font: 500 11px var(--mono); color: var(--s); border: 0.5px solid var(--b2); border-radius: 4px; padding: 0 5px; line-height: 16px; }
 
 /* Tooltips: shown after a short pause, never while a menu is open. */
@@ -166,108 +168,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after { animation: none; }
 }
 
-/* ─── Library ───────────────────────────────────────────── */
-/* Only the area under the header scrolls, so the scroll bar starts below the header and the header keeps its full width. */
-body:has(> .h-bar) { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.h-scroll { flex: 1; min-height: 0; overflow: auto; }
-.h-bar { --bar: 44px; flex: none; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px) minmax(0, 1fr); gap: 12px; padding: 0 8px 0 16px; }
-.h-brand { display: flex; align-items: center; gap: 6px; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; }
-/* The mark without its tile: drawn in the text colour, so it inverts with the theme. The tile is for tabs and home screens. */
-.h-mark { width: 14px; height: 13px; fill: currentColor; stroke: none; }
-.h-search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 9px 0 11px; border-radius: 999px; background: var(--bg2); color: var(--t); cursor: text; }
-.h-search:focus-within { background: var(--bg); box-shadow: inset 0 0 0 0.5px var(--b2), 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent); }
-.h-search svg { width: 15px; height: 15px; }
-.h-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--p); font: 500 13.5px var(--sans); outline: none; }
-.h-search input::placeholder { color: var(--t); }
-.h-search input::-webkit-search-cancel-button { display: none; }
-.h-search:focus-within kbd, .h-search.has-q kbd { visibility: hidden; }
-kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box; border-radius: 5px; box-shadow: inset 0 0 0 0.5px var(--b2); font: 500 11px var(--mono); color: var(--s); }
-.h-tools { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.h-tools .v-seg { margin: 0 2px 0 0; }
-.h-tools .v-seg button { position: relative; flex: none; width: 30px; height: 26px; padding: 0; }
-.h-keys { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 7px 12px; margin: 0; padding: 0 10px 8px; font: 12.5px var(--sans); color: var(--s); }
-.h-keys dt { display: flex; gap: 3px; }
-.h-keys dd { margin: 0; }
-
-.h-main { max-width: 1240px; margin: 0 auto; padding: 18px 24px 72px; }
-.h-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
-.h-chip { height: 28px; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 999px; background: transparent; color: var(--s); font: 500 12px var(--mono); cursor: pointer; }
-.h-chip.is-all { font: 500 12.5px var(--sans); }
-.h-chip:hover { background: var(--bg2); color: var(--p); }
-.h-chip[aria-pressed="true"] { border-color: var(--p); background: var(--p); color: var(--bg); }
-.h-label { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font: 500 12px var(--sans); color: var(--s); }
-.h-label svg { width: 13px; height: 13px; }
-.h-grid + .h-label, .h-list + .h-label { margin-top: 34px; }
-
-/* A card: the top of the page, then its title. Each version after the first adds a sheet behind it, up to two. */
-.h-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 26px 20px; }
-.h-card { position: relative; padding-top: 7px; }
-.h-link { display: block; color: inherit; text-decoration: none; outline: none; }
-.h-link:hover { text-decoration: none; }
-.h-thumb { --ring: var(--b); position: relative; display: grid; place-items: center; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 10px; background: var(--bg2); box-shadow: 0 0 0 0.5px var(--ring); transition: box-shadow 0.15s; }
-.h-thumb[data-sheets="1"] { box-shadow: 0 0 0 0.5px var(--ring), 0 -7px 0 -4px var(--bg3), 0 -7px 0 -3.5px var(--b); }
-.h-thumb[data-sheets="2"] { box-shadow: 0 0 0 0.5px var(--ring), 0 -7px 0 -4px var(--bg3), 0 -7px 0 -3.5px var(--b), 0 -14px 0 -8px var(--bg3), 0 -14px 0 -7.5px var(--b); }
-.h-link:hover .h-thumb { --ring: var(--b2); }
-.h-card.is-sel .h-thumb, .h-link:focus-visible .h-thumb { outline: 2px solid var(--link); outline-offset: 2px; }
-.h-img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
-.h-dark { display: none; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .h-light { display: none; } :root:not([data-theme="light"]) .h-dark { display: block; } }
-:root[data-theme="dark"] .h-light { display: none; }
-:root[data-theme="dark"] .h-dark { display: block; }
-.h-ph { font: 500 20px var(--mono); letter-spacing: -0.04em; color: var(--t); }
-.h-title { display: block; min-width: 0; margin-top: 10px; overflow: hidden; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; color: var(--p); white-space: nowrap; text-overflow: ellipsis; }
-.h-sub { display: flex; align-items: center; gap: 6px; margin-top: 1px; font: 12px/18px var(--sans); color: var(--s); }
-.h-sub svg, .h-acc svg { width: 13px; height: 13px; color: var(--t); }
-.h-v { margin-left: auto; font: 500 11.5px var(--mono); color: var(--t); }
-.h-menu { position: absolute; top: 15px; right: 8px; width: 28px; height: 28px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 2px 6px rgba(0, 0, 0, 0.08); opacity: 0; }
-.h-menu:hover, .h-menu[aria-expanded="true"] { background: var(--bg); }
-.h-card:hover .h-menu, .h-card.is-sel .h-menu, .h-row:hover .h-menu, .h-row.is-sel .h-menu, .h-menu:focus-visible, .h-menu[aria-expanded="true"] { opacity: 1; }
-@media (hover: none) { .h-menu { opacity: 1; } }
-
-/* The list: one row a page. Rows keep a 2px gap, so two hovered rows never touch. */
-.h-list { display: flex; flex-direction: column; gap: 2px; }
-.h-row { position: relative; }
-.h-row .h-link { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(0, 240px) 150px 32px 16px; align-items: center; gap: 14px; height: 48px; padding: 0 48px 0 8px; border-radius: 10px; }
-.h-row .h-link:hover, .h-row.is-sel .h-link { background: var(--bg2); }
-.h-row.is-sel .h-link, .h-hit.is-sel { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
-.h-row .h-thumb { border-radius: 5px; }
-.h-row .h-ph { font-size: 10px; }
-.h-row .h-title { margin: 0; font-weight: 500; }
-.h-repo { min-width: 0; overflow: hidden; font: 12px var(--mono); color: var(--s); white-space: nowrap; text-overflow: ellipsis; }
-.h-row .h-when { font-size: 12.5px; color: var(--s); white-space: nowrap; }
-.h-row .h-v { margin: 0; text-align: right; }
-.h-acc { display: grid; place-items: center; }
-.h-row .h-menu { top: 10px; background: transparent; box-shadow: none; }
-.h-row .h-menu:hover, .h-row .h-menu[aria-expanded="true"] { background: var(--bg3); }
-
-/* Search results: the best match on each page. A click opens the page at that claim. */
-.h-hits { display: flex; flex-direction: column; gap: 2px; max-width: 760px; }
-.h-hit { display: block; padding: 10px 12px; border-radius: 10px; color: inherit; text-decoration: none; }
-.h-hit:hover, .h-hit.is-sel { background: var(--bg2); text-decoration: none; }
-.h-hit-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.h-hit .h-title { flex: 0 1 auto; margin: 0; }
-.h-hit .h-repo { flex: 0 1 auto; }
-.h-hit-where { display: block; margin-top: 2px; font: 500 12.5px/18px var(--sans); color: var(--s); }
-.h-hit-snip { display: -webkit-box; margin-top: 3px; overflow: hidden; font: 13px/1.5 var(--sans); color: var(--s); -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--link) 20%, transparent); color: var(--p); }
-.h-none { margin: 4px 0 0; font-size: 13.5px; color: var(--s); }
-
-.h-empty { display: grid; justify-items: center; gap: 4px; margin: 14vh auto 0; text-align: center; font-size: 13.5px; color: var(--s); }
-.h-empty .h-thumb { width: 168px; margin-bottom: 14px; }
-.h-empty b { font-weight: 600; color: var(--p); }
-
-@media (max-width: 640px) {
-  .h-bar { grid-template-columns: minmax(0, 1fr) auto; padding-left: 8px; }
-  .h-brand, .h-search kbd { display: none; }
-  .h-main { padding: 14px 14px 56px; }
-  .h-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 22px 12px; }
-  .h-row .h-link { grid-template-columns: 52px minmax(0, 1fr) 32px; }
-  .h-row .h-repo, .h-row .h-when, .h-row .h-acc { display: none; }
-}
-@media (prefers-reduced-motion: reduce) { .h-thumb { transition: none; } }
 `;
 
-function shell(title: string, nonce: string, body: string, script = '', cssPath = '/_/explain.css') {
+export function shell(title: string, nonce: string, body: string, script = '', cssPath = '/_/explain.css') {
   return `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -301,205 +204,8 @@ export interface PageRow {
   shared: number;
   /** 'deck' for a slide deck, 'page' otherwise. */
   kind: string;
-}
-
-/**
- * The library. The script draws it from the JSON block, so the grid or list choice,
- * the repo filter, pins and search results all redraw without a reload.
- */
-export function libraryHtml(pages: PageRow[], nonce: string) {
-  const body = `<header class="v-bar h-bar">
-  <span class="h-brand"><svg class="h-mark" viewBox="24 32 208 192" aria-hidden="true">
-    <path opacity="0.3" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
-    <path opacity="0.55" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
-    <path fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
-  </svg>Pages</span>
-  <label class="h-search">${icon('search')}<input id="q" type="search" placeholder="Search pages" autocomplete="off" spellcheck="false" aria-label="Search pages"><kbd>/</kbd></label>
-  <div class="h-tools">
-    <div class="v-seg" role="group" aria-label="Layout">
-      <button type="button" data-view="grid" aria-label="Grid" data-tip="Grid">${icon('grid')}</button>
-      <button type="button" data-view="list" aria-label="List" data-tip="List">${icon('list')}</button>
-    </div>
-    <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" data-tip-end aria-label="More">${icon('more')}</button>
-  </div>
-  <div class="v-pop" id="pop-more" hidden>
-    ${appearance()}
-    <div class="v-hr"></div>
-    <div class="v-label">Keyboard</div>
-    <dl class="h-keys">
-      <dt><kbd>/</kbd></dt><dd>Search</dd>
-      <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous page</dd>
-      <dt><kbd>o</kbd></dt><dd>Open</dd>
-      <dt><kbd>c</kbd></dt><dd>Copy link</dd>
-      <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>
-    </dl>
-  </div>
-</header>
-<div class="h-scroll"><main class="h-main" id="main"></main></div>
-<div class="v-pop" id="pop-card" data-anchor hidden>
-  <button type="button" class="v-item" data-act="pin">${icon('pin')}<span>Pin</span></button>
-  <button type="button" class="v-item" data-act="copy">${icon('link')}Copy link</button>
-  <a class="v-item" data-act="tab" target="_blank" rel="noopener">${icon('open')}Open in new tab</a>
-</div>
-<div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe } })}</script>`;
-
-  const script =
-    COMMON_SCRIPT +
-    `
-const D = JSON.parse($('#data').textContent);
-const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
-const h = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const repoOf = (p) => p.repo || p.slug.split('/')[0];
-const pages = D.pages;
-let view = 'grid', repo = '', hits = null, sel = -1, menuSlug = null;
-try { view = localStorage.getItem('library-view') === 'list' ? 'list' : 'grid'; } catch {}
-
-// "2h ago" for this week, then the date.
-function ago(iso) {
-  const s = (Date.now() - Date.parse(iso)) / 1000;
-  if (s < 60) return 'just now';
-  if (s < 3600) return Math.floor(s / 60) + 'm ago';
-  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-  if (s < 7 * 86400) return Math.floor(s / 86400) + 'd ago';
-  const d = new Date(iso);
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) });
-}
-const thumb = (p, sheets) => '<span class="h-thumb"' + (sheets ? ' data-sheets="' + sheets + '"' : '') + '>' + (p.thumb
-  ? ['light', 'dark'].map((t) => '<img class="h-img h-' + t + '" src="/t/' + p.slug + '/' + p.thumb + '/' + t + '.webp?k=' + D.kit + '" alt="" loading="lazy" decoding="async">').join('')
-  : '<span class="h-ph">&lt;/&gt;</span>') + '</span>';
-const access = (p) => '<span class="h-acc" title="' + (p.shared ? 'Shared by link' : 'Only you') + '">' + svg(p.shared ? 'globe' : 'lock') + '</span>';
-const menu = (p) => '<button type="button" class="v-icon h-menu" aria-label="More for ' + h(p.title) + '" data-tip="More" data-tip-end aria-expanded="false">' + svg('more') + '</button>';
-const kind = (p) => p.kind === 'deck' ? '<span class="h-kind">Deck</span>' : '';
-const card = (p) => '<article class="h-card" data-slug="' + p.slug + '"><a class="h-link" href="/p/' + p.slug + '">'
-  + thumb(p, Math.min(2, p.latest - 1)) + '<span class="h-title">' + h(p.title) + '</span>'
-  + '<span class="h-sub">' + access(p) + kind(p) + '<span>Published ' + ago(p.updated_at) + '</span><span class="h-v">v' + p.latest + '</span></span></a>' + menu(p) + '</article>';
-const row = (p) => '<article class="h-row" data-slug="' + p.slug + '"><a class="h-link" href="/p/' + p.slug + '">'
-  + thumb(p, 0) + '<span class="h-title">' + h(p.title) + ' ' + kind(p) + '</span><span class="h-repo">' + h(repoOf(p)) + '</span>'
-  + '<span class="h-when">Published ' + ago(p.updated_at) + '</span><span class="h-v">v' + p.latest + '</span>' + access(p) + '</a>' + menu(p) + '</article>';
-const mark = (s) => h(s).replace(/\\u0002/g, '<mark>').replace(/\\u0003/g, '</mark>');
-const unmark = (s) => s.replace(/[\\u0002\\u0003]/g, '');
-const hitPath = (x) => '/p/' + x.slug + (x.anchor ? '#' + x.anchor : '');
-function hit(x) {
-  const inTitle = unmark(x.snippet) === x.title;
-  return '<a class="h-hit" data-slug="' + x.slug + '" href="' + hitPath(x) + '"><span class="h-hit-head"><span class="h-title">' + (inTitle ? mark(x.snippet) : h(x.title)) + '</span>'
-    + '<span class="h-repo">' + h(x.repo || x.slug.split('/')[0]) + '</span></span>'
-    + (x.heading ? '<span class="h-hit-where">' + (unmark(x.snippet) === x.heading ? mark(x.snippet) : h(x.heading)) + '</span>' : '')
-    + (inTitle || !x.snippet || unmark(x.snippet) === x.heading ? '' : '<span class="h-hit-snip">' + mark(x.snippet) + '</span>') + '</a>';
-}
-
-function render() {
-  const main = $('#main');
-  $$('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
-  if (hits) {
-    main.innerHTML = hits.length
-      ? '<div class="h-label">' + hits.length + (hits.length === 1 ? ' page matches' : ' pages match') + '</div><div class="h-hits">' + hits.map(hit).join('') + '</div>'
-      : '<p class="h-none">No page has text that matches \\u201c' + h($('#q').value.trim()) + '\\u201d.</p>';
-  } else if (!pages.length) {
-    main.innerHTML = '<div class="h-empty"><span class="h-thumb"><span class="h-ph">&lt;/&gt;</span></span><b>No pages yet</b><span>Publish one with <code>agent-pages publish &lt;page&gt;</code>.</span></div>';
-  } else {
-    const repos = [...new Set(pages.map(repoOf))];
-    if (!repos.includes(repo)) repo = '';
-    const shown = pages.filter((p) => !repo || repoOf(p) === repo);
-    const pinned = shown.filter((p) => p.pinned_at).sort((a, b) => b.pinned_at.localeCompare(a.pinned_at));
-    const rest = shown.filter((p) => !p.pinned_at);
-    const block = (label, list) => (label ? '<div class="h-label">' + label + '</div>' : '') + '<div class="h-' + view + '">' + list.map(view === 'grid' ? card : row).join('') + '</div>';
-    main.innerHTML = (repos.length > 1 ? '<div class="h-chips" role="group" aria-label="Repo">' + ['', ...repos].map((r) => '<button type="button" class="h-chip' + (r ? '' : ' is-all') + '" data-repo="' + h(r) + '" aria-pressed="' + (r === repo) + '">' + (r ? h(r) : 'All') + '</button>').join('') + '</div>' : '')
-      + (pinned.length ? block(svg('pin') + 'Pinned', pinned) : '') + (rest.length ? block(pinned.length ? 'Recent' : '', rest) : '');
-  }
-  select(Math.min(sel, entries().length - 1), false);
-}
-const entries = () => $$('#main [data-slug]');
-function select(i, scroll = true) {
-  sel = i;
-  entries().forEach((el, j) => el.classList.toggle('is-sel', j === i));
-  if (scroll && i >= 0) entries()[i].scrollIntoView({ block: 'nearest' });
-}
-const current = () => entries()[sel];
-const pageOf = (slug) => pages.find((p) => p.slug === slug);
-
-$('#main').addEventListener('click', (e) => {
-  const chip = e.target.closest('[data-repo]');
-  if (chip) { repo = chip.dataset.repo; sel = -1; render(); return; }
-  const btn = e.target.closest('.h-menu');
-  if (btn) {
-    e.preventDefault();
-    e.stopPropagation();
-    menuSlug = btn.closest('[data-slug]').dataset.slug;
-    const p = pageOf(menuSlug), pop = $('#pop-card');
-    $('[data-act="pin"] span', pop).textContent = p.pinned_at ? 'Unpin' : 'Pin';
-    $('[data-act="tab"]', pop).href = '/p/' + p.slug;
-    openPop(btn, pop, e.detail === 0);
-  }
-});
-
-const copyLink = (slug) => navigator.clipboard.writeText(location.origin + '/p/' + slug).then(() => toast('Link copied'), () => toast('Could not copy the link'));
-async function togglePin(slug) {
-  const p = pageOf(slug), was = p.pinned_at;
-  p.pinned_at = was ? null : new Date().toISOString();
-  render();
-  toast(was ? 'Unpinned' : 'Pinned');
-  const r = await fetch('/api/pages/' + slug + '/pin', { method: was ? 'DELETE' : 'PUT' }).catch(() => null);
-  if (!r || !r.ok) { p.pinned_at = was; render(); toast('Could not change the pin'); }
-}
-$('#pop-card').addEventListener('click', (e) => {
-  const act = e.target.closest('[data-act]')?.dataset.act;
-  if (!act || !menuSlug) return;
-  if (act !== 'tab') closePop();
-  if (act === 'pin') togglePin(menuSlug);
-  if (act === 'copy') copyLink(menuSlug);
-  if (act === 'tab') closePop();
-});
-
-$$('[data-view]').forEach((b) => b.addEventListener('click', () => {
-  view = b.dataset.view;
-  try { localStorage.setItem('library-view', view); } catch {}
-  render();
-}));
-
-// Search: the host ranks matches with FTS5. A newer request cancels the one before it.
-const q = $('#q');
-let timer, ctl;
-async function runSearch() {
-  const text = q.value.trim();
-  q.parentElement.classList.toggle('has-q', !!q.value);
-  if (ctl) ctl.abort();
-  if (!text) { hits = null; sel = -1; render(); return; }
-  ctl = new AbortController();
-  try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(text), { signal: ctl.signal });
-    if (!r.ok) throw new Error(r.statusText);
-    hits = await r.json();
-    sel = hits.length ? 0 : -1;
-    render();
-  } catch (err) { if (err.name !== 'AbortError') toast('Search failed'); }
-}
-q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 120); });
-q.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.stopPropagation(); if (q.value) { q.value = ''; runSearch(); } else q.blur(); }
-  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); move(e.key === 'ArrowDown' ? 1 : -1); }
-  else if (e.key === 'Enter') { e.preventDefault(); const el = current() || entries()[0]; if (el) location.href = el.querySelector('a, [href]')?.href || el.href; }
-});
-
-function move(d) {
-  const n = entries().length;
-  if (n) select(sel < 0 ? (d > 0 ? 0 : n - 1) : Math.max(0, Math.min(n - 1, sel + d)));
-}
-document.addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); q.focus(); q.select(); } return; }
-  if (open || e.target.closest('input, textarea, select, [contenteditable]')) return;
-  const el = current(), slug = el && el.dataset.slug;
-  if (e.key === '/') { e.preventDefault(); q.focus(); q.select(); }
-  else if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); move(1); }
-  else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
-  else if ((e.key === 'o' || e.key === 'Enter') && el) { e.preventDefault(); location.href = (el.matches('a') ? el : el.querySelector('a')).href; }
-  else if (e.key === 'c' && slug) copyLink(slug);
-  else if (e.key === 'p' && slug && !hits) togglePin(slug);
-});
-
-render();
-`;
-  return shell('Pages', nonce, body, script);
+  /** The folder that holds the page, or null. */
+  folder_id: string | null;
 }
 
 export interface VersionRow {
@@ -532,7 +238,7 @@ const pdfItem = (pdf: string) =>
     <div class="v-hr"></div>`;
 
 /** The Appearance control and the ⋯ menu items that both viewers share. */
-function appearance() {
+export function appearance() {
   return `<div class="v-label">Appearance</div>
     <div class="v-seg" role="group" aria-label="Appearance">
       <button type="button" data-theme-set="auto">${icon('auto')}Auto</button>
@@ -545,7 +251,7 @@ function appearance() {
  * Popovers, the theme and the toast, for both viewers. One popover is open at a time.
  * A click in the frame does not reach this document, so the window blur event closes them.
  */
-const COMMON_SCRIPT = `
+export const COMMON_SCRIPT = `
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 let open = null;

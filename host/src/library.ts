@@ -33,7 +33,7 @@ const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCI
 
 // The brand mark on its tile, the same cut as the favicon (brand/mark-small.svg).
 const MARK = `<svg class="h-mark" viewBox="0 0 256 256" aria-hidden="true">
-    <rect class="h-tile" x="5" y="5" width="246" height="246" rx="44"/>
+    <rect class="h-tile" width="256" height="256" rx="48"/>
     <path fill="#6b6962" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
     <path fill="#b3b0a6" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
     <path fill="#f7f6f3" fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
@@ -51,10 +51,9 @@ body:has(> .l) { height: 100%; overflow: hidden; }
 .l-brand { color: var(--p); text-decoration: none; display: flex; align-items: center; gap: 9px; flex: none; height: 44px; margin-bottom: 6px; padding: 0 6px; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; }
 .l-brand:hover { text-decoration: none; }
 .h-mark { flex: none; width: 20px; height: 20px; stroke: none; }
-/* The tile is near black. In dark mode a hairline ring keeps its squircle edge visible. */
-.h-tile { fill: #1a1a1a; stroke: rgba(255, 255, 255, 0); stroke-width: 10; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .h-tile { stroke: rgba(255, 255, 255, 0.28); } :root:not([data-theme="light"]) .l-nav[aria-current="page"] { background: var(--bg3); } }
-:root[data-theme="dark"] .h-tile { stroke: rgba(255, 255, 255, 0.28); }
+/* The tile is the favicon's: near black in both themes, with no ring. */
+.h-tile { fill: #1a1a1a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .l-nav[aria-current="page"] { background: var(--bg3); } }
 :root[data-theme="dark"] .l-nav[aria-current="page"] { background: var(--bg3); }
 .l-nav { position: relative; display: flex; align-items: center; gap: 9px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--s); font: 500 13px var(--sans); text-decoration: none; cursor: pointer; }
 .l-nav:hover { background: color-mix(in oklab, var(--bg3) 55%, var(--side)); color: var(--p); text-decoration: none; }
@@ -437,8 +436,8 @@ const row = (p) => '<article class="h-row" data-slug="' + p.slug + '" draggable=
   + '<span class="h-when">Published ' + ago(p.updated_at) + '</span><span class="h-v">v' + p.latest + '</span>' + access(p) + '</a>' + menu(p) + '</article>';
 
 // The fan: the back page leans left, the middle one right, the newest stands in front.
-// Open, the pages rise out of the folder and spread a little. They stay inside the back panel's width, so its edges and tab still show.
-const FAN = [{ x: '-6%', y: '-24%', r: '-4deg', s: 0.8 }, { x: '6%', y: '-22%', r: '3.5deg', s: 0.8 }, { x: '0%', y: '-14%', r: '0deg', s: 0.9 }];
+// Open, the pages rise out of the folder at full size and spread a little. They stay inside the back panel's width, so its edges and tab still show.
+const FAN = [{ x: '-4%', y: '-15%', r: '-2.5deg', s: 1 }, { x: '4%', y: '-13%', r: '2deg', s: 1 }, { x: '0%', y: '-7%', r: '0deg', s: 1 }];
 // The back and its tab, on a 300 by 200 grid: a rounded tab on the left that slopes down into the back panel.
 const FOLDER_BACK = '<svg class="fo-back" viewBox="0 0 300 200" preserveAspectRatio="none" aria-hidden="true"><path d="M0 12C0 5.4 5.4 0 12 0H92C98 0 101.5 2.4 104.6 6.6L111 15.4C113.6 19 116.4 20 121 20H288C294.6 20 300 25.4 300 32V188C300 194.6 294.6 200 288 200H12C5.4 200 0 194.6 0 188Z"/></svg>';
 function folderCard(f) {

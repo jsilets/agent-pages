@@ -215,6 +215,7 @@ describe('folders', () => {
     expect(route('/api/pages/g/n/folder')).toEqual({ kind: 'api-page-folder', slug: 'g/n' });
     expect(route('/api/pages/g/n/seen')).toEqual({ kind: 'api-seen', slug: 'g/n' });
     expect(route('/api/pages/g/n/views')).toEqual({ kind: 'api-views', slug: 'g/n' });
+    expect(route('/p/g/n/views')).toEqual({ kind: 'views-page', slug: 'g/n' });
     const t = 'a'.repeat(43);
     expect(route(`/s/${t}/view`)).toEqual({ kind: 'share-start', token: t });
     expect(route(`/s/${t}/ping`)).toEqual({ kind: 'share-ping', token: t });

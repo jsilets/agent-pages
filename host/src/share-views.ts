@@ -1,35 +1,17 @@
-// Views of share links: anonymous counts, the time that a reader spends, and how far they get.
-// A share link needs no login, so the host does not know who reads. It keeps no IP address and no name.
-// A visitor is a hash of the IP address and the browser with a salt that changes each day, so the host
-// can count people for one day and cannot link a visitor across days or recover the address.
+// Views of share links, on the model of Papermark (github.com/mfts/papermark) and DocSend.
+// One visit is one load of a share link. The share page measures the active time on each part of the page
+// (a slide of a deck, a section of a document) and reports it every 10 seconds. Completion is the share of
+// the parts that the visit saw. A share link needs no login, so a visit keeps no name and no IP address.
 
-/** The longest active time that one view can have. A tab that stays open all day does not count all day. */
-export const MAX_ACTIVE_MS = 4 * 3600_000;
-/** The most parts (sections or slides) that one view keeps. */
+/** Papermark's numbers (lib/tracking/tracking-config.ts): the report interval, the idle limit, and the least time that counts. */
+export const TRACKING = { INTERVAL_MS: 10_000, IDLE_MS: 5 * 60_000, MIN_MS: 1000 } as const;
+/** The most parts that one page can have. */
 export const MAX_PARTS = 200;
-/** A view from the same visitor on the same link within this time continues the view before it. */
-export const SESSION_MS = 30 * 60_000;
+/** The longest active time that one visit can have. */
+export const MAX_ACTIVE_MS = 4 * 3600_000;
 
-/** One row of share_views. parts is JSON: for each section or slide, the active milliseconds on it. */
-export interface ShareViewRow {
-  id: string;
-  token: string;
-  visitor: string;
-  device: string;
-  country: string | null;
-  referrer: string | null;
-  started_at: string;
-  last_at: string;
-  active_ms: number;
-  /** A document: the furthest point read, in percent. A deck: the number of slides reached. */
-  depth: number;
-  /** A deck: the number of slides. A document: 0. */
-  slides: number;
-  downloads: number;
-  parts: string;
-}
-
-// Link previews (Slack, iMessage, WhatsApp and others), search engines and headless browsers do not count.
+// Link previews (Slack, iMessage, WhatsApp and others), crawlers and headless browsers. The list follows
+// Papermark's lib/utils/user-agent.ts. A view also starts only from a script, so a preview that runs no script makes none.
 const BOTS = /bot\b|bot\/|crawler|spider|preview|facebookexternalhit|slackbot|twitterbot|linkedinbot|discordbot|whatsapp|telegrambot|skypeuripreview|embedly|quora link|vkshare|pinterest|headlesschrome|lighthouse|curl\/|wget\/|python-requests|go-http-client|node-fetch|axios\//i;
 export const isBot = (ua: string | null) => !ua || BOTS.test(ua);
 
@@ -39,6 +21,18 @@ export function deviceOf(ua: string | null): 'phone' | 'tablet' | 'desktop' {
   if (/ipad|tablet|(android(?!.*mobile))/i.test(ua)) return 'tablet';
   if (/mobi|iphone|ipod|android/i.test(ua)) return 'phone';
   return 'desktop';
+}
+
+/** The operating system, or null. */
+export function osOf(ua: string | null): string | null {
+  if (!ua) return null;
+  if (/iphone|ipad|ipod/i.test(ua)) return 'iOS';
+  if (/android/i.test(ua)) return 'Android';
+  if (/cros/i.test(ua)) return 'ChromeOS';
+  if (/mac os x|macintosh/i.test(ua)) return 'macOS';
+  if (/windows/i.test(ua)) return 'Windows';
+  if (/linux/i.test(ua)) return 'Linux';
+  return null;
 }
 
 /** The host name of the page that linked to the share link, or null for a direct visit or a link from this host. */
@@ -58,101 +52,112 @@ export async function visitorHash(salt: string, ip: string, ua: string) {
   return [...bytes.slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** A report from the share page: the active time and the time on each part since the report before it. */
+/** The headings of the parts of a page, as the share page sends them when a visit starts. */
+export function cleanLabels(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.slice(0, MAX_PARTS).map((x, i) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim().slice(0, 80) : '') || `Part ${i + 1}`);
+}
+
+/** A report of the share page: the active time on each part since the report before it. */
 export interface Ping {
   id: string;
-  active: number;
-  depth: number;
-  slides: number;
+  parts: Map<number, number>;
   download: boolean;
-  parts: Record<string, number>;
 }
 
 /**
- * Reads a report from the share page. The page is public, so each value is checked and capped.
- * One report can add at most the time since the view last reported, plus a small margin: `maxMs`.
+ * Reads a report. The share page is public, so each value is checked. A report can add at most `maxMs`
+ * in all: the time since the visit last reported, and a little more for a slow network. A part past `count` does not count.
  */
-export function cleanPing(body: unknown, maxMs: number): Ping | null {
+export function cleanPing(body: unknown, count: number, maxMs: number): Ping | null {
   if (!body || typeof body !== 'object') return null;
   const b = body as Record<string, unknown>;
   if (typeof b.id !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(b.id)) return null;
-  const ms = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(Math.round(v), maxMs) : 0);
-  const int = (v: unknown, max: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.min(Math.round(v), max) : 0);
-  const parts: Record<string, number> = {};
+  const parts = new Map<number, number>();
+  let left = Math.max(0, maxMs);
   if (b.parts && typeof b.parts === 'object') {
-    for (const [k, v] of Object.entries(b.parts as Record<string, unknown>).slice(0, 50)) {
-      const key = k.replace(/\s+/g, ' ').trim().slice(0, 80);
-      const t = ms(v);
-      if (key && t) parts[key] = Math.min((parts[key] || 0) + t, maxMs);
+    for (const [k, v] of Object.entries(b.parts as Record<string, unknown>)) {
+      const i = Number(k);
+      if (!Number.isInteger(i) || i < 0 || i >= Math.max(count, 1) || typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
+      const ms = Math.min(Math.round(v), left);
+      if (ms <= 0) break;
+      parts.set(i, (parts.get(i) || 0) + ms);
+      left -= ms;
     }
   }
-  return { id: b.id, active: ms(b.active), depth: int(b.depth, 1000), slides: int(b.slides, 1000), download: b.download === true, parts };
+  return { id: b.id, parts, download: b.download === true };
 }
 
-/** Adds the time of a report to the parts of a view. A view keeps at most MAX_PARTS parts; a new part past that does not count. */
-export function addParts(json: string, add: Record<string, number>): string {
-  let parts: Record<string, number> = {};
-  try {
-    const p = JSON.parse(json);
-    if (p && typeof p === 'object') parts = p;
-  } catch {}
-  for (const [k, v] of Object.entries(add)) {
-    if (!(k in parts) && Object.keys(parts).length >= MAX_PARTS) continue;
-    parts[k] = Math.min((parts[k] || 0) + v, MAX_ACTIVE_MS);
-  }
-  return JSON.stringify(parts);
-}
-
-export interface LinkStats {
+export interface ViewRow {
+  id: string;
   token: string;
-  views: number;
-  /** Distinct visitors. A visitor hash changes each day, so one person on two days counts twice. */
-  people: number;
-  /** The median active time of the views that had any. */
-  median_ms: number;
-  total_ms: number;
-  last_at: string | null;
+  visitor: string;
+  device: string;
+  os: string | null;
+  country: string | null;
+  referrer: string | null;
+  started_at: string;
+  last_at: string;
+  active_ms: number;
+  parts: number;
   downloads: number;
 }
+export interface PartRow {
+  view_id: string;
+  part: number;
+  label: string;
+  ms: number;
+}
+export interface LinkRow {
+  token: string;
+  name: string | null;
+  version: number | null;
+  created_at: string;
+  revoked_at: string | null;
+}
 
-const median = (xs: number[]) => {
-  if (!xs.length) return 0;
-  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
-  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
-};
+/** Papermark's completion: the parts that the visit saw for at least the least time, out of all the parts. */
+export function completion(seen: PartRow[], count: number) {
+  if (!count) return 0;
+  return Math.round((100 * new Set(seen.filter((p) => p.ms >= TRACKING.MIN_MS).map((p) => p.part)).size) / count);
+}
 
-/** How far a view got, as a percent. A deck counts the slides reached against the number of slides. */
-export const reach = (v: Pick<ShareViewRow, 'depth' | 'slides'>) => (v.slides ? Math.min(100, Math.round((v.depth / v.slides) * 100)) : Math.min(100, v.depth));
+const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : 0);
 
 /**
- * The summary for the owner of a page: one line for each link, the time on each part across all views,
- * and the newest views. A part keeps the order in which it first shows in the views, oldest view first,
- * which is the order of the page for most readers.
+ * The views of a page for its owner, as DocSend and Papermark show them: the totals, the average time on
+ * each part, a line for each link, and each visit with its own time on each part, newest first.
  */
-export function summarize(tokens: string[], rows: ShareViewRow[], recent = 20) {
-  const links: LinkStats[] = tokens.map((token) => {
-    const mine = rows.filter((r) => r.token === token);
-    const timed = mine.map((r) => r.active_ms).filter((t) => t > 0);
+export function summarize(links: LinkRow[], views: ViewRow[], parts: PartRow[]) {
+  const byView = new Map<string, PartRow[]>();
+  for (const p of parts) (byView.get(p.view_id) ?? byView.set(p.view_id, []).get(p.view_id)!).push(p);
+  const visits = [...views].sort((a, b) => b.started_at.localeCompare(a.started_at)).map((v) => {
+    const mine = (byView.get(v.id) || []).sort((a, b) => a.part - b.part);
     return {
-      token,
-      views: mine.length,
-      people: new Set(mine.map((r) => r.visitor)).size,
-      median_ms: median(timed),
-      total_ms: timed.reduce((a, b) => a + b, 0),
-      last_at: mine.reduce<string | null>((a, r) => (!a || r.last_at > a ? r.last_at : a), null),
-      downloads: mine.reduce((a, r) => a + r.downloads, 0),
+      id: v.id, token: v.token, started_at: v.started_at, last_at: v.last_at, active_ms: v.active_ms,
+      completion: completion(mine, v.parts), device: v.device, os: v.os, country: v.country, referrer: v.referrer, downloads: v.downloads,
+      parts: mine.filter((p) => p.ms > 0).map((p) => ({ part: p.part, label: p.label, ms: p.ms })),
     };
   });
-  const parts = new Map<string, { ms: number; views: number }>();
-  for (const r of [...rows].sort((a, b) => a.started_at.localeCompare(b.started_at))) {
-    let p: Record<string, number> = {};
-    try { p = JSON.parse(r.parts) || {}; } catch {}
-    for (const [k, ms] of Object.entries(p)) {
-      const cur = parts.get(k) || { ms: 0, views: 0 };
-      parts.set(k, { ms: cur.ms + ms, views: cur.views + 1 });
-    }
+  // The average time on each part, over the visits that had any time. A part keeps the label of its newest visit.
+  const per = new Map<number, { label: string; ms: number[] }>();
+  for (const v of visits) for (const p of v.parts) {
+    const cur = per.get(p.part) ?? per.set(p.part, { label: p.label, ms: [] }).get(p.part)!;
+    cur.ms.push(p.ms);
   }
-  const newest = [...rows].sort((a, b) => b.started_at.localeCompare(a.started_at)).slice(0, recent)
-    .map((r) => ({ token: r.token, started_at: r.started_at, active_ms: r.active_ms, reach: reach(r), device: r.device, country: r.country, referrer: r.referrer, downloads: r.downloads }));
-  return { links, parts: [...parts].map(([key, v]) => ({ key, ...v })), recent: newest };
+  const timed = visits.filter((v) => v.active_ms > 0);
+  return {
+    totals: {
+      views: visits.length,
+      visitors: new Set(views.map((v) => v.visitor)).size,
+      avg_ms: avg(timed.map((v) => v.active_ms)),
+      avg_completion: avg(timed.map((v) => v.completion)),
+    },
+    parts: [...per].sort((a, b) => a[0] - b[0]).map(([part, x]) => ({ part, label: x.label, avg_ms: avg(x.ms), visits: x.ms.length })),
+    links: links.map((l) => {
+      const mine = visits.filter((v) => v.token === l.token);
+      return { ...l, views: mine.length, last_at: mine[0]?.started_at ?? null };
+    }),
+    visits,
+  };
 }

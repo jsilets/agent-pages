@@ -41,6 +41,8 @@ export const ICON: Record<string, string> = {
   trash: '<path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.1a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/>',
   x: '<path d="m7 7 10 10M17 7 7 17"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+  // Lucide eye (ISC).
+  eye: '<path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/>',
   share: '<path d="M12 3.5v11M8 7.5l4-4 4 4"/><path d="M8.5 11H7a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 7 20h10a1.5 1.5 0 0 0 1.5-1.5v-6A1.5 1.5 0 0 0 17 11h-1.5"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/>',
   list: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.8" cy="6.5" r="0.9" fill="currentColor"/><circle cx="4.8" cy="12" r="0.9" fill="currentColor"/><circle cx="4.8" cy="17.5" r="0.9" fill="currentColor"/>',
@@ -151,22 +153,10 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-links code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
 .v-links .v-tag { margin-right: 4px; }
 .v-links .v-icon { width: 28px; height: 28px; }
-/* The views of a link: one line under the link. */
-.v-links li.v-stat { height: auto; padding: 0 2px 8px; border-top: 0; font-size: 12px; line-height: 16px; color: var(--t); font-variant-numeric: tabular-nums; }
-/* How people read the page: the time on each section, then the newest visits. Counts only, with no names. */
-.v-reads:empty { display: none; }
-.v-reads { margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--b); max-height: 46vh; overflow: auto; }
-.v-reads h3 { margin: 8px 0 6px; font: 600 12px var(--sans); color: var(--s); }
-.v-reads h3:first-child { margin-top: 0; }
-.v-part { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; margin-bottom: 7px; font-size: 12.5px; line-height: 16px; }
-.v-part span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--p); }
-.v-part span:nth-child(2) { color: var(--s); font-variant-numeric: tabular-nums; }
-.v-part i { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--link) 70%, transparent); }
-.v-visit { display: flex; gap: 8px; padding: 5px 0; border-top: 0.5px solid var(--b); font-size: 12px; line-height: 16px; color: var(--s); font-variant-numeric: tabular-nums; }
-.v-visit:first-of-type { border-top: 0; }
-.v-visit b { flex: none; width: 62px; font-weight: 500; color: var(--p); }
-.v-visit span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.v-reads p { margin: 4px 0 0; font-size: 11.5px; line-height: 15px; color: var(--t); }
+/* A link can have a name: the person it is for. The Views page shows the name on each visit. */
+.v-lname { display: block; box-sizing: border-box; width: 100%; height: 32px; margin: 0 0 8px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px var(--sans); }
+.v-lname::placeholder { color: var(--t); }
+.v-links .v-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
 
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
@@ -221,8 +211,6 @@ export interface PageRow {
   thumb: number | null;
   /** The number of active share links. */
   shared: number;
-  /** The number of views of the share links of the page. */
-  views: number;
   /** 'deck' for a slide deck, 'page' otherwise. */
   kind: string;
   /** The folder that holds the page, or null. */
@@ -425,6 +413,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     ${step('right', n + 1, 'Next version')}
   </div>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
+  <a class="v-icon" href="/p/${esc(slug)}/views" data-tip="Views of the share links" aria-label="Views">${icon('eye')}</a>
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
   ${presentButton(input.kind)}
   <button type="button" class="v-share" data-pop="pop-share" aria-label="Share">${icon('share')}<span class="v-lbl">Share</span></button>
@@ -450,9 +439,9 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
       <button type="button" data-target="latest" aria-pressed="true">Latest version</button>
       <button type="button" data-target="${n}" aria-pressed="false">Only v${n}</button>
     </div>
+    <input class="v-lname" id="lname" type="text" maxlength="80" placeholder="Who is it for? For example, Dana at Acme" aria-label="Name of the link" autocomplete="off">
     <button type="button" class="v-create" id="create">Create link</button>
     <ul class="v-links" id="links"></ul>
-    <div class="v-reads" id="reads"></div>
   </div>
 </header>
 <iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
@@ -493,49 +482,14 @@ $$('[data-target]').forEach((b) => b.addEventListener('click', () => {
   target = b.dataset.target;
   $$('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
 }));
-// The views of the links: counts with no names, the time on each section, and the newest visits.
-const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' + (s % 60 ? ' ' + (s % 60) + 's' : '') : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; };
-const since = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
-const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
-function statLine(st) {
-  if (!st || !st.views) return 'No views yet';
-  return [plural(st.views, 'view', 'views'), plural(st.people, 'person', 'people'), st.median_ms ? dur(st.median_ms) + ' typical read' : '', 'last ' + since(st.last_at), st.downloads ? plural(st.downloads, 'download', 'downloads') : ''].filter(Boolean).join(' \u00b7 ');
-}
-function drawReads(v) {
-  const box = $('#reads');
-  box.replaceChildren();
-  if (!v || !v.recent.length) return;
-  const add = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; box.append(el); return el; };
-  const parts = v.parts.filter((p) => p.ms >= 1000);
-  if (parts.length) {
-    add('h3', '', 'Time on each part');
-    const top = Math.max(...parts.map((p) => p.ms));
-    for (const p of parts.slice(0, 12)) {
-      const row = add('div', 'v-part');
-      const a = document.createElement('span'); a.textContent = p.key; a.title = p.key;
-      const b = document.createElement('span'); b.textContent = dur(p.ms) + ' \u00b7 ' + plural(p.views, 'view', 'views');
-      const bar = document.createElement('i'); bar.style.width = Math.max(2, Math.round((p.ms / top) * 100)) + '%';
-      row.append(a, b, bar);
-    }
-  }
-  add('h3', '', 'Recent views');
-  for (const r of v.recent.slice(0, 8)) {
-    const row = add('div', 'v-visit');
-    const b = document.createElement('b'); b.textContent = since(r.started_at);
-    const s = document.createElement('span');
-    s.textContent = [r.active_ms ? dur(r.active_ms) : 'Under 1s', 'read ' + r.reach + '%', r.device, r.country, r.referrer ? 'from ' + r.referrer : '', r.downloads ? 'downloaded' : ''].filter(Boolean).join(' \u00b7 ');
-    row.append(b, s);
-  }
-  add('p', '', 'Counts are anonymous. A person is one browser on one day. Time counts only while the page is on screen and the reader is active.');
-}
 async function loadLinks() {
-  const [list, views] = await Promise.all([api('/api/pages/' + D.slug + '/shares'), api('/api/pages/' + D.slug + '/views').catch(() => null)]);
-  const statOf = (t) => views && views.links.find((l) => l.token === t);
-  drawReads(views);
+  const list = await api('/api/pages/' + D.slug + '/shares');
   const ul = $('#links');
-  ul.replaceChildren(...list.flatMap((s) => {
+  ul.replaceChildren(...list.map((s) => {
     const li = document.createElement('li');
-    const code = document.createElement('code'); code.textContent = s.url.replace(/^https?:\\/\\//, ''); code.title = s.url;
+    const code = document.createElement(s.name ? 'span' : 'code');
+    if (s.name) code.className = 'v-nm';
+    code.textContent = s.name || s.url.replace(/^https?:\\/\\//, ''); code.title = s.url;
     const tag = document.createElement('span'); tag.className = 'v-tag'; tag.textContent = s.version ? 'v' + s.version : 'Latest';
     const c = document.createElement('button'); c.type = 'button'; c.className = 'v-icon'; c.innerHTML = svg('link'); c.setAttribute('aria-label', 'Copy link'); c.dataset.tip = 'Copy';
     c.onclick = () => copyText(s.url).then(() => toast('Link copied'));
@@ -545,15 +499,15 @@ async function loadLinks() {
       await api('/api/shares/' + s.token, { method: 'DELETE' }); toast('Link revoked'); loadLinks();
     };
     li.append(code, tag, c, r);
-    const st = document.createElement('li'); st.className = 'v-stat'; st.textContent = statLine(statOf(s.token));
-    return [li, st];
+    return li;
   }));
 }
 $('#pop-share').addEventListener('open', loadLinks);
 $('#create').addEventListener('click', async (e) => {
   const b = e.currentTarget; b.disabled = true;
   try {
-    const s = await api('/api/pages/' + D.slug + '/shares', { method: 'POST', body: JSON.stringify({ version: target === 'latest' ? 'latest' : +target }) });
+    const s = await api('/api/pages/' + D.slug + '/shares', { method: 'POST', body: JSON.stringify({ version: target === 'latest' ? 'latest' : +target, name: $('#lname').value }) });
+    $('#lname').value = '';
     await copyText(s.url).then(() => toast('Link created and copied'), () => toast('Link created'));
     await loadLinks();
   } catch (err) { toast('Could not create the link: ' + err.message); }
@@ -565,93 +519,87 @@ $('#create').addEventListener('click', async (e) => {
 
 /**
  * The reader report of a share link. The host adds it to the page in the frame of the share page.
- * Each second it notes if the page is on screen and the reader did something in the last minute. Only that time counts.
- * It notes how far the reader got and which section or slide is in the middle of the screen.
- * Every 5 seconds it sends what it noted to the share page, which sends it to the host. It keeps nothing in the browser.
+ * The frame has no origin, so it only reports to the share page, which keeps the time (SHARE_COUNT).
+ * It sends the headings of the parts once, the part in the middle of the screen when it changes, and the
+ * activity of the reader, at most once a second. A part is a slide of a deck, or a section of a document
+ * that starts at an h1 or h2 heading. A document with no heading is one part.
  */
 export const READ_REPORTER = String.raw`(() => {
   if (parent === window) return;
+  const send = (m) => parent.postMessage({ ns: 'ap-read', ...m }, '*');
   const deck = document.querySelector('main.k-deck');
   const slides = deck ? [...deck.querySelectorAll('.k-slide')] : [];
   const heads = deck ? [] : [...document.querySelectorAll('h1, h2')];
-  let last = Date.now(), input = Date.now(), active = 0, depth = 0, parts = {};
-  const mark = () => { input = Date.now(); };
-  for (const t of ['scroll', 'wheel', 'keydown', 'pointerdown', 'pointermove', 'touchstart']) addEventListener(t, mark, { passive: true, capture: true });
-  addEventListener('message', (e) => { const d = e.data; if (e.source === parent && d && d.ns === 'ap-read' && d.type === 'input') mark(); });
-  const text = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 70);
-  function part() {
+  const text = (el) => (el ? (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80) : '');
+  const labels = deck ? slides.map((s, i) => (i + 1) + '. ' + (text(s.querySelector('h1, h2, blockquote')) || 'Slide')) : heads.length ? heads.map(text) : ['The page'];
+  function current() {
     const mid = innerHeight / 2;
     if (deck) {
       // A slide that is not on screen has hidden="until-found". It keeps its box, so the box alone does not say which slide shows.
       const i = slides.findIndex((s) => { if (s.hidden) return false; const r = s.getBoundingClientRect(); return r.height > 0 && r.top <= mid && r.bottom >= mid; });
-      if (i < 0) return '';
-      depth = Math.max(depth, i + 1);
-      const h = slides[i].querySelector('h1, h2, blockquote');
-      return (i + 1) + (h && text(h) ? '. ' + text(h) : '');
+      return i;
     }
-    let cur = null;
-    for (const h of heads) { if (h.getBoundingClientRect().top <= mid) cur = h; else break; }
-    return cur ? text(cur) : heads.length ? 'Start of the page' : '';
+    let cur = 0;
+    heads.forEach((h, i) => { if (h.getBoundingClientRect().top <= mid) cur = i; });
+    return cur;
   }
-  setInterval(() => {
-    const t = Date.now(), dt = Math.min(t - last, 2000);
-    last = t;
-    if (document.visibilityState !== 'visible' || t - input > 60000) return;
-    active += dt;
-    const k = part();
-    if (k) parts[k] = (parts[k] || 0) + dt;
-    if (!deck) {
-      const se = document.scrollingElement || document.documentElement;
-      depth = Math.max(depth, se.scrollHeight <= innerHeight ? 100 : Math.round(((se.scrollTop + innerHeight) / se.scrollHeight) * 100));
-    }
-  }, 1000);
-  const flush = () => { if (!active) return; parent.postMessage({ ns: 'ap-read', type: 'tick', active, depth, slides: slides.length, parts }, '*'); active = 0; parts = {}; };
-  setInterval(flush, 5000);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  let part = -2, told = 0;
+  const check = () => { const i = current(); if (i >= 0 && i !== part) { part = i; send({ type: 'part', part }); } };
+  send({ type: 'hello', parts: labels });
+  check();
+  setInterval(check, 500);
+  const active = () => { const n = Date.now(); if (n - told < 1000) return; told = n; send({ type: 'active' }); };
+  for (const t of ['mousedown', 'mousemove', 'keydown', 'keyup', 'scroll', 'wheel', 'touchstart', 'click']) addEventListener(t, active, { passive: true, capture: true });
 })();`;
 
 /**
- * The share page counts the visit for the owner of the page: no name, no cookie and no storage.
- * It starts a view, adds up the reports of the page in the frame, and sends them every 15 seconds and when the tab hides.
+ * The share page counts the visit for the owner of the page, with Papermark's tracker (lib/tracking):
+ * it counts time only while the tab shows and the reader was active in the last 5 minutes, on the part that
+ * is on screen. It sends the time every 10 seconds, and with sendBeacon when the tab hides or closes.
+ * The visit starts when the page in the frame says hello, so a client that runs no script makes no visit.
+ * It keeps no cookie and nothing in the browser.
  */
 const SHARE_COUNT = String.raw`
 (() => {
-  const T = location.pathname.split('/')[2];
-  const post = (path, body) => fetch('/s/' + T + '/' + path, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const empty = () => ({ active: 0, depth: q ? q.depth : 0, slides: q ? q.slides : 0, download: false, parts: {} });
-  let id = null, q = null, dirty = false;
-  q = empty();
-  function send() {
-    if (!id || !dirty) return;
-    const body = { id, ...q };
-    q = empty(); dirty = false;
-    post('ping', body).catch(() => {});
-  }
-  post('view', { referrer: document.referrer }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.id) { id = d.id; send(); } }).catch(() => {});
+  const INTERVAL = 10000, IDLE = 5 * 60000, MIN = 1000;
+  const T = location.pathname.split('/')[2], url = (p) => '/s/' + T + '/' + p;
   const frame = $('iframe');
+  let id = null, started = false, part = 0, lastActive = Date.now(), lastTick = Date.now(), acc = {}, download = false;
+  const visible = () => document.visibilityState === 'visible';
+  // Each second adds the time since the last second to the part on screen, while the tab shows and the reader is not idle.
+  function tick() {
+    const n = Date.now(), dt = Math.min(n - lastTick, 2000);
+    lastTick = n;
+    if (started && visible() && n - lastActive < IDLE) acc[part] = (acc[part] || 0) + dt;
+  }
+  function body() {
+    tick();
+    const total = Object.values(acc).reduce((a, b) => a + b, 0);
+    if (!id || (total < MIN && !download)) return null;
+    const b = { id, parts: acc, download };
+    acc = {}; download = false;
+    return JSON.stringify(b);
+  }
+  function send() { const b = body(); if (b) fetch(url('ping'), { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: b }).catch(() => {}); }
+  function beacon() { const b = body(); if (b && !navigator.sendBeacon(url('ping'), new Blob([b], { type: 'application/json' }))) fetch(url('ping'), { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: b }).catch(() => {}); }
   addEventListener('message', (e) => {
     if (!frame || e.source !== frame.contentWindow) return;
     const d = e.data;
-    if (!d || d.ns !== 'ap-read' || d.type !== 'tick') return;
-    q.active += +d.active || 0;
-    q.depth = Math.max(q.depth, +d.depth || 0);
-    q.slides = Math.max(q.slides, +d.slides || 0);
-    for (const [k, v] of Object.entries(d.parts || {})) q.parts[k] = (q.parts[k] || 0) + (+v || 0);
-    dirty = true;
+    if (!d || d.ns !== 'ap-read') return;
+    if (d.type === 'hello' && !started) {
+      started = true; lastActive = Date.now(); lastTick = Date.now();
+      fetch(url('view'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ referrer: document.referrer, parts: d.parts }) })
+        .then((r) => (r.ok ? r.json() : null)).then((x) => { if (x && x.id) id = x.id; }).catch(() => {});
+    } else if (d.type === 'part' && Number.isInteger(d.part)) { tick(); part = d.part; }
+    else if (d.type === 'active') lastActive = Date.now();
   });
-  setInterval(send, 15000);
-  // The frame sends what it has when the tab hides, so wait a moment for that message.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') setTimeout(send, 250); });
-  addEventListener('pagehide', send);
-  // The frame does not see the reader use the bar, so the bar tells it, at most every 5 seconds.
-  let told = 0;
-  for (const t of ['pointermove', 'pointerdown', 'keydown']) addEventListener(t, () => {
-    const n = Date.now();
-    if (n - told < 5000 || !frame || !frame.contentWindow) return;
-    told = n;
-    frame.contentWindow.postMessage({ ns: 'ap-read', type: 'input' }, '*');
-  }, { passive: true });
-  document.addEventListener('click', (e) => { if (e.target.closest('[data-pdf], a[download]')) { q.download = true; dirty = true; send(); } });
+  // The reader can use the bar of the share page too. The frame does not see that.
+  for (const t of ['mousemove', 'mousedown', 'keydown', 'touchstart']) addEventListener(t, () => { lastActive = Date.now(); }, { passive: true });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-pdf], a[download]')) { download = true; send(); } });
+  setInterval(tick, 1000);
+  setInterval(send, INTERVAL);
+  document.addEventListener('visibilitychange', () => { if (!visible()) beacon(); else { lastTick = Date.now(); lastActive = Date.now(); } });
+  addEventListener('pagehide', beacon);
 })();
 `;
 

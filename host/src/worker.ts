@@ -5,10 +5,11 @@ import kitJs from '../../kit/explain.js?raw';
 import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
-import { verifyAccessJwt, type Identity } from './auth';
+import { accessCookie, verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { KIT, READ_REPORTER, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
-import { MAX_ACTIVE_MS, SESSION_MS, addParts, cleanPing, deviceOf, isBot, referrerHost, summarize, visitorHash, type ShareViewRow } from './share-views';
+import { MAX_ACTIVE_MS, cleanLabels, cleanPing, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
+import { viewsHtml } from './views-page';
 import { libraryHtml, type FolderRow, type Opens } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
@@ -108,7 +109,7 @@ async function identify(req: Request, env: Env): Promise<Identity | null> {
   return verifyAccessJwt(req.headers.get('cf-access-jwt-assertion'), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD });
 }
 
-const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared, (SELECT COUNT(*) FROM share_views WHERE share_views.slug = pages.slug) AS views';
+const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug AND shares.revoked_at IS NULL) AS shared';
 
 async function getPage(env: Env, slug: string) {
   return env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages WHERE slug = ?`).bind(slug).first<PageRow>();
@@ -423,6 +424,7 @@ async function deletePage(env: Env, slug: string) {
   } while (cursor);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM share_view_parts WHERE view_id IN (SELECT id FROM share_views WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM share_views WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_opens WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
@@ -435,20 +437,22 @@ async function deletePage(env: Env, slug: string) {
 async function createShare(req: Request, env: Env, slug: string, origin: string) {
   const p = await getPage(env, slug);
   if (!p) return fail(404, 'no such page');
-  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest' };
+  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest'; name?: unknown };
   const v = body.version ?? 'latest';
+  // A name says who the link is for, as in DocSend and Papermark. One link for each reader tells the readers apart.
+  const name = typeof body.name === 'string' ? body.name.replace(/\s+/g, ' ').trim().slice(0, 80) || null : null;
   let version: number | null = null;
   if (v !== 'latest') {
     if (!Number.isInteger(v) || !(await getVersion(env, slug, v))) return fail(400, 'no such version');
     version = v;
   }
   const token = newToken();
-  await env.DB.prepare('INSERT INTO shares (token, slug, version, created_at) VALUES (?, ?, ?, ?)').bind(token, slug, version, now()).run();
-  return json({ token, slug, version, url: `${origin}/s/${token}` }, 201);
+  await env.DB.prepare('INSERT INTO shares (token, slug, version, name, created_at) VALUES (?, ?, ?, ?, ?)').bind(token, slug, version, name, now()).run();
+  return json({ token, slug, version, name, url: `${origin}/s/${token}` }, 201);
 }
 
 async function listShares(env: Env, slug: string, origin: string) {
-  const { results } = await env.DB.prepare('SELECT token, version, created_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<{ token: string; version: number | null; created_at: string }>();
+  const { results } = await env.DB.prepare('SELECT token, name, version, created_at FROM shares WHERE slug = ? AND revoked_at IS NULL ORDER BY created_at DESC').bind(slug).all<{ token: string; name: string | null; version: number | null; created_at: string }>();
   return json(results.map((s) => ({ ...s, url: `${origin}/s/${s.token}` })));
 }
 
@@ -469,56 +473,67 @@ async function daySalt(env: Env) {
 }
 
 /**
- * Starts a view of a share link, or continues the view of the same visitor in the last 30 minutes.
- * The share page calls it once it runs. A link preview or a crawler gets no view.
+ * Starts a visit of a share link. The share page calls it from a script once the page in its frame has loaded,
+ * so a link preview that runs no script makes no visit. The body has the referrer and the headings of the parts.
+ * Each load is a new visit, as in Papermark and DocSend.
  */
 async function startShareView(req: Request, env: Env, token: string) {
   const hit = await resolveShare(env, token);
   if (!hit) return fail(404, 'no such link');
   const ua = req.headers.get('user-agent');
   if (isBot(ua)) return json({ id: null });
-  const body = (await req.json().catch(() => ({}))) as { referrer?: unknown };
+  // The owner and anyone else who signed in to the host is not a reader of the link. Their visit does not count.
+  if (env.ACCESS_AUD && (await verifyAccessJwt(accessCookie(req.headers.get('cookie')), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD }))?.kind === 'person') return json({ id: null });
+  const body = (await req.json().catch(() => ({}))) as { referrer?: unknown; parts?: unknown };
+  const labels = cleanLabels(body.parts);
   const visitor = await visitorHash(await daySalt(env), req.headers.get('cf-connecting-ip') || '', ua || '');
-  const at = now();
-  const prev = await env.DB.prepare('SELECT id FROM share_views WHERE token = ? AND visitor = ? AND last_at > ? ORDER BY last_at DESC LIMIT 1')
-    .bind(token, visitor, new Date(Date.now() - SESSION_MS).toISOString()).first<{ id: string }>();
-  if (prev) {
-    await env.DB.prepare('UPDATE share_views SET last_at = ? WHERE id = ?').bind(at, prev.id).run();
-    return json({ id: prev.id });
-  }
-  const id = newToken().slice(0, 24);
+  const id = newToken().slice(0, 24), at = now();
   const country = typeof req.cf?.country === 'string' ? req.cf.country : null;
-  await env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, country, referrer, started_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), at, at).run();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, os, country, referrer, started_at, last_at, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), osOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), at, at, labels.length),
+    ...labels.map((label, i) => env.DB.prepare('INSERT INTO share_view_parts (view_id, part, label) VALUES (?, ?, ?)').bind(id, i, label)),
+  ]);
   return json({ id }, 201);
 }
 
-/** Adds a report of the share page to its view: active time, how far the reader got, the time on each part, a download. */
+/** Adds a report of the share page to its visit: the active time on each part since the last report, and a download. */
 async function pingShareView(req: Request, env: Env, token: string) {
   const body = await req.json().catch(() => null);
   const id = body && typeof body === 'object' && typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : '';
-  const row = await env.DB.prepare('SELECT last_at, active_ms, parts FROM share_views WHERE id = ? AND token = ?').bind(id, token).first<{ last_at: string; active_ms: number; parts: string }>();
+  const row = await env.DB.prepare('SELECT last_at, active_ms, parts FROM share_views WHERE id = ? AND token = ?').bind(id, token).first<{ last_at: string; active_ms: number; parts: number }>();
   if (!row) return fail(404, 'no such view');
-  // A report can add at most the time since the view last reported, and a little more for a slow network.
-  const p = cleanPing(body, Math.max(0, Date.now() - Date.parse(row.last_at)) + 15_000);
+  // A report can add at most the time since the visit last reported, and a little more for a slow network.
+  const room = Math.min(Math.max(0, Date.now() - Date.parse(row.last_at)) + 15_000, MAX_ACTIVE_MS - row.active_ms);
+  const p = cleanPing(body, row.parts, room);
   if (!p) return fail(400, 'bad report');
-  await env.DB.prepare('UPDATE share_views SET active_ms = ?, depth = max(depth, ?), slides = max(slides, ?), downloads = downloads + ?, parts = ?, last_at = ? WHERE id = ?')
-    .bind(Math.min(row.active_ms + p.active, MAX_ACTIVE_MS), p.depth, p.slides, p.download ? 1 : 0, addParts(row.parts, p.parts), now(), id).run();
+  let added = 0;
+  const writes = [...p.parts].map(([part, ms]) => {
+    added += ms;
+    // A page with no headings has one part, which the visit did not list when it started.
+    return env.DB.prepare('INSERT INTO share_view_parts (view_id, part, label, ms) VALUES (?, ?, ?, ?) ON CONFLICT (view_id, part) DO UPDATE SET ms = ms + excluded.ms')
+      .bind(id, part, 'The page', ms);
+  });
+  await env.DB.batch([
+    ...writes,
+    env.DB.prepare('UPDATE share_views SET active_ms = active_ms + ?, downloads = downloads + ?, last_at = ? WHERE id = ?').bind(added, p.download ? 1 : 0, now(), id),
+  ]);
   return new Response(null, { status: 204, headers: BASE_HEADERS });
 }
 
-/** The views of the share links of a page, for its owner. */
+/** The views of a page for its owner: the totals, the time on each part, the links, and each visit. Revoked links keep their visits. */
 async function listViews(env: Env, slug: string) {
-  if (!(await getPage(env, slug))) return fail(404, 'no such page');
-  const { results: shares } = await env.DB.prepare('SELECT token FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<{ token: string }>();
-  const { results: rows } = await env.DB.prepare('SELECT id, token, visitor, device, country, referrer, started_at, last_at, active_ms, depth, slides, downloads, parts FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 2000')
-    .bind(slug).all<ShareViewRow>();
-  return json(summarize(shares.map((s) => s.token), rows));
+  const { results: links } = await env.DB.prepare('SELECT token, name, version, created_at, revoked_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<LinkRow>();
+  const { results: views } = await env.DB.prepare('SELECT id, token, visitor, device, os, country, referrer, started_at, last_at, active_ms, parts, downloads FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 1000')
+    .bind(slug).all<ViewRow>();
+  const { results: parts } = await env.DB.prepare('SELECT p.view_id, p.part, p.label, p.ms FROM share_view_parts p JOIN share_views v ON v.id = p.view_id WHERE v.slug = ?')
+    .bind(slug).all<PartRow>();
+  return summarize(links, views, parts);
 }
 
 /** Resolves a share token to its page and version, or null when the page or version is gone. */
 async function resolveShare(env: Env, token: string) {
-  const s = await env.DB.prepare('SELECT slug, version FROM shares WHERE token = ?').bind(token).first<{ slug: string; version: number | null }>();
+  const s = await env.DB.prepare('SELECT slug, version FROM shares WHERE token = ? AND revoked_at IS NULL').bind(token).first<{ slug: string; version: number | null }>();
   if (!s) return null;
   const p = await getPage(env, s.slug);
   if (!p) return null;
@@ -620,9 +635,15 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'api-page-folder':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return movePage(req, env, r.slug);
+    case 'views-page': {
+      const p = await getPage(env, r.slug);
+      if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);
+      return page(viewsHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, views: await listViews(env, p.slug) }, nonce), nonce);
+    }
     case 'api-views':
       if (method !== 'GET') return fail(405, 'method not allowed');
-      return listViews(env, r.slug);
+      if (!(await getPage(env, r.slug))) return fail(404, 'no such page');
+      return json(await listViews(env, r.slug));
     case 'api-seen':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return markSeen(req, env, who.who, r.slug);
@@ -648,11 +669,8 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       return fail(405, 'method not allowed');
     case 'api-share': {
       if (method !== 'DELETE') return fail(405, 'method not allowed');
-      // A revoked link takes its views with it.
-      const [res] = await env.DB.batch([
-        env.DB.prepare('DELETE FROM shares WHERE token = ?').bind(r.token),
-        env.DB.prepare('DELETE FROM share_views WHERE token = ?').bind(r.token),
-      ]);
+      // A revoked link stops at once. Its row stays, so its visits keep the name of the link.
+      const res = await env.DB.prepare('UPDATE shares SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL').bind(now(), r.token).run();
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such share');
     }
     default:

@@ -1,7 +1,14 @@
--- Views of share links. A share link needs no login, so a row has no name and no IP address.
+-- Views of share links, on the model of Papermark (github.com/mfts/papermark) and DocSend.
+-- One row of share_views is one visit: one load of a share link. share_view_parts holds the active time of
+-- the visit on each part of the page: a slide of a deck, or a section of a document.
+
+-- A link can have a name, for example the person it is for. A revoked link stays, so its visits keep their name.
+ALTER TABLE shares ADD COLUMN name TEXT;
+ALTER TABLE shares ADD COLUMN revoked_at TEXT;
+
+-- A share link needs no login, so a visit has no name and no IP address.
 -- visitor is a hash of the IP address and the browser with the salt of one day (share_salts). The host deletes
--- each salt after two days, so a visitor cannot be linked across days and the address cannot be recovered.
--- One row is one visit: a new load of the link by the same visitor within 30 minutes continues the row.
+-- each salt after two days, so the host can count visitors for a day but cannot link a visitor across days.
 CREATE TABLE share_views (
   id TEXT PRIMARY KEY,
   token TEXT NOT NULL,
@@ -10,25 +17,30 @@ CREATE TABLE share_views (
   visitor TEXT NOT NULL,
   -- phone, tablet or desktop.
   device TEXT NOT NULL,
+  -- macOS, Windows, iOS, Android, Linux, ChromeOS, or NULL.
+  os TEXT,
   -- The two-letter country code from Cloudflare, or NULL.
   country TEXT,
   -- The host name of the page that linked here, or NULL for a direct visit.
   referrer TEXT,
   started_at TEXT NOT NULL,
   last_at TEXT NOT NULL,
-  -- The time that the page was on screen and the reader was active in the last minute.
+  -- The sum of the active time on the parts.
   active_ms INTEGER NOT NULL DEFAULT 0,
-  -- A document: the furthest point read, in percent. A deck: the number of slides reached.
-  depth INTEGER NOT NULL DEFAULT 0,
-  -- A deck: the number of slides. A document: 0.
-  slides INTEGER NOT NULL DEFAULT 0,
-  -- Downloads of the PDF or the HTML from the share page.
-  downloads INTEGER NOT NULL DEFAULT 0,
-  -- JSON: for each section heading or slide, the active milliseconds on it.
-  parts TEXT NOT NULL DEFAULT '{}'
+  -- The number of parts of the page: slides of a deck, or sections of a document.
+  parts INTEGER NOT NULL DEFAULT 0,
+  downloads INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX share_views_slug ON share_views (slug, started_at);
-CREATE INDEX share_views_visit ON share_views (token, visitor, last_at);
+
+-- The active time of one visit on one part. part is the index of the part, from 0. label is its heading.
+CREATE TABLE share_view_parts (
+  view_id TEXT NOT NULL,
+  part INTEGER NOT NULL,
+  label TEXT NOT NULL,
+  ms INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (view_id, part)
+);
 
 -- The salt of each day for the visitor hash. The host deletes a salt when it is two days old.
 CREATE TABLE share_salts (

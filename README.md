@@ -43,7 +43,8 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 - The Worker checks the Access JWT on each request too. Access at the edge is the first check, and the Worker is the second.
 - A page whose `<main>` has the class `k-deck` is a deck, and D1 stores `kind = 'deck'` for it. At publish time, Browser Rendering opens the deck at 1920×1080, and the kit reports the slides that overflow. The publish response returns that audit, and the CLI prints it. The deck thumbnails show the first slide.
 - A second Access application bypasses Access for `/s/*`. On that path the Worker checks only the share token, which is 32 random bytes.
-- The host counts the views of each share link with no name, no cookie and no IP address. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. A view records the active time, how far the reader got, the time on each section or slide, the device class, the country, the host of the referring page, and downloads. Link previews and headless browsers do not count. The owner sees the views in the Share menu of the page.
+- The host records the visits to share links on the model of Papermark and DocSend. One load of a link is one visit. The share page counts time only while the tab shows and the reader was active in the last 5 minutes, on the slide or section on screen. It reports every 10 seconds and with `sendBeacon` when the tab hides or closes. Completion is the share of the parts that the visit saw for at least 1 second.
+- A visit keeps no name, no cookie and no IP address. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. A link can have a name, for example the person it is for, so one link for each reader tells the readers apart. Link previews, crawlers, headless browsers and people who signed in to the host do not count. The owner sees the visits on the Views page of each document, `/p/<group>/<name>/views`.
 - The host records which version of each page a person last saw and when they last opened it. The library uses the record for the blue dot of a new version, for Recent, and for the sort by the last open.
 
 | Route | Auth | Does |
@@ -60,18 +61,19 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `PUT`, `DELETE /api/pages/<group>/<name>/pin` | Access | Pin or unpin a page |
 | `POST /api/pages/<group>/<name>/refresh` | Access | Index the latest version and take its thumbnails again |
 | `PUT /api/pages/<group>/<name>` | Access | Store a new version. The body is the HTML. |
-| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links and their views |
-| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
-| `DELETE /api/shares/<token>` | Access | Revoke a share link and delete its views |
+| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links and their visits |
+| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }`, and an optional `"name"` |
+| `DELETE /api/shares/<token>` | Access | Revoke a share link. Its visits stay. |
 | `GET /api/activity` | Access | The pages, the activity list and what the reader opened, for the library to poll |
 | `GET`, `POST /api/folders` | Access | List or make folders. POST body: `{ "name", "color", "parent_id" }` |
 | `PATCH`, `DELETE /api/folders/<id>` | Access | Rename, recolor or move a folder, or delete it and move its pages and folders to its parent |
 | `PUT /api/pages/<group>/<name>/folder` | Access | Move a page to a folder. Body: `{ "folder_id" }`, or null for no folder |
-| `GET /api/pages/<group>/<name>/views` | Access | The views of the share links of a page: a line for each link, the time on each part, and the newest views |
+| `GET /p/<group>/<name>/views` | Access | The Views page of a document: the totals, the average time on each part, each visit, and the links |
+| `GET /api/pages/<group>/<name>/views` | Access | The same data as JSON |
 | `PUT /api/pages/<group>/<name>/seen` | Access | Record that the reader saw a version in Activity. Body: `{ "version": n }` |
 | `GET /s/<token>` | Token | The shared page |
 | `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
-| `POST /s/<token>/view`, `POST /s/<token>/ping` | Token, same origin | The share page starts a view and reports the reading time. Other origins get 403. |
+| `POST /s/<token>/view`, `POST /s/<token>/ping` | Token, same origin | The share page starts a visit and reports the time on each part. Other origins get 403. |
 
 ## Deploy the host
 

@@ -72,6 +72,7 @@ export const isFolderColor = (v: unknown): v is FolderColor => (FOLDER_COLORS as
 export type Route =
   | { kind: 'library' }
   | { kind: 'view'; slug: string; version: number | null }
+  | { kind: 'views-page'; slug: string }
   | { kind: 'raw'; slug: string; version: number }
   | { kind: 'kit-css' }
   | { kind: 'share-css' }
@@ -115,6 +116,7 @@ export function route(path: string): Route {
   if (path === '/favicon.ico') return { kind: 'icon', name: 'favicon.ico' };
   if (p[0] === 's' && p[1] === '_' && p.length === 3 && (ICONS as readonly string[]).includes(p[2])) return { kind: 'icon', name: p[2] as IconName };
   if (p[0] === 'p' && ok && p.length === 3) return { kind: 'view', slug, version: null };
+  if (p[0] === 'p' && ok && p.length === 4 && p[3] === 'views') return { kind: 'views-page', slug };
   if (p[0] === 'p' && ok && p.length === 5 && p[3] === 'v' && NUM.test(p[4])) return { kind: 'view', slug, version: +p[4] };
   if (p[0] === 'raw' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'raw', slug, version: +p[3] };
   if (p[0] === 'pdf' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'pdf', slug, version: +p[3] };

@@ -19,6 +19,7 @@ const M = new Function(`${marginJs}\nreturn Margin;`)() as {
   person: (author: string, agents?: Record<string, string>) => { name: string; initials: string };
   mentionAt: (value: string, caret: number) => { from: number; query: string } | null;
   assistantStates: (threads: unknown[], handled: string[]) => Record<string, string>;
+  placeMargin: (body: number, doc: number, opt?: { card?: number; gap?: number; edge?: number }) => { frame: number; x: number };
 };
 
 /** The text nodes of an HTML fragment, in order, as a browser makes them. */
@@ -116,6 +117,45 @@ describe('layoutCards', () => {
   it('keeps the order of the anchors, also for input in another order', () => {
     const tops = M.layoutCards([...cards].reverse(), { gap: 10 });
     expect(Object.keys(tops).sort((x, y) => tops[x] - tops[y])).toEqual(['a', 'b', 'c', 'd']);
+  });
+});
+
+describe('placeMargin', () => {
+  // A column of 760 px, cards of 280 px, 28 px from the column and 16 px from the edge: 324 px of room at the right.
+  const at = (body: number) => {
+    const p = M.placeMargin(body, 760, { card: 280, gap: 28, edge: 16 });
+    const right = Math.min(p.frame, (p.frame + 760) / 2);
+    return { ...p, left: right - Math.min(760, p.frame) };
+  };
+  it('keeps the column in the middle of a view with room for the cards', () => {
+    for (const body of [2000, 1680, 1440, 1408]) {
+      const p = at(body);
+      expect(p.frame).toBe(body);
+      expect(p.left).toBe((body - 760) / 2);
+      expect(p.x).toBe((body + 760) / 2 + 28);
+      expect(p.x + 280 + 16).toBeLessThanOrEqual(body);
+    }
+  });
+  it('moves the column left by the smallest distance in a narrower view, then makes it narrower', () => {
+    const p = at(1280);
+    expect(p.left).toBe(1280 - 324 - 760);
+    expect(p.x).toBe(1280 - 296);
+    const q = at(1000);
+    expect(q.frame).toBe(1000 - 324);
+    expect(q.left).toBe(0);
+    expect(q.x).toBe(1000 - 296);
+  });
+  it('moves the column a little for a little less room: no jump at any width', () => {
+    let was = at(2000);
+    for (let body = 1999; body >= 1000; body--) {
+      const p = at(body);
+      expect(Math.abs(p.left - was.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(p.x - was.x)).toBeLessThanOrEqual(1);
+      was = p;
+    }
+  });
+  it('gives the room to the cards when the page does not report its column', () => {
+    expect(M.placeMargin(1440, 0)).toEqual({ frame: 1440 - 324, x: 1440 - 296 });
   });
 });
 

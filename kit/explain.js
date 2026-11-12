@@ -566,7 +566,8 @@ function runDeck(deck) {
   });
   const builds = (i) => slides[i].querySelectorAll('.k-build').length;
   // thumbs is null until the reader chooses; then the sidebar follows the screen width.
-  const S = { i: 0, b: 0, view: 'slide', thumbs: null, present: false };
+  // room: the width at the right edge that the host viewer keeps for its comments.
+  const S = { i: 0, b: 0, view: 'slide', thumbs: null, present: false, room: 0 };
   const bar = document.createElement('nav'); bar.className = 'k-deck-bar'; bar.setAttribute('aria-label', 'Deck');
   // A floating toolbar: thumbnails | previous, one tick for each slide, next, position. Each control has a tooltip.
   // The ticks show the deck's structure: section slides stand taller, and a slide with builds fills its tick in steps.
@@ -655,11 +656,17 @@ function runDeck(deck) {
     root.style.setProperty('--k-rail', (rl ? RAIL_W : 0) + 'px');
     // The slide width is a multiple of 16 px, so the width and the height are whole pixels. The slide sits on whole pixels too.
     // A slide on a half pixel shifts its edges when a build fades in.
-    const fit = v === 'slide' ? Math.min((vw - 2 * pad) / DECK_W, (vh - 2 * pad) / DECK_H) : Math.min(vw - 48, 1100) / DECK_W;
+    // With comments beside it, the slide stays in the middle while it is clear of their room. With too little room, it moves
+    // left, then it gets smaller. It never goes under the comments.
+    const room = v === 'slide' && !S.present ? S.room : 0;
+    const fit = v === 'slide' ? Math.min((vw - 2 * pad) / DECK_W, (vh - 2 * pad) / DECK_H, room ? (vw - room - pad) / DECK_W : Infinity) : Math.min(vw - 48, 1100) / DECK_W;
     const s = Math.max(16, Math.floor((fit * DECK_W) / 16) * 16) / DECK_W;
     const was = root.style.getPropertyValue('--k-s');
+    const fx = Math.floor(Math.min((vw - s * DECK_W) / 2, room ? vw - room - s * DECK_W : Infinity));
     root.style.setProperty('--k-s', s);
-    root.style.setProperty('--k-fx', Math.floor((vw - s * DECK_W) / 2) + 'px');
+    root.style.setProperty('--k-fx', fx + 'px');
+    // The bar of the deck stays under the middle of the slide.
+    root.style.setProperty('--k-bx', (rl ? RAIL_W : 0) + fx + (s * DECK_W) / 2 + 'px');
     root.style.setProperty('--k-fy', Math.floor((vh - s * DECK_H) / 2) + 'px');
     // The thumbnails fill the sidebar, so their scale follows its width, with or without a scroll bar.
     const tf = rl && rail.querySelector('.k-tframe');
@@ -717,6 +724,7 @@ function runDeck(deck) {
     // The host makes the frame full screen itself, so it tells the deck when that starts and ends.
     if (d.type === 'present') { S.present = !!d.on; if (S.present && S.view !== 'slide') { S.view = 'slide'; autoView = false; } show(); }
     if (d.type === 'view' && ['slide', 'scroll'].includes(d.view) && !(locked && d.view === 'scroll')) setView(d.view);
+    if (d.type === 'room') { const r = Number(d.right); S.room = Number.isFinite(r) ? Math.max(0, Math.min(2000, Math.round(r))) : 0; show(); }
     if (d.type === 'audit') parent.postMessage({ ns: 'k-deck', v: 1, type: 'audit', report: window.kDeck?.report || null }, '*');
   });
 
@@ -1269,8 +1277,7 @@ function startComments() {
       list.push({ id: it.id, state: it.state, top: top == null ? null : Math.round(top + scrollY), slide: n, hidden: top == null && it.state !== 'lost' });
     });
     const deck = all.length ? { n: all.length, cur: all.findIndex((s) => s.parentElement.classList.contains('k-cur')) + 1, paged: root.dataset.kView === 'slide' } : null;
-    const body = JSON.stringify([deck, list]);
-    if (body !== sent) { sent = body; say({ type: 'anchors', deck, list }); }
+    // The size goes first: the viewer places the cards beside the column of the page, so it needs the width before the places.
     if (HOST.on) {
       // The height of the content, not of the frame: the frame is as tall as the last height, and the page fills it.
       const b = document.body, h = Math.ceil(b.getBoundingClientRect().bottom + scrollY + (parseFloat(getComputedStyle(b).marginBottom) || 0));
@@ -1279,6 +1286,8 @@ function startComments() {
       const w = Number.isFinite(max) ? Math.round(max + 112) : 0;
       if (h !== sentH || w !== sentW) { sentH = h; sentW = w; say({ type: 'size', h, w }); }
     }
+    const body = JSON.stringify([deck, list]);
+    if (body !== sent) { sent = body; say({ type: 'anchors', deck, list }); }
     paint();
     // A deck shows the number of comments of each slide on its thumbnail, and a dot on its tick.
     if (all.length) document.querySelectorAll('.k-tick[data-i], .k-thumb[data-i]').forEach((b) => {

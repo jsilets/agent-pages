@@ -426,7 +426,7 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 /* The toolbar floats over the canvas, centered under the slide: thumbnails, then the arrows around one tick for each slide. */
 .k-deck-bar { display: none; }
 :root[data-k-view] .k-deck-bar {
-  position: fixed; z-index: 3; bottom: 14px; left: calc(var(--k-rail) + (100% - var(--k-rail)) / 2); translate: -50% 0;
+  position: fixed; z-index: 3; bottom: 14px; left: var(--k-bx, calc(var(--k-rail) + (100% - var(--k-rail)) / 2)); translate: -50% 0;
   display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px; box-sizing: border-box;
   border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 4px 16px rgba(0, 0, 0, 0.08);
 }

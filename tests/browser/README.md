@@ -1,6 +1,6 @@
 # Browser tests of the viewer
 
-`run.mjs` drives the viewer with a real mouse, real keys and real scrolling in Chromium, WebKit and Firefox. The tests check the single scroll bar, the place of each card, selections, the keyboard, edit and delete, an `@claude` run, a deck, the medium and narrow widths, the two sign-ins of "Assistants", the boxes that replace the Highlight API, and an old version.
+`run.mjs` drives the viewer with a real mouse, real keys and real scrolling in Chromium, WebKit and Firefox. The tests check the single scroll bar, the place of each card, the place of the page when the margin opens (the column stays in the middle, like Google Docs), the entrance of a new card (never more than 12 px from its place in any frame), the resolved threads button and its list, selections, the keyboard, edit and delete, an `@claude` run, a deck, the medium and narrow widths, the two sign-ins of "Assistants", the boxes that replace the Highlight API, and an old version.
 
 Playwright is not a dependency of this repo. Install it in a folder of your choice:
 

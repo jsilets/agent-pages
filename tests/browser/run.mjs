@@ -162,6 +162,40 @@ async function disconnected(page, name) {
   await until(() => con.isVisible(), name + ' shows Connect');
   return con;
 }
+/** The left and right edges of the column of the page in the window, and the width of the view. */
+async function docEdges(page) {
+  const o = await rect(page, '.v-stage > iframe:not(.is-in)');
+  const m = await pageFrame(page).evaluate(() => { const r = (document.querySelector('main.k-page') || document.querySelector('.k-frame.k-cur')).getBoundingClientRect(); return { l: r.left, r: r.right }; });
+  const view = await page.evaluate(() => document.querySelector('#body').clientWidth);
+  return { left: o.left + m.l, right: o.left + m.r, view };
+}
+/**
+ * Records the place of every card on each frame, after the browser laid out the frame. A ResizeObserver runs then, so the
+ * record never forces a style change of its own, which could hide a transition.
+ */
+function cardTracker() {
+  const log = (window.__cards = {}), probe = document.createElement('div');
+  probe.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;pointer-events:none;opacity:0';
+  document.body.append(probe);
+  let n = 0;
+  // The top is in the coordinates of the page: a scroll of the view moves a card with its text, and that is no movement.
+  new ResizeObserver(() => document.querySelectorAll('.cm-rail > .cm-card[data-id], .cm-pins > .cm-card[data-id]').forEach((c) => {
+    const r = c.getBoundingClientRect(), f = document.querySelector('.v-stage > iframe:not(.is-in)')?.getBoundingClientRect().top || 0;
+    (log[c.dataset.id] ||= []).push({ t: performance.now(), x: r.left, y: r.top - f, o: +getComputedStyle(c).opacity });
+  })).observe(probe);
+  const tick = () => { probe.style.width = (++n % 2) + 1 + 'px'; requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+const trackCards = (page) => page.evaluate(cardTracker);
+/** The largest distance between a card and its final place in any frame, and how long it moved or faded. */
+async function travel(page, id) {
+  await sleep(600);
+  const list = await page.evaluate((id) => window.__cards[id] || [], id);
+  ok(list.length > 3, `the card ${id} was recorded in ${list.length} frames`);
+  const f = list[list.length - 1], far = list.map((s) => Math.hypot(s.x - f.x, s.y - f.y));
+  const busy = list.filter((s, i) => far[i] > 0.5 || s.o < 0.99);
+  return { px: Math.max(...far), ms: busy.length ? Math.round(busy[busy.length - 1].t - list[0].t) : 0, frames: list.length };
+}
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, `${ENGINE}${DARK ? '-dark' : ''}-${name}.png`) }); };
 
 // ─── The pages ───
@@ -182,11 +216,54 @@ const TESTS = {
     for (const w of [1440, 1280, 1024]) {
       await page.setViewportSize({ width: w, height: 860 });
       await openViewer(page, SLUGS.doc, { cards: 2 });
+      // The cards that the page has when it loads show at their places, with no animation.
+      if (w === 1440) {
+        await page.addInitScript(`if (location.pathname.startsWith('/p/')) addEventListener('DOMContentLoaded', ${cardTracker.toString()})`);
+        await openViewer(page, SLUGS.doc, { cards: 2 });
+        for (const id of await page.evaluate(() => Object.keys(window.__cards))) {
+          const t = await travel(page, id), list = await page.evaluate((id) => window.__cards[id], id);
+          ok(t.px <= 2 && list.every((s) => s.o === 1), `a card shows at its place with no animation when the page loads (${t.px.toFixed(1)} px, ${t.ms} ms: ${JSON.stringify(list.slice(0, 4).map((s) => [Math.round(s.t), s.x, s.y, s.o]))})`);
+        }
+      }
       await oneScroller(page);
       await cardsClean(page);
-      const col = await rect(page, '#cm-col'), stage = await rect(page, '.v-stage');
-      ok(col.left >= stage.right - 0.5, `the margin is beside the page at ${w} px, not over it`);
+      const doc = await docEdges(page), first = await rect(page, '.cm-rail > .cm-card');
+      ok(first.left >= doc.right + 20 && first.right <= doc.view, `the cards are beside the page at ${w} px, not over it`);
       await shot(page, `wide-${w}`);
+    }
+  },
+
+  async 'the page keeps its place when the margin opens, like Google Docs'(page) {
+    const slug = await fresh('doc');
+    for (const w of [2000, 1680, 1440, 1280]) {
+      await page.setViewportSize({ width: w, height: 860 });
+      for (const t of await threads(slug)) await api('/api/comments/' + t.id, { method: 'DELETE' });
+      await openViewer(page, slug);
+      const none = await docEdges(page), width = none.right - none.left;
+      near(none.left, (none.view - width) / 2, 0.5, `with no thread, the column is in the middle of the view at ${w} px`);
+      const t = await comment(slug, { body: 'Width check.', quote: 'The second paragraph follows it.', prefix: '', suffix: '' });
+      await openViewer(page, slug, { cards: 1 });
+      const one = await docEdges(page), card = await rect(page, `.cm-card[data-id="${t.id}"]`);
+      ok(card.right <= one.view + 0.5, `the card is inside the view at ${w} px`);
+      ok(card.left >= one.right + 20, `the card is beside the column, not over it, at ${w} px (${card.left} < ${one.right} + 20)`);
+      if (w >= 1440) {
+        // Room for the column in the middle and the cards at its right: the column does not move, not by one pixel.
+        near(one.left, none.left, 0.5, `the column keeps its place when a thread shows at ${w} px`);
+        near(card.left, one.right + 28, 1, `the cards keep the same distance from the column at ${w} px`);
+        // The box for a new comment, then the last thread resolved: the column still does not move.
+        await page.click('#cnew');
+        await until(() => page.evaluate(() => !!document.querySelector('.cm-card.is-compose')), 'the comment box opens');
+        near((await docEdges(page)).left, none.left, 0.5, `the column keeps its place while the comment box is open at ${w} px`);
+        await page.keyboard.press('Escape');
+        await page.click(`.cm-card[data-id="${t.id}"]`);
+        await page.click(`.cm-card[data-id="${t.id}"] .cm-done`);
+        await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'with the last thread resolved, the margin goes');
+        near((await docEdges(page)).left, none.left, 0.5, `the column keeps its place when the last thread is resolved at ${w} px`);
+      } else {
+        // Too little room: the column moves left by the smallest distance that makes room for the cards.
+        near(one.right, one.view - 324, 1, `the column moves left only as far as the cards need at ${w} px`);
+        ok(one.left < none.left, `the column moved left at ${w} px`);
+      }
     }
   },
 
@@ -200,8 +277,20 @@ const TESTS = {
     await clickAdd(page);
     await until(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label') === 'Comment'), 'the comment box has the focus');
     await page.keyboard.type('Three inline elements in one quote.');
+    await trackCards(page);
     await page.keyboard.press(`${MOD}+Enter`);
     const t = await until(async () => (await threads(slug))[0], 'the comment is stored');
+    // The new card comes in at its own place: a short fade and a few pixels, never a slide from the top of the margin.
+    await until(() => page.$(`.cm-card[data-id="${t.id}"]`), 'the new card shows');
+    const mine = await travel(page, t.id);
+    ok(mine.px <= 12, `the new card is never more than 12 px from its place (${mine.px.toFixed(1)} px)`);
+    ok(mine.ms <= 300, `the new card settles in 300 ms (${mine.ms} ms)`);
+    // A comment from another person comes in the same way with the next refresh.
+    const other = await comment(slug, { body: 'From another person.', quote: 'The second paragraph follows it.', prefix: '', suffix: '' });
+    await until(() => page.$(`.cm-card[data-id="${other.id}"]`), 'the comment of another person shows', 8000);
+    const theirs = await travel(page, other.id);
+    ok(theirs.px <= 12, `a card that arrives is never more than 12 px from its place (${theirs.px.toFixed(1)} px)`);
+    await api('/api/comments/' + other.id, { method: 'DELETE' });
     ok(t.quote === 'bold words, a link and inline code', `the quote crosses the inline elements: "${t.quote}"`);
     SLUGS.doc = slug;
     const card = await until(() => page.$(`.cm-card[data-id="${t.id}"].is-active`), 'the new card shows, open');
@@ -362,10 +451,35 @@ const TESTS = {
     await page.click(`.cm-card[data-id="${root.id}"] .cm-done`);
     await until(async () => (await threads(slug))[0].status === 'resolved', 'the thread is resolved');
     await until(() => page.isVisible('#cres'), 'the bar shows the resolved threads');
+    // The button: the icon and "1 resolved" on one line, as tall as the other buttons of the bar.
+    const res = await page.evaluate(() => {
+      const b = document.querySelector('#cres'), r = b.getBoundingClientRect(), i = b.querySelector('svg').getBoundingClientRect(), t = b.querySelector('span').getBoundingClientRect(), n = document.querySelector('#cnew').getBoundingClientRect();
+      return { h: r.height, nh: n.height, ny: n.top, y: r.top, icon: i.top + i.height / 2, text: t.top + t.height / 2, gap: t.left - i.right, lines: t.height, label: b.textContent.trim() };
+    });
+    ok(res.label === '1 resolved', `the button says "1 resolved" (${res.label})`);
+    near(res.icon, res.text, 1, 'the icon and the text of the resolved button are on one line');
+    ok(res.gap >= 4 && res.gap <= 8, `the icon and the text have a small gap (${res.gap} px)`);
+    ok(res.lines < 20, `the text of the resolved button is one line (${res.lines} px)`);
+    near(res.h, res.nh, 0.5, 'the resolved button is as tall as the other buttons');
+    near(res.y, res.ny, 0.5, 'the resolved button is level with the other buttons');
+    // The keyboard opens the list on its first Reopen button, and Esc gives the focus back to the button.
+    await page.focus('#cres');
+    await page.keyboard.press('Enter');
+    await until(() => page.evaluate(() => document.activeElement?.classList.contains('v-reopen')), 'the keyboard opens the list on Reopen');
+    await sleep(250);
+    const pop = await rect(page, '#pop-res'), btn = await rect(page, '#cres'), vw = await page.evaluate(() => innerWidth);
+    ok(pop.left >= 8 && pop.right <= vw - 8, 'the list is inside the window');
+    near(pop.right, btn.right, 1, 'the list lines up with its button');
+    ok(pop.top >= btn.bottom, 'the list opens under its button');
+    await page.keyboard.press('Escape');
+    await until(() => page.evaluate(() => document.activeElement?.id === 'cres' && document.querySelector('#pop-res').hidden), 'Esc closes the list and the focus goes back to its button');
     await page.click('#cres');
-    await page.click('#res-list .v-link');
+    await trackCards(page);
+    await page.click('#res-list .v-reopen');
     await until(async () => (await threads(slug))[0].status === 'open', 'the thread is open again');
     await until(() => page.$(`.cm-card[data-id="${root.id}"]`), 'the card is back');
+    const back = await travel(page, root.id);
+    ok(back.px <= 12, `the card that opens again comes in at its place (${back.px.toFixed(1)} px: ${JSON.stringify((await page.evaluate((id) => window.__cards[id], root.id)).slice(0, 5).map((s) => [Math.round(s.t), s.x, s.y, s.o]))})`);
     // Delete the thread.
     await page.click(`[data-comment="${root.id}"] .cm-menu`);
     await page.getByRole('menuitem', { name: 'Delete thread' }).click();
@@ -453,6 +567,20 @@ const TESTS = {
     await shot(page, 'deck');
     await page.keyboard.press('ArrowRight');
     await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'slide 3 has no thread, so the margin goes again');
+    // A wide view has room beside the slide: the slide stays where it is when the margin opens.
+    await page.setViewportSize({ width: 2400, height: 900 });
+    await sleep(400);
+    const alone = await docEdges(page);
+    await page.keyboard.press('ArrowLeft');
+    await until(() => page.evaluate(() => !document.querySelector('#cm-col').hidden && !!document.querySelector('.cm-rail > .cm-card')), 'slide 2 shows its thread at 2400 px');
+    await sleep(400);
+    const beside = await docEdges(page), dcard = await rect(page, '.cm-rail > .cm-card');
+    near(beside.left, alone.left, 0.5, 'the slide keeps its place when the margin opens in a wide view');
+    near(beside.right, alone.right, 0.5, 'the slide keeps its size when the margin opens in a wide view');
+    ok(dcard.left >= beside.right + 20, 'the card is beside the slide, not over it');
+    await page.setViewportSize({ width: 1440, height: 860 });
+    await page.keyboard.press('ArrowRight');
+    await until(() => page.evaluate(() => document.querySelector('#cm-col').hidden), 'slide 3 again');
     ok(await f.evaluate(() => document.documentElement.dataset.kView === 'slide'), 'the deck stays in the slide view');
     const rail = await f.evaluate(() => document.documentElement.dataset.kRail !== undefined);
     ok(rail, 'the thumbnails show at this width');

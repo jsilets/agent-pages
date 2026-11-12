@@ -161,7 +161,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
    margin side by side, and its scroll bar is the only one, at the right edge of the window, under the bar. A deck frame is
    as tall as the view and sticks to its top. margin.js sets the height of the frame. */
 .v-scroll { position: relative; flex: 1; min-height: 0; overflow: hidden auto; overscroll-behavior-y: contain; background: var(--bg); }
-.v-body { position: relative; display: flex; justify-content: center; min-height: 100%; }
+.v-body { position: relative; display: flex; min-height: 100%; }
 .v-stage { position: relative; flex: 1; min-width: 0; }
 .v-stage > .v-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
 .v-body[data-kind="deck"] .v-stage > .v-frame, .v-stage > .v-frame.is-self { position: sticky; top: 0; }
@@ -175,12 +175,16 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-btn:disabled { opacity: 0.5; cursor: default; }
 .cm-col { --cm-w: 316px; position: relative; z-index: 4; flex: none; width: var(--cm-w); box-sizing: border-box; }
 .cm-col[hidden] { display: none; }
+/* wide: the margin lies over the right part of the view, so the page keeps its place. margin.js sets --cm-x (placeMargin).
+   Only the cards take the pointer: the page under the empty margin gets its clicks and the wheel. */
+.v-body[data-cm="wide"] .cm-col { --cm-w: 280px; position: absolute; top: 0; left: var(--cm-x, calc(100% - 296px)); pointer-events: none; }
+.v-body[data-cm="wide"] .cm-col > * > *, .v-body[data-cm="wide"] .cm-ro { pointer-events: auto; }
 .v-body[data-cm="mid"] .cm-col { --cm-w: 40px; border-left: 0.5px solid var(--b); }
 .v-body[data-cm="narrow"] .cm-col { --cm-w: 30px; }
-.cm-ro { margin: 12px 16px 0 12px; padding: 8px 10px; border-radius: 8px; background: var(--bg2); color: var(--s); font-size: 12px; line-height: 1.45; }
+.cm-ro { margin: 12px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg2); color: var(--s); font-size: 12px; line-height: 1.45; }
 .cm-ro a { font-weight: 600; }
 .v-body:not([data-cm="wide"]) .cm-ro { display: none; }
-.cm-pins { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 0 12px; }
+.cm-pins { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 0 0; }
 .cm-pins:empty { padding: 0; }
 .v-body:not([data-cm="wide"]) .cm-pins { align-items: center; gap: 4px; padding: 8px 0 0; }
 .v-body:not([data-cm="wide"]) .cm-pins:empty { padding: 0; }
@@ -189,6 +193,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* A card: the quiet form until it opens, like the comments of Google Docs. The open card is raised and moves toward the page. */
 .cm-card { position: relative; box-sizing: border-box; padding: 10px 12px 12px; border-radius: 10px; background: color-mix(in srgb, var(--bg2) 70%, var(--bg)); box-shadow: 0 0 0 0.5px var(--b); color: var(--p); font-size: 13px; line-height: 1.5; cursor: pointer; outline-offset: 2px; transition: background-color 0.15s, box-shadow 0.15s; }
 .cm-rail > .cm-card { position: absolute; top: 0; left: 12px; right: 16px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.15s, box-shadow 0.15s; }
+.v-body[data-cm="wide"] .cm-rail > .cm-card { left: 0; right: 0; }
 .cm-rail > .is-in { transition: none !important; }
 .cm-card.is-hover:not(.is-active) { background: var(--bg2); box-shadow: 0 0 0 0.5px var(--b2); }
 .cm-card.is-active { z-index: 2; cursor: default; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b), 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06); }
@@ -196,8 +201,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-card.has-new:not(.is-active) { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--link) 55%, transparent); }
 .cm-list { display: flex; flex-direction: column; gap: 12px; }
 .cm-c { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
-.cm-c.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
-@keyframes cm-in { from { opacity: 0; transform: translateY(6px); } }
+.cm-c.is-new { animation: cm-in 0.16s cubic-bezier(0.2, 0, 0, 1); }
+@keyframes cm-in { from { opacity: 0; translate: 0 4px; } }
 .cm-ava { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg3); box-shadow: inset 0 0 0 0.5px var(--b); color: var(--s); font: 600 11px/1 var(--sans); letter-spacing: 0.02em; }
 .cm-ava.is-agent { background: var(--a); color: var(--a-on); box-shadow: none; }
 .cm-main { min-width: 0; }
@@ -218,14 +223,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-quote.is-changed { border-left-color: var(--b2); }
 .cm-quote.is-changed q { text-decoration: line-through; text-decoration-color: var(--t); }
 .cm-flag { align-self: flex-start; padding: 0 6px; border-radius: 4px; background: var(--bg2); color: var(--s); font: 600 10.5px/17px var(--sans); }
-.cm-quote.is-off q::after { content: " · not on this slide"; color: var(--t); }
+.v-body[data-kind="deck"] .cm-quote.is-off q::after { content: " · not on this slide"; color: var(--t); }
 .cm-more { display: flex; flex-direction: column; gap: 1px; padding-left: 38px; font-size: 12px; }
-.cm-more.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cm-more.is-new { animation: cm-in 0.16s cubic-bezier(0.2, 0, 0, 1); }
 .cm-n { color: var(--link); font-weight: 600; }
 .cm-last { overflow: hidden; color: var(--s); white-space: nowrap; text-overflow: ellipsis; }
 .cm-list .v-react, .cm-list .v-runfail { margin-top: 6px; }
 .cm-done { position: absolute; top: 9px; right: 8px; width: 28px; height: 28px; opacity: 0; }
-.cm-menu { flex: none; width: 26px; height: 26px; margin: -1px -4px 0 0; opacity: 0; }
+.cm-menu { flex: none; width: 28px; height: 28px; margin: -1px -4px 0 0; opacity: 0; }
 .cm-card:hover :is(.cm-done, .cm-menu), .cm-card.is-active :is(.cm-done, .cm-menu), :is(.cm-done, .cm-menu):focus-visible, .cm-menu[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) { .cm-done, .cm-menu { opacity: 1; } }
 .cm-foot { position: relative; margin-top: 12px; }
@@ -293,17 +298,25 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-add kbd { height: 17px; box-shadow: none; background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; opacity: 0.8; font-size: 10.5px; }
 @keyframes cm-add { from { opacity: 0; scale: 0.92; } }
 .v-body.is-ro .cm-add, .v-body.is-ro .cm-done { display: none; }
-#cres { width: auto; gap: 5px; padding: 0 8px; font: 500 12px var(--sans); }
+/* A bar button with a count: the icon and the text on one line, with the height, the corners and the states of an icon button. */
+.v-icon.v-count { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 10px 0 8px; font: 500 12.5px/1 var(--sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.v-count b { font-weight: 600; color: var(--p); }
 #cres[hidden] { display: none; }
-#cres svg { width: 14px; height: 14px; }
-.v-respop { width: 320px; max-height: min(420px, 70vh); overflow: auto; }
-.v-resrow { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; }
-.v-resrow:hover { background: var(--bg2); }
-.v-resmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; line-height: 1.4; }
-.v-resmain b { font-weight: 600; }
-.v-resmain span { overflow-wrap: anywhere; }
-.v-resmain q { color: var(--s); font-size: 12px; quotes: none; padding-left: 6px; border-left: 2px solid var(--b2); }
-.v-resrow .v-link { flex: none; margin-top: 2px; }
+/* The resolved threads: one row each, with the author, the time, the comment, its quote and Reopen. */
+.v-respop { width: 340px; max-height: min(440px, calc(100vh - var(--bar) - 16px)); overflow: auto; overscroll-behavior: contain; }
+.v-respop .v-label { display: flex; justify-content: space-between; }
+.v-resrow { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; padding: 8px 8px 9px 10px; border-radius: 8px; }
+.v-resrow:hover, .v-resrow:focus-within { background: var(--bg2); }
+.v-resrow .cm-ava { width: 24px; height: 24px; margin-top: 1px; font-size: 10px; }
+.v-resmain { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 1.45; }
+.v-reshead { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 18px; }
+.v-reshead b { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.v-reshead time { flex: none; font-size: 11.5px; color: var(--t); }
+.v-resbody { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.v-resmain q { display: block; overflow: hidden; padding-left: 7px; border-left: 2px solid rgba(229, 168, 35, 0.6); color: var(--s); font-size: 12px; white-space: nowrap; text-overflow: ellipsis; quotes: none; }
+.v-resn { font-size: 11.5px; color: var(--s); }
+.v-reopen { height: 26px; align-self: start; margin-top: -4px; padding: 0 10px; border-radius: 999px; font-weight: 600; }
+.v-resnone { margin: 0; padding: 4px 10px 10px; font-size: 12.5px; color: var(--t); }
 /* The small menu of a comment: Edit and Delete. */
 .cm-mpop { position: fixed; z-index: 45; min-width: 160px; padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06); animation: v-pop 0.12s ease-out; }
 .cm-mpop .v-item { min-height: 30px; padding: 5px 10px; }
@@ -424,7 +437,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-share { display: inline-flex; align-items: center; }
   .v-share svg { display: block; }
   .v-sharepop { width: calc(100vw - 16px); }
-  #cres span { display: none; }
+  .v-icon.v-count { padding: 0 9px 0 8px; gap: 5px; }
   .v-who { margin-right: 4px; }
   .v-whochip { padding: 0 4px; }
 }
@@ -973,7 +986,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-cur" data-pop="pop-ver" aria-label="Version ${n} of ${latest}. Show all versions"><b>v${n}</b><span class="v-of">/${latest}</span>${icon('down')}</button>
     ${step('right', n + 1, 'Next version')}
   </div>
-  <button type="button" class="v-icon" id="cres" data-pop="pop-res" aria-label="Resolved threads" hidden>${icon('check')}<span>0 resolved</span></button>
+  <button type="button" class="v-icon v-count" id="cres" data-pop="pop-res" data-tip="Resolved threads" aria-label="Resolved threads" hidden>${icon('check')}<span><b>0</b><span class="v-lbl"> resolved</span></span></button>
   <button type="button" class="v-icon" id="cnew" data-tip="Comment on the page" aria-label="Comment on the page" aria-keyshortcuts="Control+Alt+M Meta+Alt+M"${old ? ' hidden' : ''}>${icon('comment')}</button>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
@@ -1006,8 +1019,8 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-create" id="create">Create link</button>
     <ul class="v-links" id="links"></ul>
   </div>
-  <div class="v-pop v-respop" id="pop-res" hidden>
-    <div class="v-label">Resolved threads</div>
+  <div class="v-pop v-respop" id="pop-res" role="dialog" aria-labelledby="res-h" hidden>
+    <div class="v-label" id="res-h">Resolved threads</div>
     <div id="res-list"></div>
   </div>
 </header>

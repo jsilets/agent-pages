@@ -112,7 +112,22 @@ const Margin = (() => {
     return { name: name || 'Someone', initials: (letters.length > 1 ? letters[0] + letters[letters.length - 1] : letters[0] || '?') };
   }
 
-  const pure = { layoutCards, readSelect, readAnchors, frameHeight, mentionAt, assistantStates, person };
+  /**
+   * Where the page and the cards go in the wide layout, like a document and its comments in Google Docs. body is the width
+   * of the view. doc is the width of the column of the page, or 0 when the page does not say it. The column stays in the
+   * middle of the view, at the same place as with no card, and the cards go in the room to its right, `gap` from the column.
+   * Only a view with too little room for that moves the column left, by the smallest distance, then makes it narrower.
+   * Returns { frame, x }: the width of the frame, which starts at the left edge of the view, and the left of the cards.
+   */
+  function placeMargin(body, doc, opt = {}) {
+    const card = opt.card ?? 280, gap = opt.gap ?? 28, edge = opt.edge ?? 16, need = gap + card + edge;
+    // The right edge of the column. The column is in the middle of the frame, so a frame of width f puts it at (f + doc) / 2.
+    const right = doc > 0 ? Math.min((body + doc) / 2, body - need) : body - need;
+    const frame = doc > 0 && right >= (body + doc) / 2 ? body : doc > 0 && right >= doc ? 2 * right - doc : right;
+    return { frame: Math.max(0, Math.floor(frame)), x: Math.round(right + gap) };
+  }
+
+  const pure = { layoutCards, readSelect, readAnchors, frameHeight, mentionAt, assistantStates, person, placeMargin };
   if (typeof document === 'undefined') return pure;
 
   // ─── The viewer part ─────────────────────────────────────
@@ -126,7 +141,8 @@ const Margin = (() => {
   const modeOf = () => (innerWidth >= 1000 ? 'wide' : innerWidth >= 700 ? 'mid' : 'narrow');
   // threads: the open threads. anchors: the place of each one in the page. draft: the comment that the person writes now.
   const S = { threads: [], resolved: [], anchors: new Map(), deck: null, ready: false, settled: false, kit: false, active: '', hover: '', sel: null, draft: null, mode: modeOf(), pinsH: 0, side: [], ensure: '', back: null };
-  const cards = new Map(), seen = new Set(), fresh = new Set(), unread = new Set();
+  // quiet: the open threads when the page loads. Their cards show with no animation.
+  const cards = new Map(), seen = new Set(), fresh = new Set(), unread = new Set(), quiet = new Set();
   let loaded = '', first = true, draftCard = null, warmedAt = 0, laid = 0, sentList = '', autoAt = 0, viewTick = 0;
   const keep = (k, v) => { try { sessionStorage.setItem(k + D.slug, v); } catch {} };
   const kept = (k) => { try { return sessionStorage.getItem(k + D.slug) || ''; } catch { return ''; } };
@@ -164,15 +180,33 @@ const Margin = (() => {
     fit(f);
     s.wait?.(); s.wait = null;
   }
+  // The cards in the wide layout: their width, the room between the column of the page and the cards, and the room at the
+  // right edge of the view. The kit reports the width of the column with ROOM px on each side (explain.js, measure()).
+  const CARD = 280, GAP = 28, EDGE = 16, ROOM = 56;
+  let sentRoom = -1;
   /**
-   * With cards beside it, the page keeps the width that it reads best at, and the page and the margin sit together in the
-   * middle of the window, like a document and its comments in Google Docs. With no card, the page has the whole width.
+   * The page stays where it is with no card: in the middle of the view. The cards go in the room to its right (placeMargin).
+   * A deck keeps its whole frame, and it moves its slide out of the room of the cards itself, only when it must.
    */
   function group() {
-    const w = !col.hidden && S.mode === 'wide' && sizes.get(frame)?.w;
-    const v = w ? w + 'px' : '';
-    if (stage.style.maxWidth !== v) { stage.style.maxWidth = v; schedule(); }
+    const wide = !col.hidden && S.mode === 'wide', B = body.clientWidth;
+    let fw = '', x = '';
+    if (wide) {
+      const w = sizes.get(frame)?.w || 0, p = deck ? { frame: B, x: B - CARD - EDGE } : placeMargin(B, w > 2 * ROOM ? w - 2 * ROOM : 0, { card: CARD, gap: GAP, edge: EDGE });
+      if (p.frame < B) fw = p.frame + 'px';
+      x = p.x + 'px';
+    }
+    if (col.style.getPropertyValue('--cm-x') !== x) col.style.setProperty('--cm-x', x);
+    if (stage.style.maxWidth !== fw) { stage.style.maxWidth = fw; schedule(); }
+    if (deck) sendRoom(wide ? GAP + CARD + EDGE : 0);
   }
+  /** Tells a deck how much room at its right edge the cards take. */
+  function sendRoom(px, force = false) {
+    if (px === sentRoom && !force) return;
+    sentRoom = px;
+    if (frame && frame.contentWindow) frame.contentWindow.postMessage({ ns: 'k-deck', v: 1, type: 'room', right: px }, '*');
+  }
+  new ResizeObserver(() => group()).observe(scroller);
   /** The part of the page that shows, for the cursor of an assistant and the scroll to a comment. */
   function sendView(user = false) {
     tell({ type: 'view', top: Math.max(0, scroller.scrollTop - frameTop()), h: scroller.clientHeight, user });
@@ -230,7 +264,7 @@ const Margin = (() => {
     const next = $$('iframe', stage).find((x) => x !== frame && x.contentWindow === e.source);
     if (next) { if (d.type === 'size') setSize(next, d.h, d.w); return; }
     if (!frame || e.source !== frame.contentWindow) return;
-    if (d.type === 'ready') { S.ready = true; S.kit = true; pushThreads(); sendView(); }
+    if (d.type === 'ready') { S.ready = true; S.kit = true; pushThreads(); sendView(); if (deck) sendRoom(Math.max(0, sentRoom), true); }
     else if (d.type === 'size') { setSize(frame, d.h, d.w); group(); }
     else if (d.type === 'goto') { const y = num(d.y, 0, 2e5); if (y != null) scrollView(frameTop() + y, d.smooth === true); }
     else if (d.type === 'keyscroll' && typeof d.key === 'string') keyScroll(d.key, d.shift === true);
@@ -382,7 +416,8 @@ const Margin = (() => {
     main.append(head, bodyOf(c.body), ...reaction(run));
     row.dataset.comment = c.id;
     row.append(avatar(c.author), main);
-    if (fresh.delete(c.id)) row.classList.add('is-new');
+    // The first comment of a card that comes in has the animation of its card.
+    if (fresh.delete(c.id) && !(card && card.enter)) row.classList.add('is-new');
     return row;
   }
   /** Changes the body of a comment in place: the text becomes a box with Save and Cancel. */
@@ -431,7 +466,7 @@ const Margin = (() => {
   }
   const labelOf = (t) => 'Comment from ' + short(t.author) + ': ' + oneLine(t.body, 80) + (t.replies.length ? '. ' + t.replies.length + (t.replies.length === 1 ? ' reply' : ' replies') : '');
   function makeCard(t) {
-    const c = { id: t.id, key: '', y: 0, top: null, el: el('article', 'cm-card'), dot: el('button', 'cm-dot'), list: el('div', 'cm-list'), foot: el('div', 'cm-foot'), box: el('textarea'), done: el('button', 'v-icon cm-done'), editing: false };
+    const c = { id: t.id, key: '', y: 0, top: null, enter: !quiet.has(t.id), el: el('article', 'cm-card'), dot: el('button', 'cm-dot'), list: el('div', 'cm-list'), foot: el('div', 'cm-foot'), box: el('textarea'), done: el('button', 'v-icon cm-done'), editing: false };
     c.el.tabIndex = 0; c.el.dataset.id = t.id;
     c.dot.type = 'button'; c.dot.dataset.id = t.id;
     c.done.type = 'button'; c.done.innerHTML = svg('check'); c.done.dataset.tip = 'Resolve'; c.done.dataset.tipEnd = ''; c.done.setAttribute('aria-label', 'Resolve thread');
@@ -556,7 +591,8 @@ const Margin = (() => {
         seen.add(made.id);
         S.threads.push({ ...made, replies: [], run: null, runs: {} });
         // The card takes the place of the box at once. The page sends the exact place a moment later.
-        const at = S.anchors.get(DRAFT);
+        // With no place from the page yet, the card goes where the box was, never to the top of the margin.
+        const at = S.anchors.get(DRAFT) || (d.q && d.y != null ? { id: DRAFT, state: 'exact', top: d.y, slide: 0, hidden: false } : null);
         if (at) S.anchors.set(made.id, { ...at, id: made.id });
         keep('draft:', '');
         // The person can press Esc or go on while the comment is on its way. Then the card does not open, and the focus stays where the person put it.
@@ -583,6 +619,7 @@ const Margin = (() => {
     S.active = DRAFT; S.sel = null; S.ensure = DRAFT;
     add.hidden = true;
     if (!draftCard) draftCard = makeDraft();
+    if (!draftCard.el.isConnected) draftCard.enter = true;
     draftCard.box.value = value;
     draftCard.send.disabled = !value.trim();
     draftCard.quote.replaceChildren(...(sel ? [el('q', '', sel.quote)] : []));
@@ -680,7 +717,10 @@ const Margin = (() => {
     const paged = !!(S.deck && S.deck.paged);
     for (const t of S.threads) {
       const a = S.anchors.get(t.id), anchored = placed(t);
-      if (anchored && !S.settled) continue;
+      // A thread on a quote shows when the page has said where its quote is, so its card never shows first at the top of
+      // the margin. A page with no kit never says it: its threads show at the top. No card shows before the first places
+      // from the page: until then, the viewer does not know the width of the page, so it cannot place the margin.
+      if (!S.settled || (anchored && S.kit && !a)) continue;
       let c = cards.get(t.id);
       if (!c) { c = makeCard(t); cards.set(t.id, c); }
       const off = anchored && S.ready && a && a.hidden && !paged;
@@ -690,18 +730,22 @@ const Margin = (() => {
         if (S.active !== t.id) { c.el.remove(); c.dot.remove(); continue; }
       }
       fill(c, t, a, off);
-      const here = anchored && S.ready && a && a.top != null;
+      // While the frame loads again (a new theme, a new version), a card keeps the last place that the page sent.
+      const here = anchored && (S.ready || S.kit) && a && a.top != null;
       if (here) c.y = a.top;
       if (S.mode === 'narrow' && S.active === t.id) inSheet.push(c.el);
       if (here) side.push(c); else top.push(c);
     }
-    cards.forEach((c, id) => { if (!S.threads.some((t) => t.id === id)) { seenSize.unobserve(c.el); seenSize.unobserve(c.dot); c.el.remove(); c.dot.remove(); cards.delete(id); } });
+    cards.forEach((c, id) => { if (!S.threads.some((t) => t.id === id)) { seenSize.unobserve(c.el); seenSize.unobserve(c.dot); c.el.remove(); c.dot.remove(); cards.delete(id); quiet.delete(id); } });
     if (S.draft) {
       const a = S.anchors.get(DRAFT);
       if (S.draft.q && (S.draft.y != null || (a && a.top != null))) { draftCard.y = a && a.top != null ? a.top : S.draft.y; side.push(draftCard); } else top.push(draftCard);
       if (S.mode === 'narrow') inSheet.push(draftCard.el);
     }
     side.sort((x, y) => x.y - y.y);
+    // A card that comes to the rail from another place (the top of the margin, the sheet, another slide) takes its new place
+    // with no glide, as a new card does.
+    side.forEach((c) => { if (c.el.parentNode !== rail && c.dot.parentNode !== rail) c.top = null; });
     const nodes = (list) => list.flatMap((c) => (inSheet.includes(c.el) ? [c.dot] : [c.el, c.dot]));
     // A card can move from one list to another, for example when the page finds the place of a new comment. It keeps the focus.
     const focus = document.activeElement;
@@ -720,8 +764,9 @@ const Margin = (() => {
     body.dataset.cm = S.mode;
     const n = S.resolved.length, res = $('#cres');
     res.hidden = !n;
-    res.lastChild.textContent = n + ' resolved';
+    $('b', res).textContent = n;
     res.setAttribute('aria-label', n + (n === 1 ? ' resolved thread' : ' resolved threads'));
+    if (!$('#pop-res').hidden) { if (n) drawResolved(); else closePop(); }
     group();
     if (was !== col.hidden) fit();
     layout();
@@ -730,6 +775,19 @@ const Margin = (() => {
     if (sheetWas && !sheet.hidden) requestAnimationFrame(() => { const a = S.anchors.get(S.active); if (a && a.top != null) { const y = frameTop() + a.top - scroller.scrollTop; if (y > scroller.clientHeight - sheetRoom() - 40) scrollView(frameTop() + a.top - 72, true); } });
   }
   const schedule = () => { if (!laid) laid = requestAnimationFrame(() => { laid = 0; layout(); }); };
+  /**
+   * A card that comes while the page is open (a new comment, the box for a new comment, a thread that opens again) fades in
+   * and moves 6 px into its place, like a comment in Google Docs. It starts at its own place, never at another. The cards
+   * that the page has when it loads show with no animation.
+   */
+  function enter(c) {
+    if (!c.enter) return;
+    c.enter = false;
+    if (still.matches || S.mode === 'narrow') return;
+    const a = [{ opacity: 0, translate: '0 6px' }, { opacity: 1, translate: '0 0' }], o = { duration: 160, easing: 'cubic-bezier(0.2, 0, 0, 1)' };
+    c.el.animate(a, o);
+    c.dot.animate(a, o);
+  }
   /** Reads the height of each card, then writes the top of each card. The reads come first, so the browser lays out one time. */
   function layout() {
     if (col.hidden) { S.pinsH = 0; col.style.minHeight = ''; return; }
@@ -739,20 +797,29 @@ const Margin = (() => {
     const items = side.map((c) => ({ id: c.id, y: c.y - (dots ? 3 : 12), h: (dots ? c.dot : c.el).offsetHeight }));
     const tops = layoutCards(items, { active: dots ? '' : S.active, gap: dots ? 4 : 8, min: pinsH + (dots ? 6 : 8) });
     let bottom = pinsH;
+    const shown = [];
     side.forEach((c, i) => {
       const y = Math.round(tops[c.id]);
       bottom = Math.max(bottom, y + items[i].h);
-      // A new card takes its place with no movement. After that, a change of place glides.
-      if (c.top == null) { c.el.classList.add('is-in'); c.dot.classList.add('is-in'); }
+      // A card that shows for the first time takes its place before the browser draws it, with no transition. After that,
+      // a change of place glides: the cards make room for each other.
+      if (c.top == null) shown.push(c);
       if (c.top !== y) { c.top = y; c.el.style.setProperty('--y', y + 'px'); c.dot.style.setProperty('--y', y + 'px'); }
     });
+    if (shown.length) {
+      shown.forEach((c) => { c.el.classList.add('is-in'); c.dot.classList.add('is-in'); });
+      // The browser computes the style with the place and no transition. Only then can the transition come back.
+      shown.forEach((c) => { getComputedStyle(c.el).transform; getComputedStyle(c.dot).transform; });
+      shown.forEach((c) => { c.el.classList.remove('is-in'); c.dot.classList.remove('is-in'); enter(c); });
+    }
+    // The cards of the whole page, at the top of the margin, come in the same way.
+    [...pins.children].forEach((n) => { const c = n === draftCard?.el ? draftCard : cards.get(n.dataset.id); if (c && c.enter && n === c.el) enter(c); });
     // The open card in the middle layout floats beside its dot, and it must fit too.
     const act = dots && S.mode === 'mid' && side.find((c) => c.id === S.active);
     if (act) bottom = Math.max(bottom, act.top + act.el.offsetHeight);
     S.pinsH = pinsH;
     // The margin is at least as tall as its lowest card, so the view can scroll to it.
     col.style.minHeight = Math.ceil(bottom + 24) + 'px';
-    requestAnimationFrame(() => side.forEach((c) => { c.el.classList.remove('is-in'); c.dot.classList.remove('is-in'); }));
     // A card that the person just opened must show in full: the view scrolls by the part that is out of view.
     const want = S.ensure && (side.find((c) => c.id === S.ensure) || (S.ensure === DRAFT && draftCard && draftCard.el.isConnected && { el: draftCard.el, top: null }));
     if (want && S.mode !== 'narrow') {
@@ -777,6 +844,7 @@ const Margin = (() => {
       if (!seen.has(c.id) && !first) { fresh.add(c.id); if (S.active !== t.id) unread.add(t.id); }
       seen.add(c.id);
     }
+    if (first) S.threads.forEach((t) => quiet.add(t.id));
     first = false;
     if (S.active && S.active !== DRAFT && !S.threads.some((t) => t.id === S.active)) S.active = '';
     const list = JSON.stringify(S.threads.filter(placed).map((t) => ({ id: t.id, ...quoteOf(t) })).concat(S.draft && S.draft.q ? [{ id: DRAFT, ...S.draft.q }] : []));
@@ -788,12 +856,23 @@ const Margin = (() => {
   refresh().catch((err) => toast('Could not load the comments: ' + err.message));
 
   // The resolved threads: a list under the bar, each with a button that opens the thread again.
-  $('#pop-res').addEventListener('open', () => {
-    $('#res-list').replaceChildren(...S.resolved.map((t) => {
-      const row = el('div', 'v-resrow'), main = el('div', 'v-resmain'), b = el('button', 'v-link', 'Reopen');
-      main.append(el('b', '', short(t.author)), el('span', '', oneLine(t.body, 140)));
-      if (t.quote) main.append(el('q', '', oneLine(t.quote, 90)));
-      b.type = 'button'; b.setAttribute('aria-label', 'Reopen the thread from ' + short(t.author));
+  let resKey = '';
+  function drawResolved() {
+    const key = JSON.stringify(S.resolved);
+    if (key === resKey && $('#res-list').childElementCount) return;
+    resKey = key;
+    const list = [...S.resolved].sort((a, b) => b.created_at.localeCompare(a.created_at));
+    $('#res-h').replaceChildren(el('span', '', 'Resolved threads'), el('span', '', String(list.length)));
+    if (!list.length) { $('#res-list').replaceChildren(el('p', 'v-resnone', 'No resolved threads.')); return; }
+    $('#res-list').replaceChildren(...list.map((t) => {
+      const row = el('div', 'v-resrow'), main = el('div', 'v-resmain'), head = el('div', 'v-reshead'), b = el('button', 'v-btn v-reopen', 'Reopen');
+      const time = el('time', '', stampOf(t.created_at));
+      time.dateTime = t.created_at; time.title = when(t.created_at);
+      head.append(el('b', '', short(t.author)), time);
+      main.append(head, el('span', 'v-resbody', t.body));
+      if (t.quote) main.append(el('q', '', oneLine(t.quote, 140)));
+      if (t.replies.length) main.append(el('span', 'v-resn', t.replies.length + (t.replies.length === 1 ? ' reply' : ' replies')));
+      b.type = 'button'; b.setAttribute('aria-label', 'Reopen the thread from ' + short(t.author) + ': ' + oneLine(t.body, 60));
       if (readOnly) b.hidden = true;
       b.addEventListener('click', async () => {
         b.disabled = true;
@@ -805,10 +884,11 @@ const Margin = (() => {
         activate(t.id);
         cards.get(t.id)?.el.focus({ preventScroll: true });
       });
-      row.append(main, b);
+      row.append(avatar(t.author), main, b);
       return row;
     }));
-  });
+  }
+  $('#pop-res').addEventListener('open', () => { resKey = ''; drawResolved(); });
 
   watch(frame);
   return {
@@ -819,7 +899,12 @@ const Margin = (() => {
       return new Promise((ok) => {
         const s = { h: 0, kit: false, grows: [], wait: ok };
         sizes.set(f, s);
-        f.addEventListener('load', () => { tell({ type: 'hello', boxes: new URLSearchParams(location.search).get('hl') === 'boxes', host: true }, f); setTimeout(ok, 1500); }, { once: true });
+        f.addEventListener('load', () => {
+          tell({ type: 'hello', boxes: new URLSearchParams(location.search).get('hl') === 'boxes', host: true }, f);
+          // A deck lays out its slide for the room of the cards before it shows.
+          if (deck) f.contentWindow?.postMessage({ ns: 'k-deck', v: 1, type: 'room', right: Math.max(0, sentRoom) }, '*');
+          setTimeout(ok, 1500);
+        }, { once: true });
         f.style.height = frame.style.height;
       });
     },

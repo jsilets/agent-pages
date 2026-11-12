@@ -1,0 +1,161 @@
+
+/* ─── The layout study: Rooms and Ledger ─────────────────────────
+   The sidebar holds doors: Home, Activity in Rooms, the pinned pages, the folders, and the shared pages at the foot.
+   A page shows its own news on its card or on its row, so Home stays a place for pages.
+   The tints mix the text colour into the surface, so they work on any surface in both themes. */
+.is-study { --tint: color-mix(in oklab, var(--p) 5%, transparent); --tint2: color-mix(in oklab, var(--p) 9%, transparent); --new: var(--link); }
+
+/* ─── The sidebar ─── */
+.l.is-study .l-side { padding: 0 8px 8px; }
+.l.is-study .l-brand { padding: 0 8px; }
+.l.is-study .l-nav { height: 30px; }
+.l.is-study .l-nav:hover { background: var(--tint); }
+.l.is-study .l-nav[aria-current="page"] { background: var(--tint2); box-shadow: none; color: var(--p); font-weight: 600; }
+.l.is-study .l-sec { margin-top: 22px; }
+.s-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-study .l-nav .l-n { margin-left: 0; }
+/* A page in the sidebar: a pinned page, or a page below its folder in the Ledger outline. */
+.l.is-study .l-nav.s-page { gap: 7px; padding-left: calc(8px + var(--d, 0) * 14px); font-weight: 400; }
+.l.is-study .l-nav.s-page:hover { color: var(--p); }
+#pins .l-nav.s-page { font-weight: 500; }
+/* The row for the pages in no folder: its name starts where the folder names start. */
+.l-tree [data-loose] > svg { margin-right: 6px; }
+.s-count { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font: 500 11.5px var(--sans); color: var(--s); font-variant-numeric: tabular-nums; }
+.s-count svg { width: 12px; height: 12px; color: var(--new); }
+/* The mark of a page that has news: a run in flight, a new version, a question or a failure. */
+.s-mark { flex: none; display: inline-grid; place-items: center; width: 12px; height: 16px; }
+.s-mark i { width: 6px; height: 6px; border-radius: 50%; background: var(--new); }
+.s-mark[class*="c-"] i { background: var(--line); }
+.s-mark svg { width: 12px; height: 12px; color: var(--new); }
+.is-spin { animation: s-spin 0.9s linear infinite; }
+@keyframes s-spin { to { transform: rotate(360deg); } }
+.s-foot { display: flex; flex-direction: column; gap: 1px; margin-top: auto; padding-top: 16px; }
+/* The button that opens the sidebar on a phone shows a dot when the sidebar has news. */
+.is-study.has-news #menu { position: relative; }
+.is-study.has-news #menu::after { content: ""; position: absolute; top: 5px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--new); box-shadow: 0 0 0 2px var(--bg); }
+/* The way from a folder to its activity. */
+.l-act { display: inline-flex; align-items: center; gap: 6px; align-self: center; height: 28px; margin-left: auto; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--s); font: 500 12.5px var(--sans); cursor: pointer; }
+.l-act:hover { background: var(--tint); color: var(--p); }
+.l-act:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.l-act svg { width: 14px; height: 14px; }
+
+/* ─── News: one glyph and one sentence. Blue means not seen yet or in flight, a ramp colour means it needs the reader. ─── */
+.n { display: flex; flex-wrap: wrap; min-width: 0; height: 18px; overflow: hidden; color: var(--s); }
+/* The glyph and the sentence stay on the first line. The age goes to a second line that does not show when it does not fit. */
+.n-m { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 100%; }
+.n-w { flex: none; height: 100%; white-space: pre; }
+.g-what .n { height: 20px; }
+.n-g { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; }
+.n .n-g svg { width: 13px; height: 13px; color: var(--t); }
+.n-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.n-t b { font-weight: 500; color: var(--p); }
+.n.is-new .n-g svg, .n.is-work .n-g svg { color: var(--new); }
+.n.is-warn .n-g svg { color: var(--line); }
+.n.is-quiet, .n.is-quiet .n-t b { color: var(--t); font-weight: 400; }
+.h-card .h-sub .n { flex: 1; }
+
+/* ─── The ledger: one row for each page, with its latest change. Also the list view of Rooms. ─── */
+.g-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; }
+.g-row { position: relative; }
+.g-link { display: grid; grid-template-columns: 56px minmax(0, 5fr) minmax(0, 7fr) minmax(0, 164px) 68px 16px; align-items: center; gap: 16px; height: 48px; padding: 0 44px 0 8px; border-radius: 10px; color: inherit; text-decoration: none; outline: none; }
+.g-link:hover, .g-row.is-sel .g-link { background: var(--tint); text-decoration: none; }
+.g-row.is-sel .g-link, .g-link:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
+.g-row.is-dragging { opacity: 0.4; }
+.g-row .h-thumb { border-radius: 5px; }
+.g-row .h-ph { font-size: 10px; }
+.g-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.g-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/20px var(--sans); letter-spacing: -0.005em; color: var(--p); }
+.g-row.has-news .g-name { font-weight: 600; }
+.g-pin { flex: none; display: inline-grid; }
+.g-pin svg { width: 12px; height: 12px; color: var(--t); }
+.g-what { min-width: 0; font: 13px/20px var(--sans); }
+.g-where { min-width: 0; }
+.g-where .l-glyph { width: 14px; height: 14px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
+.g-where.is-none { color: var(--t); }
+.g-when { font-size: 12.5px; color: var(--s); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.g-row .h-menu { top: 10px; background: transparent; box-shadow: none; }
+.g-row .h-menu:hover, .g-row .h-menu[aria-expanded="true"] { background: var(--bg3); }
+.g-row:hover .h-menu, .g-row.is-sel .h-menu { opacity: 1; }
+.g-day { margin: 0; padding: 18px 8px 6px; font: 600 12.5px/18px var(--sans); color: var(--s); }
+.g-day:first-child { padding-top: 2px; }
+.g-none { margin: 0; padding: 6px 8px; font-size: 13.5px; color: var(--s); }
+/* The lens: two headings on one list. Pages has one row for each page, Activity one row for each event. */
+.g-tabs { display: flex; align-items: baseline; gap: 18px; }
+.g-tabs button { display: inline-flex; align-items: baseline; gap: 6px; margin: 0; padding: 0; border: 0; background: none; font: 600 14px/20px var(--sans); color: var(--t); cursor: pointer; }
+.g-tabs button:hover { color: var(--s); }
+.g-tabs button[aria-selected="true"] { color: var(--p); cursor: default; }
+.g-tabs button:focus-visible { outline: 2px solid var(--link); outline-offset: 4px; border-radius: 4px; }
+.g-tabs .s-count { margin: 0; }
+
+/* ─── Activity in Rooms: the list of changes on the left, the page itself on the right. ─── */
+.h-scroll.is-room { overflow: hidden; }
+.is-room .h-main { height: 100%; max-width: none; padding: 0; box-sizing: border-box; }
+.r { display: grid; grid-template-columns: clamp(300px, 36%, 408px) minmax(0, 1fr); height: 100%; }
+.r-list { min-height: 0; overflow: auto; padding: 18px 12px 48px 20px; border-right: 0.5px solid var(--b); box-sizing: border-box; }
+.r-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 24px; margin: 0 8px 4px; }
+.r-scope { display: inline-flex; align-items: center; gap: 4px; min-width: 0; height: 24px; padding: 0 4px 0 8px; border: 0; border-radius: 999px; background: var(--tint); color: var(--s); font: 500 12px var(--sans); cursor: pointer; }
+.r-scope:hover { background: var(--tint2); color: var(--p); }
+.r-scope span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.r-scope svg { width: 12px; height: 12px; }
+.r-day { margin: 0; padding: 16px 8px 4px; font: 600 12px/18px var(--sans); color: var(--s); }
+.r-head + .r-day { padding-top: 8px; }
+.e-row { position: relative; }
+.e-link { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; padding: 8px 8px 9px; border-radius: 10px; color: inherit; text-decoration: none; outline: none; }
+.e-link:hover { background: var(--tint); text-decoration: none; }
+.e-row.is-cur .e-link { background: var(--tint2); }
+.e-row.is-sel .e-link, .e-link:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
+.e-g { grid-row: 1 / span 2; align-self: start; display: inline-grid; place-items: center; width: 16px; height: 20px; }
+.e-g svg { width: 14px; height: 14px; color: var(--t); }
+.e-row.is-new .e-g svg, .e-row.is-work .e-g svg { color: var(--new); }
+.e-row.is-warn .e-g svg { color: var(--line); }
+.e-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/20px var(--sans); letter-spacing: -0.005em; color: var(--p); }
+.e-row.is-fresh .e-title { font-weight: 600; }
+.e-when { font: 12px/20px var(--sans); color: var(--t); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.e-line { grid-column: 2 / span 2; display: -webkit-box; overflow: hidden; font: 12.5px/18px var(--sans); color: var(--s); -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.e-line b { font-weight: 500; color: var(--p); }
+
+.r-view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.r-top { flex: none; display: flex; align-items: flex-start; gap: 16px; padding: 18px 24px 0; }
+.r-id { flex: 1; min-width: 0; }
+.r-id h1 { margin: 0 0 2px; overflow: hidden; font: 600 17px/24px var(--sans); letter-spacing: -0.01em; white-space: nowrap; text-overflow: ellipsis; }
+.r-acts { flex: none; display: flex; align-items: center; gap: 8px; }
+.r-acts .v-seg { margin: 0; }
+.r-acts .v-seg button { padding: 0 12px; }
+.r-open { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px 0 13px; border-radius: 9px; background: var(--tint2); color: var(--p); font: 600 13px var(--sans); text-decoration: none; }
+.r-open:hover { background: color-mix(in oklab, var(--p) 14%, transparent); text-decoration: none; }
+.r-open:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.r-open svg { width: 14px; height: 14px; }
+/* What was asked and what came back: two short lines, not a card. */
+.r-talk { flex: none; display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 12px; max-width: 760px; margin: 14px 24px 16px; font: 13px/20px var(--sans); }
+.r-talk dt { overflow: hidden; font-weight: 600; color: var(--p); white-space: nowrap; text-overflow: ellipsis; }
+.r-talk dd { margin: 0; color: var(--p); overflow-wrap: anywhere; }
+.r-talk small { display: block; font-size: 12.5px; color: var(--s); }
+.r-talk .is-warn { color: var(--ink); }
+.r-stage { position: relative; flex: 1; min-height: 0; margin: 0 24px 24px; overflow: hidden; border-radius: 10px; background: var(--bg2); box-shadow: 0 0 0 0.5px var(--b2); }
+.r-frame { position: absolute; left: 0; top: 0; width: calc(100% / var(--z, 1)); height: calc(100% / var(--z, 1)); border: 0; background: var(--bg); transform: scale(var(--z, 1)); transform-origin: 0 0; }
+.r-frame.is-off { visibility: hidden; }
+.r-none { margin: 0; padding: 24px 28px; font-size: 13.5px; color: var(--s); }
+
+@media (max-width: 1240px) {
+  .g-link { grid-template-columns: 56px minmax(0, 5fr) minmax(0, 7fr) 68px 16px; }
+  .g-where { display: none; }
+}
+/* Below this width the room has no space for the page, so a row opens the page. */
+@media (max-width: 1120px) {
+  .r { grid-template-columns: minmax(0, 1fr); }
+  .r-view { display: none; }
+  .r-list { padding: 14px 8px 48px; border-right: 0; }
+  .r-list > * { max-width: 760px; }
+}
+@media (max-width: 760px) {
+  .g-link { grid-template-columns: 52px minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 0 12px; height: auto; padding: 9px 40px 9px 8px; }
+  .g-link .h-thumb { grid-row: 1 / span 2; align-self: center; }
+  .g-title { grid-column: 2; grid-row: 1; }
+  .g-what { grid-column: 2 / span 2; grid-row: 2; font-size: 12.5px; line-height: 18px; }
+  .g-when { grid-column: 3; grid-row: 1; font-size: 12px; }
+  .g-link .h-acc, .g-row .h-kind { display: none; }
+  .g-row .h-menu { top: 14px; opacity: 1; }
+  .e-link { padding: 10px 8px; }
+}
+@media (hover: none) { .g-row .h-menu { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .is-spin { animation: none; } }

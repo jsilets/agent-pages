@@ -8,7 +8,8 @@ import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { KIT, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
-import { libraryHtml, type FolderRow } from './library';
+import { libraryHtml, parseLayout, type FolderRow } from './library';
+import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
 interface Env {
   DB: D1Database;
@@ -109,6 +110,26 @@ async function getPage(env: Env, slug: string) {
 async function listPages(env: Env) {
   const { results } = await env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages ORDER BY updated_at DESC`).all<PageRow>();
   return results;
+}
+
+// ─── Activity ────────────────────────────────────────────
+
+/**
+ * The newest versions, comments and assistant runs, joined into one list. The comments and agent_runs
+ * tables come from the comment branch. A database without them has versions only.
+ * The query does not read the id of a run, because that id is a secret.
+ */
+async function listActivity(env: Env): Promise<Item[]> {
+  const { results: versions } = await env.DB.prepare('SELECT slug, version, created_at FROM versions ORDER BY created_at DESC LIMIT 400').all<VersionEvent>();
+  let comments: CommentRow[] = [];
+  let runs: RunRow[] = [];
+  try {
+    comments = (await env.DB.prepare('SELECT id, slug, version, anchor, quote, body, author, mention, parent_id, status, created_at FROM comments ORDER BY created_at DESC LIMIT 600').all<CommentRow>()).results;
+    runs = (await env.DB.prepare('SELECT comment_id, agent, status, started_at, finished_at, detail FROM agent_runs ORDER BY started_at DESC LIMIT 300').all<RunRow>()).results;
+  } catch {
+    // This database has no comments table or no agent_runs table.
+  }
+  return deriveActivity(versions, comments, runs, Date.now());
 }
 
 // ─── Folders ─────────────────────────────────────────────
@@ -428,8 +449,14 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   switch (r.kind) {
     case 'kit-css':
       return css();
-    case 'library':
-      return page(libraryHtml(await listPages(env), await listFolders(env), nonce), nonce);
+    case 'library': {
+      // The classic layout does not draw the activity, so it does not load it.
+      const layout = parseLayout(url.searchParams.get('layout'));
+      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: layout === 'classic' ? [] : await listActivity(env), layout, me: who.who }, nonce), nonce);
+    }
+    case 'api-activity':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      return json({ pages: await listPages(env), activity: await listActivity(env) });
     case 'view': {
       const p = await getPage(env, r.slug);
       if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);

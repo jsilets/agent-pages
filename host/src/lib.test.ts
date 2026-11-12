@@ -56,6 +56,8 @@ describe('route', () => {
     expect(route('/p/g/n/v/3')).toEqual({ kind: 'view', slug: 'g/n', version: 3 });
     expect(route('/raw/g/n/12')).toEqual({ kind: 'raw', slug: 'g/n', version: 12 });
     expect(route('/api/pages')).toEqual({ kind: 'api-list' });
+    expect(route('/api/activity')).toEqual({ kind: 'api-activity' });
+    expect(route('/api/activity/x')).toEqual({ kind: 'not-found' });
     expect(route('/api/pages/g/n')).toEqual({ kind: 'api-page', slug: 'g/n' });
     expect(route('/api/pages/g/n/shares')).toEqual({ kind: 'api-shares', slug: 'g/n' });
     expect(route(`/api/shares/${t}`)).toEqual({ kind: 'api-share', token: t });

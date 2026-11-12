@@ -3,6 +3,17 @@
 // moving a page, pinning and searching all redraw without a reload.
 
 import { COMMON_SCRIPT, ICON, KIT, appearance, data, icon, shell, type PageRow } from './views';
+import type { Item } from './activity';
+import studyCss from './study.css?raw';
+import studyJs from './study.js?raw';
+
+/**
+ * The layout study. `classic` is the library as it was. `rooms` and `ledger` are two answers to one question:
+ * where does the work of the assistants show? `?layout=<name>` picks one, and the More menu changes it.
+ */
+export const LAYOUTS = ['classic', 'rooms', 'ledger'] as const;
+export type Layout = (typeof LAYOUTS)[number];
+export const parseLayout = (v: string | null): Layout => ((LAYOUTS as readonly string[]).includes(v ?? '') ? (v as Layout) : 'classic');
 
 export interface FolderRow {
   id: string;
@@ -28,6 +39,17 @@ const LUCIDE: Record<string, string> = {
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
   users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  activity: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+  file: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
+  loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  pencilLine: '<path d="M13 21h8"/><path d="m15 5 4 4"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  question: '<path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>',
+  unplug: '<path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L12 18l-6-6-2.3 2.3a2.4 2.4 0 0 0 0 3.4Z"/><path d="M7.5 13.5 10 11"/><path d="M10.5 16.5 13 14"/><path d="m12 6 6 6 2.3-2.3a2.4 2.4 0 0 0 0-3.4l-2.6-2.6a2.4 2.4 0 0 0-3.4 0Z"/>',
+  upload: '<path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>',
+  message: '<path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>',
+  arrowUpRight: '<path d="M7 7h10v10"/><path d="M7 17 17 7"/>',
+  link2: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
 };
 const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCIDE[name]}</svg>`;
 
@@ -274,17 +296,45 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
  * The library. The script draws it from the JSON block. The address keeps the view:
  * `/` is Home, `/?f=<folder id>` a folder, `/?v=recent|pinned|shared` a list.
  */
-export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: string) {
-  const body = `<style>${LIB_CSS}</style>
-<div class="l" id="app">
-  <aside class="l-side" id="side" aria-label="Library">
+export interface LibraryInput {
+  pages: PageRow[];
+  folders: FolderRow[];
+  /** What happened to the pages, newest first. Only the study layouts draw it. */
+  activity: Item[];
+  layout: Layout;
+  /** The identity of the reader. A comment by this author shows as "You". */
+  me: string;
+}
+
+/** The sidebar of the library as it was: four lists, then the folder tree. */
+const CLASSIC_SIDE = `
     <a class="l-brand" href="/">${MARK}Pages</a>
     <a class="l-nav" href="/" data-nav="home">${lu('home')}Home</a>
     <a class="l-nav" href="/?v=recent" data-nav="recent">${lu('clock')}Recent</a>
     <a class="l-nav" href="/?v=pinned" data-nav="pinned">${icon('pin')}Pinned<span class="l-n" id="n-pinned"></span></a>
     <a class="l-nav" href="/?v=shared" data-nav="shared">${lu('users')}Shared by link<span class="l-n" id="n-shared"></span></a>
     <div class="l-sec">Folders<button type="button" class="v-icon" id="new-folder" aria-label="New folder" data-tip="New folder" data-tip-end>${lu('plus')}</button></div>
+    <nav class="l-tree" id="tree" aria-label="Folders"></nav>`;
+
+/**
+ * The sidebar of a study layout: doors, not lists. Home, then Activity in `rooms`, then the pinned pages themselves,
+ * then the folders, and the pages with a share link at the foot. The script fills the pins, the tree and the counts.
+ */
+const studySide = (layout: Layout) => `
+    <a class="l-brand" href="/?layout=${layout}">${MARK}Pages</a>
+    <a class="l-nav" href="/?layout=${layout}" data-nav="home">${lu('home')}Home</a>
+    ${layout === 'rooms' ? `<a class="l-nav" href="/?layout=${layout}&v=activity" data-nav="activity">${lu('activity')}Activity<span class="s-count" id="n-activity"></span></a>` : ''}
+    <div id="pins"></div>
+    <div class="l-sec">Folders<button type="button" class="v-icon" id="new-folder" aria-label="New folder" data-tip="New folder" data-tip-end>${lu('plus')}</button></div>
     <nav class="l-tree" id="tree" aria-label="Folders"></nav>
+    <div class="s-foot"><a class="l-nav" href="/?layout=${layout}&v=shared" data-nav="shared">${lu('link2')}Shared by link<span class="s-count" id="n-shared"></span></a></div>`;
+
+export function libraryHtml(input: LibraryInput, nonce: string) {
+  const { pages, folders, activity, layout, me } = input;
+  const study = layout !== 'classic';
+  const body = `<style>${LIB_CSS}${study ? studyCss : ''}</style>
+<div class="l${study ? ' is-study' : ''}" id="app" data-layout="${layout}">
+  <aside class="l-side" id="side" aria-label="Library">${study ? studySide(layout) : CLASSIC_SIDE}
   </aside>
   <div class="l-scrim" id="scrim"></div>
   <div class="l-main">
@@ -301,6 +351,10 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
       </div>
       <div class="v-pop" id="pop-more" hidden>
         ${appearance()}
+        <div class="v-label">Layout</div>
+        <div class="v-seg" role="group" aria-label="Layout">
+          ${LAYOUTS.map((l) => `<button type="button" data-layout-set="${l}" aria-pressed="${l === layout}">${l[0].toUpperCase() + l.slice(1)}</button>`).join('')}
+        </div>
         <div class="v-hr"></div>
         <div class="v-label">Keyboard</div>
         <dl class="h-keys">
@@ -308,7 +362,7 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
           <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous page</dd>
           <dt><kbd>o</kbd></dt><dd>Open</dd>
           <dt><kbd>c</kbd></dt><dd>Copy link</dd>
-          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>
+          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>b</kbd></dt><dd>Before and after, in Activity</dd>' : ''}
         </dl>
       </div>
     </header>
@@ -329,7 +383,7 @@ export function libraryHtml(pages: PageRow[], folders: FolderRow[], nonce: strin
   <button type="button" class="v-item is-danger" id="fdelete" hidden>${icon('trash')}Delete folder, keep its pages</button>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc } })}</script>`;
+<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x } : {}) } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -340,6 +394,14 @@ const h = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '
 const pages = D.pages, folders = D.folders;
 const COLORS = ['blue', 'teal', 'green', 'amber', 'coral', 'pink', 'purple', 'red', 'gray'];
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// A study layout draws its own sidebar and views. The functions for it are in study.js, in this same script.
+const STUDY = D.layout !== 'classic';
+// The browser keeps the layout of the study, so the link back from a page opens the same layout.
+// An address that names a layout sets it. An address with no layout follows the layout that the browser keeps.
+try {
+  if (new URLSearchParams(location.search).has('layout')) localStorage.setItem('library-layout', D.layout);
+  else { const kept = localStorage.getItem('library-layout'); if (kept && kept !== 'classic') location.replace('/?layout=' + kept + (location.search ? '&' + location.search.slice(1) : '')); }
+} catch {}
 
 let view = 'grid';
 try { if (localStorage.getItem('library-view') === 'list') view = 'list'; } catch {}
@@ -350,13 +412,24 @@ try { JSON.parse(localStorage.getItem('library-open') || '[]').forEach((id) => e
 // ─── Where we are ─────────────────────────────────────────
 function placeFromUrl() {
   const u = new URLSearchParams(location.search);
-  const f = u.get('f');
-  if (f && folders.some((x) => x.id === f)) return { folder: f };
-  const v = u.get('v');
-  return { list: v === 'recent' || v === 'pinned' || v === 'shared' ? v : 'home' };
+  const f = u.get('f'), v = u.get('v');
+  const lists = STUDY ? ['recent', 'pinned', 'shared', 'activity', 'unfiled'] : ['recent', 'pinned', 'shared'];
+  const p = f && folders.some((x) => x.id === f) ? { folder: f } : { list: lists.includes(v) ? v : 'home' };
+  return STUDY ? studyPlace(p, u) : p;
 }
 let place = placeFromUrl();
-const urlOf = (p) => p.folder ? '/?f=' + encodeURIComponent(p.folder) : p.list === 'home' ? '/' : '/?v=' + p.list;
+// The address keeps the layout, and in a study layout the lens, the filters and the open item too.
+const urlOf = (p) => {
+  const q = new URLSearchParams();
+  if (STUDY) q.set('layout', D.layout);
+  if (p.folder) q.set('f', p.folder); else if (p.list !== 'home') q.set('v', p.list);
+  if (p.lens === 'activity') q.set('lens', 'activity');
+  if (p.af) q.set('af', p.af);
+  if (p.only) q.set('only', p.only);
+  if (p.ev) q.set('e', p.ev);
+  const text = q.toString();
+  return text ? '/?' + text : '/';
+};
 function go(p, push = true) {
   place = p; hits = null; sel = -1;
   $('#q').value = ''; $('#q').parentElement.classList.remove('has-q');
@@ -380,6 +453,7 @@ function pagesUnder(id) {
 const ramp = (f) => 'c-' + (f && f.color ? f.color : 'gray');
 
 function renderTree() {
+  if (STUDY) return studySide();
   const here = place.folder;
   pathOf(here).forEach((f) => f.id !== here && expanded.add(f.id));
   const row = (f, d) => {
@@ -480,7 +554,7 @@ function renderCrumb() {
   if (place.folder) {
     const path = pathOf(place.folder);
     html = '<a href="/" data-crumb="">Home</a>' + path.map((f, i) => '<span class="l-sep">' + svg('right') + '</span>' + (i === path.length - 1 ? '<span class="l-here">' + h(f.name) + '</span>' : '<a href="' + urlOf({ folder: f.id }) + '" data-crumb="' + f.id + '">' + h(f.name) + '</a>')).join('');
-  } else html = '<span class="l-here">' + ({ home: 'Home', recent: 'Recent', pinned: 'Pinned', shared: 'Shared by link' })[place.list] + '</span>';
+  } else html = '<span class="l-here">' + ({ home: 'Home', recent: 'Recent', pinned: 'Pinned', shared: 'Shared by link', activity: 'Activity', unfiled: 'Not in a folder' })[place.list] + '</span>';
   c.innerHTML = html;
 }
 $('#crumb').addEventListener('click', (e) => {
@@ -501,6 +575,8 @@ function render() {
       : '<p class="h-none">No page has text that matches \\u201c' + h($('#q').value.trim()) + '\\u201d.</p>';
   } else if (!pages.length && !folders.length) {
     main.innerHTML = '<div class="l-empty"><b>No pages yet</b><span>Publish one with <code>agent-pages publish &lt;page&gt;</code>.</span></div>';
+  } else if (STUDY) {
+    studyMain(main);
   } else if (place.folder) {
     const f = folderOf(place.folder), kids = childrenOf(f.id), here = pages.filter((p) => p.folder_id === f.id).sort(byNew);
     const all = pagesUnder(f.id);
@@ -529,6 +605,7 @@ function select(i, scroll = true) {
   sel = i;
   entries().forEach((el, j) => el.classList.toggle('is-sel', j === i));
   if (scroll && i >= 0) entries()[i].scrollIntoView({ block: 'nearest' });
+  if (STUDY && scroll && i >= 0) studySelected(entries()[i]);
 }
 const current = () => entries()[sel];
 const pageOf = (slug) => pages.find((p) => p.slug === slug);
@@ -726,6 +803,16 @@ $$('[data-view]').forEach((b) => b.addEventListener('click', () => {
   try { localStorage.setItem('library-view', view); } catch {}
   render();
 }));
+// The layout switch loads the library again, in the same folder.
+$$('[data-layout-set]').forEach((b) => b.addEventListener('click', () => {
+  const q = new URLSearchParams(location.search);
+  try { localStorage.setItem('library-layout', b.dataset.layoutSet); } catch {}
+  if (b.dataset.layoutSet === 'classic') q.delete('layout'); else q.set('layout', b.dataset.layoutSet);
+  ['lens', 'af', 'only', 'e'].forEach((k) => q.delete(k));
+  if (!['recent', 'pinned', 'shared'].includes(q.get('v'))) q.delete('v');
+  const text = q.toString();
+  location.href = text ? '/?' + text : '/';
+}));
 
 // Search: the host ranks matches with FTS5. A newer request cancels the one before it.
 const q = $('#q');
@@ -766,7 +853,10 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'c' && slug) copyLink(slug);
   else if (e.key === 'p' && slug && !hits) togglePin(slug);
 });
-
+` +
+    // The study functions and their state must exist before the first draw.
+    (study ? studyJs : '') +
+    `
 render();
 `;
   return shell('Pages', nonce, body, script);

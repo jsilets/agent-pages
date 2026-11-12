@@ -86,6 +86,7 @@ export type Route =
   | { kind: 'api-folders' }
   | { kind: 'api-folder'; id: string }
   | { kind: 'api-page-folder'; slug: string }
+  | { kind: 'api-activity' }
   | { kind: 'thumb'; slug: string; version: number; theme: Theme }
   | { kind: 'pdf'; slug: string; version: number }
   | { kind: 'share-view'; token: string }
@@ -115,6 +116,7 @@ export function route(path: string): Route {
   if (p[0] === 'pdf' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'pdf', slug, version: +p[3] };
   if (p[0] === 't' && ok && p.length === 5 && NUM.test(p[3]) && (p[4] === 'light.webp' || p[4] === 'dark.webp')) return { kind: 'thumb', slug, version: +p[3], theme: p[4] === 'light.webp' ? 'light' : 'dark' };
   if (path === '/api/search') return { kind: 'api-search' };
+  if (path === '/api/activity') return { kind: 'api-activity' };
   if (path === '/api/folders') return { kind: 'api-folders' };
   if (p[0] === 'api' && p[1] === 'folders' && p.length === 3 && isFolderId(p[2])) return { kind: 'api-folder', id: p[2] };
   if (p[0] === 'api' && p[1] === 'pages') {

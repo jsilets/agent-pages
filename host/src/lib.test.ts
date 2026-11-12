@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { auditFromHtml, auditLines, blobKey, ftsQuery, isSlug, isToken, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseTheme, pdfKey, plainText, route, thumbKey, withKit, withTheme } from './lib';
+import { applyEdits, auditFromHtml, auditLines, blobKey, ftsQuery, isId, isSlug, isToken, newId, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseMention, parseTheme, pdfKey, plainText, readJson, route, thumbKey, withKit, withoutKit, withTheme } from './lib';
 
 describe('isSlug', () => {
   it('takes <group>/<name>', () => {
@@ -94,6 +94,22 @@ describe('withKit', () => {
   it('keeps a page script that is not the kit', () => {
     const html = page('/* explain.css */') + '<script>\nlet x = 1;\n</script>';
     expect(withKit(html, '/* explain.css */', '/* explain.js: new */')).toBe(html);
+  });
+});
+
+describe('withoutKit', () => {
+  const css = '/* explain.css: v1 */ :root{--bg:#fff} ' + 'a{}'.repeat(500);
+  const js = '/* explain.js: v1 */ a("<\\/script>"); ' + 'b();'.repeat(500);
+  const page = `<html><head><title>T</title><style>\n${css}\n</style><style>.x{}</style></head><body><p>Text</p><script>\n${js}\n</script>\n<script>let own = 1;</script></body></html>`;
+  it('replaces the packed kit CSS and JS with one short comment each, and keeps the rest', () => {
+    const out = withoutKit(page);
+    expect(out).toBe(
+      '<html><head><title>T</title><!-- The kit CSS is here in the stored HTML. get_page leaves it out. Do not use this comment in an edit. --><style>.x{}</style></head><body><p>Text</p><!-- The kit JS is here in the stored HTML. get_page leaves it out. Do not use this comment in an edit. -->\n<script>let own = 1;</script></body></html>',
+    );
+  });
+  it('keeps a page without the packed kit', () => {
+    const html = '<html><head><style>.x{}</style></head><body><script>\nlet x = 1;\n</script></body>';
+    expect(withoutKit(html)).toBe(html);
   });
 });
 
@@ -202,5 +218,82 @@ describe('auditFromHtml with an inlined kit', () => {
     const report = { pass: true, slides: [] };
     const html = `<script>/* writes <script type="application/json" id="k-deck-report"> */ const x = 1;</script><body><script type="application/json" id="k-deck-report">${JSON.stringify(report)}</script>`;
     expect(auditFromHtml(html)).toEqual({ pass: true, slides: [] });
+  });
+});
+
+describe('comment routes', () => {
+  const t = 'A'.repeat(43), id = '0123456789abcdef01234567';
+  it('maps the comment, connector token and MCP routes', () => {
+    expect(route('/api/pages/a/b/comments')).toEqual({ kind: 'api-comments', slug: 'a/b' });
+    expect(route(`/api/comments/${id}/resolve`)).toEqual({ kind: 'api-comment-resolve', id });
+    expect(route('/api/connector-tokens')).toEqual({ kind: 'api-connector-tokens' });
+    expect(route(`/api/connector-tokens/${t}`)).toEqual({ kind: 'api-connector-token', token: t });
+    expect(route('/api/connector-tokens/0a1b2c3d4e5f')).toEqual({ kind: 'api-connector-token', token: '0a1b2c3d4e5f' });
+    expect(route(`/s/_mcp/${t}`)).toEqual({ kind: 'mcp', token: t });
+  });
+  it('sends a token of any shape to the connector, which answers 404', () => {
+    expect(route('/s/_mcp/short')).toEqual({ kind: 'mcp', token: 'short' });
+    expect(route(`/s/_run/${t}`)).toEqual({ kind: 'run-result', id: t });
+    expect(route('/s/_run/short')).toEqual({ kind: 'not-found' });
+  });
+  it('refuses bad ids, bad tokens and longer paths', () => {
+    for (const p of ['/api/comments/xyz/resolve', `/api/comments/${id}`, `/api/comments/${id}/reopen`, '/api/connector-tokens/short', '/api/pages/A/b/comments', '/s/_mcp', `/s/_mcp/${t}/x`])
+      expect(route(p).kind).toBe('not-found');
+  });
+  it('makes 24-character hex ids, each one new', () => {
+    const a = newId();
+    expect(a).toMatch(/^[0-9a-f]{24}$/);
+    expect(isId(a)).toBe(true);
+    expect(isId(a.toUpperCase())).toBe(false);
+    expect(newId()).not.toBe(a);
+  });
+});
+
+describe('parseMention', () => {
+  it('reads a mention at the start or inside the comment, in any case', () => {
+    expect(parseMention('@claude reword this')).toBe('claude');
+    expect(parseMention('Please, @ChatGPT, make this shorter')).toBe('chatgpt');
+    expect(parseMention('too long\n@CLAUDE.')).toBe('claude');
+    expect(parseMention('(@chatgpt)')).toBe('chatgpt');
+  });
+  it('takes the first mention when the comment has two', () => {
+    expect(parseMention('@chatgpt and @claude')).toBe('chatgpt');
+  });
+  it('finds no mention in plain text, other names and email addresses', () => {
+    for (const s of ['reword this', 'claude, reword this', '@claudette hi', '@claude-code hi', 'mail me@claude.ai', 'see x@chatgpt', '@claude.ai is a site', '@ claude'])
+      expect(parseMention(s)).toBe(null);
+  });
+});
+
+describe('applyEdits', () => {
+  const html = '<html><p>one</p><p>two</p><p>two</p></html>';
+  it('replaces a text that occurs once', () => {
+    expect(applyEdits(html, [{ old_text: '<p>one</p>', new_text: '<p>1</p>' }])).toEqual({ html: '<html><p>1</p><p>two</p><p>two</p></html>' });
+  });
+  it('reports the edit with no match', () => {
+    expect(applyEdits(html, [{ old_text: 'three', new_text: '3' }])).toEqual({ failed: 1, matches: 0 });
+    expect(applyEdits(html, [{ old_text: '', new_text: 'x' }])).toEqual({ failed: 1, matches: 0 });
+  });
+  it('reports the edit with two matches, by its number in the list', () => {
+    expect(applyEdits(html, [{ old_text: 'one', new_text: '1' }, { old_text: 'two', new_text: '2' }])).toEqual({ failed: 2, matches: 2 });
+  });
+  it('applies the edits in order, each one to the result of the one before', () => {
+    expect(applyEdits('<p>a</p>', [{ old_text: 'a', new_text: 'b' }, { old_text: '<p>b</p>', new_text: '<h1>c</h1>' }])).toEqual({ html: '<h1>c</h1>' });
+    expect(applyEdits('<p>a</p>', [{ old_text: 'a', new_text: 'pp' }, { old_text: 'p>', new_text: '' }])).toEqual({ failed: 2, matches: 2 });
+  });
+  it('puts the new text in as it is, with no $ patterns', () => {
+    expect(applyEdits('cost: X', [{ old_text: 'X', new_text: "$& $1 $'" }])).toEqual({ html: "cost: $& $1 $'" });
+  });
+});
+
+describe('readJson', () => {
+  const req = (body: string, headers: Record<string, string> = {}) => new Request('http://x/', { method: 'POST', body, headers });
+  it('parses a JSON body', async () => {
+    expect(await readJson(req('{"a":1}'), 100)).toEqual({ a: 1 });
+  });
+  it('returns undefined for a body that is not JSON or is over the limit', async () => {
+    expect(await readJson(req('{'), 100)).toBe(undefined);
+    expect(await readJson(req(JSON.stringify({ a: 'é'.repeat(60) })), 100)).toBe(undefined);
+    expect(await readJson(req('{}', { 'content-length': '101' }), 100)).toBe(undefined);
   });
 });

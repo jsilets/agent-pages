@@ -46,6 +46,7 @@ const ICON: Record<string, string> = {
   list: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.8" cy="6.5" r="0.9" fill="currentColor"/><circle cx="4.8" cy="12" r="0.9" fill="currentColor"/><circle cx="4.8" cy="17.5" r="0.9" fill="currentColor"/>',
   pin: '<path d="M9 3.5h6l-.9 6.2 3.4 3.3V15h-11v-2l3.4-3.3z"/><path d="M12 15v5.5"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>',
+  comment: '<path d="M5.5 5h13A1.5 1.5 0 0 1 20 6.5v8a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V16h-2A1.5 1.5 0 0 1 4 14.5v-8A1.5 1.5 0 0 1 5.5 5Z"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/>',
 };
 const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
@@ -151,6 +152,30 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-links .v-icon { width: 28px; height: 28px; }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
 
+/* The comments panel: a column to the right of the page. */
+.v-body { flex: 1; min-height: 0; display: flex; }
+.v-side { flex: none; display: flex; flex-direction: column; width: 340px; max-width: 100%; box-sizing: border-box; border-left: 0.5px solid var(--b); background: var(--bg); }
+.v-side[hidden] { display: none; }
+.v-side-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 14px; border-bottom: 0.5px solid var(--b); }
+.v-side-head h2 { margin: 0; font: 600 13.5px var(--sans); }
+.v-threads { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px; }
+.v-threads:empty::before { content: "No open comments."; display: block; padding: 10px 0; font-size: 12.5px; color: var(--t); }
+.v-thread { padding: 12px 0; border-bottom: 0.5px solid var(--b); }
+.v-cmt { font-size: 13px; line-height: 1.45; }
+.v-cmt + .v-cmt { margin: 10px 0 0 10px; padding-left: 10px; border-left: 1.5px solid var(--b2); }
+.v-cmt-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--t); }
+.v-cmt-head b { font-weight: 600; color: var(--p); overflow-wrap: anywhere; }
+.v-cmt p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.v-cmt blockquote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--b2); color: var(--s); font-size: 12.5px; overflow-wrap: anywhere; }
+.v-side textarea, .v-side input { display: block; width: 100%; box-sizing: border-box; padding: 7px 9px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px/1.4 var(--sans); resize: vertical; }
+.v-run { margin: 8px 0 0; font-size: 12px; color: var(--t); }
+.v-acts { display: flex; gap: 6px; margin-top: 8px; }
+.v-acts textarea { flex: 1; min-width: 0; }
+.v-btn { flex: none; align-self: flex-start; height: 30px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
+.v-btn:hover { background: var(--bg2); }
+.v-compose { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-top: 0.5px solid var(--b); }
+.v-hint { margin: 0; font-size: 11.5px; color: var(--t); }
+
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
 .v-toast[hidden] { display: none; }
 
@@ -161,6 +186,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-share { display: inline-flex; align-items: center; }
   .v-share svg { display: block; }
   .v-sharepop { width: calc(100vw - 16px); }
+  .v-body { position: relative; }
+  .v-side { position: absolute; inset: 0; width: auto; border-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after { animation: none; }
@@ -697,6 +724,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-cur" data-pop="pop-ver" aria-label="Version ${n} of ${latest}. Show all versions"><b>v${n}</b><span class="v-of">/${latest}</span>${icon('down')}</button>
     ${step('right', n + 1, 'Next version')}
   </div>
+  <button type="button" class="v-icon" id="cbtn" data-tip="Comments" aria-label="Comments" aria-expanded="false" aria-controls="side">${icon('comment')}</button>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
   ${presentButton(input.kind)}
@@ -727,7 +755,18 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <ul class="v-links" id="links"></ul>
   </div>
 </header>
+<div class="v-body">
 <iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
+<aside class="v-side" id="side" aria-label="Comments" hidden>
+  <div class="v-side-head"><h2>Comments</h2><button type="button" class="v-icon" id="cclose" aria-label="Close comments">${icon('x')}</button></div>
+  <div class="v-threads" id="threads"></div>
+  <div class="v-compose">
+    <input type="text" id="cquote" maxlength="1000" placeholder="Quote from the page (optional)" aria-label="Quote from the page">
+    <textarea id="cbody" rows="3" maxlength="4000" placeholder="Add a comment" aria-label="Comment"></textarea>
+    <p class="v-hint">Write @claude or @chatgpt to ask an assistant.</p>
+    <button type="button" class="v-create" id="csend">Comment</button>
+  </div>
+</aside>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
 <script type="application/json" id="data">${data({ slug, version: n, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x } })}</script>`;
@@ -793,6 +832,86 @@ $('#create').addEventListener('click', async (e) => {
   } catch (err) { toast('Could not create the link: ' + err.message); }
   b.disabled = false;
 });
+
+// Comments: a panel beside the page. Every text goes in with textContent, so a comment never becomes markup.
+const side = $('#side'), cbtn = $('#cbtn'), cbody = $('#cbody');
+const keep = (k, v) => { try { sessionStorage.setItem(k + D.slug, v); } catch {} };
+const kept = (k) => { try { return sessionStorage.getItem(k + D.slug) || ''; } catch { return ''; } };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const when = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+// The reply drafts, by thread id. A refresh draws the list again, and the drafts go back in.
+const drafts = {};
+let shown = null;
+function comment(c) {
+  const d = el('div', 'v-cmt'), head = el('div', 'v-cmt-head');
+  head.append(el('b', '', c.author), el('span', '', when(c.created_at)));
+  if (c.mention) head.append(el('span', 'v-tag', '@' + c.mention));
+  d.append(head);
+  if (c.quote) d.append(el('blockquote', '', c.quote));
+  d.append(el('p', '', c.body));
+  return d;
+}
+// One line for the latest run of the thread: the assistant works on it, or the run failed. A run that is done shows nothing.
+function runLine(r) {
+  if (!r || r.status === 'done') return [];
+  const off = (r.detail || '').startsWith('not_signed_in');
+  const who = r.agent === 'chatgpt' ? 'ChatGPT' : 'Claude';
+  const p = el('p', 'v-run', r.status === 'running' ? who + ' is working…' : off ? who + ': not connected' : who + ' did not finish.');
+  if (r.status === 'failed' && !off) p.title = r.detail || '';
+  return [p];
+}
+function thread(t) {
+  const a = el('article', 'v-thread'), acts = el('div', 'v-acts');
+  const box = el('textarea'); box.rows = 1; box.maxLength = 4000; box.placeholder = 'Reply'; box.setAttribute('aria-label', 'Reply'); box.dataset.id = t.id; box.value = drafts[t.id] || '';
+  box.oninput = () => { drafts[t.id] = box.value; };
+  const send = () => post({ body: box.value, parent_id: t.id }, () => { delete drafts[t.id]; });
+  box.onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); };
+  const reply = el('button', 'v-btn', 'Reply'); reply.type = 'button'; reply.onclick = send;
+  const done = el('button', 'v-btn', 'Resolve'); done.type = 'button';
+  done.onclick = async () => { try { await api('/api/comments/' + t.id + '/resolve', { method: 'PUT' }); toast('Thread resolved'); await loadComments(); } catch (err) { toast('Could not resolve: ' + err.message); } };
+  acts.append(box, reply, done);
+  a.append(comment(t), ...t.replies.map(comment), ...runLine(t.run), acts);
+  return a;
+}
+async function loadComments(force) {
+  const list = await api('/api/pages/' + D.slug + '/comments?status=open');
+  const key = JSON.stringify(list);
+  if (key === shown && !force) return;
+  shown = key;
+  const at = document.activeElement && document.activeElement.dataset.id;
+  $('#threads').replaceChildren(...list.map(thread));
+  if (at) $$('#threads textarea').find((b) => b.dataset.id === at)?.focus();
+}
+async function post(c, sent) {
+  if (!c.body.trim()) return;
+  try { await api('/api/pages/' + D.slug + '/comments', { method: 'POST', body: JSON.stringify(c) }); sent(); await loadComments(true); }
+  catch (err) { toast('Could not send the comment: ' + err.message); }
+}
+function showSide(on) {
+  side.hidden = !on;
+  cbtn.setAttribute('aria-expanded', String(on));
+  keep('comments:', on ? '1' : '');
+  if (on) loadComments().catch((err) => toast('Could not load the comments: ' + err.message));
+}
+cbtn.addEventListener('click', () => showSide(side.hidden));
+$('#cclose').addEventListener('click', () => showSide(false));
+const sendNew = () => post({ body: cbody.value, quote: $('#cquote').value }, () => { cbody.value = ''; $('#cquote').value = ''; keep('draft:', ''); });
+$('#csend').addEventListener('click', sendNew);
+cbody.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendNew(); });
+cbody.addEventListener('input', () => keep('draft:', cbody.value));
+// A new version loads the viewer again. The panel and the comment draft come back from sessionStorage.
+cbody.value = kept('draft:');
+if (kept('comments:')) showSide(true);
+
+// Every 5 seconds: the open panel loads its threads, and a viewer that follows the latest version asks for the latest number.
+// An assistant that answers a comment stores a new version, so the page and the reply show with no reload by hand.
+setInterval(async () => {
+  if (document.hidden) return;
+  try {
+    if (!side.hidden) await loadComments();
+    if (D.followsLatest && (await api('/api/pages/' + D.slug)).latest !== D.version) location.reload();
+  } catch {}
+}, 5000);
 `;
   return shell(title, nonce, body, script);
 }

@@ -1,0 +1,83 @@
+// The types that the Worker, the MCP connector and the agent hooks share. This file imports only types.
+import type { Mention } from './lib';
+
+export interface Env {
+  DB: D1Database;
+  PAGES: R2Bucket;
+  BROWSER: BrowserRun;
+  ENVIRONMENT: string;
+  ACCESS_TEAM: string;
+  ACCESS_AUD: string;
+  /** Development only: the URL of the sandbox runner that starts Claude Code for a comment. Not set means no runs. */
+  SANDBOX_RUNNER_URL?: string;
+  /** Development only: the mentions that the runner handles, as a comma list of 'claude' and 'chatgpt'. Default: 'claude'. */
+  SANDBOX_AGENTS?: string;
+}
+
+/** One row of the comments table. A reply has parent_id set to the first comment of its thread. */
+export interface Comment {
+  id: string;
+  slug: string;
+  /** The page version the comment was written on. */
+  version: number;
+  /** An element id or a claim id, or null for a comment on the whole page. */
+  anchor: string | null;
+  /** The text the comment is about, or null. */
+  quote: string | null;
+  body: string;
+  /** The Access identity of a person, or the label of a connector token. */
+  author: string;
+  mention: Mention | null;
+  parent_id: string | null;
+  status: 'open' | 'resolved';
+  created_at: string;
+}
+
+/** The first comment of a thread, with its replies, oldest first. */
+export interface Thread extends Comment {
+  replies: Comment[];
+}
+
+/** Why a store function did not store, with the HTTP status for it. */
+export interface Refusal {
+  error: string;
+  status: number;
+}
+
+/** What publish and edit_page return for a new version. */
+export interface Stored {
+  slug: string;
+  version: number;
+  kind: string;
+  title: string;
+  url: string;
+  versionUrl: string;
+  audit?: unknown;
+}
+
+/** Stores the HTML as a new version of the page. worker.ts owns it, and the MCP connector gets it as an argument. */
+export type StoreVersion = (env: Env, ctx: ExecutionContext, slug: string, html: string, origin: string) => Promise<Stored | Refusal>;
+
+/** What a JSON-RPC handler knows about the caller of the MCP connector. */
+export interface McpContext {
+  token: string;
+  /** The label of the connector token. */
+  label: string;
+  origin: string;
+  /** The page scope of the connector token. Not set means every page. */
+  slug?: string;
+}
+
+/**
+ * One JSON-RPC method of the MCP connector. params is the `params` member of the request, not checked.
+ * The return value is the JSON-RPC `result`. Throw an RpcError to answer with a JSON-RPC error.
+ * For a notification (a request with no id) the connector drops the result and answers 202.
+ */
+export type Handler = (env: Env, params: unknown, ctx: McpContext) => Promise<unknown>;
+
+/** A JSON-RPC error that a Handler throws. -32602 means bad params. data, when set, is the `data` member of the error. */
+export class RpcError extends Error {
+  constructor(public code: number, message: string, public data?: unknown) {
+    super(message);
+  }
+}

@@ -87,7 +87,7 @@ index 46d559d..bca55b6 100644
 +++ b/host/src/sandbox.ts
 @@ -3,7 +3,7 @@
  // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
- import { noteActivity, pruneActivity } from './activity';
+ import { noteActivity, pruneActivity } from './run-activity';
  import { ENGINES, modelFor } from './assistants';
 -import { newToken, newTokenId, readJson, type Mention } from './lib';
 +import { newToken, newTokenId, readJson, runnerFetch, type Mention } from './lib';

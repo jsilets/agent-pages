@@ -1,7 +1,7 @@
 // Starts Claude Code or Codex in a sandbox for a comment that mentions @claude or @chatgpt, and records each run in agent_runs.
 // The Worker does not wait for the run. The runner answers 202 at once and reports the result later at
 // POST /s/_run/<run id>, because a run takes longer than the 30 seconds that waitUntil gives a Worker.
-import { noteActivity, pruneActivity } from './activity';
+import { noteActivity, pruneActivity } from './run-activity';
 import { ENGINES, modelFor } from './assistants';
 import { newToken, newTokenId, readJson, type Mention } from './lib';
 import type { Comment, Env, Refusal, Thread } from './types';

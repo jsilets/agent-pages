@@ -203,7 +203,7 @@ A progress event is one JSON object of at most 16 KB:
 - A run keeps only its newest `typing` event.
 - The route answers 200 with `{ "seq": n }`, 400 for a bad event, and 404 for an unknown run or a run that has ended.
 
-The host does not store the state of a run. `reduceActivity` in `host/src/activity.ts` makes the state from the events: `phase` (`starting`, `reading`, `editing`, `replying`, `done` or `failed`), `tool`, `quote`, `text`, `final`, `before`, `anchor` and `version`. After the host saw the `edit_page` call, `final` is true and the text is exact.
+The host does not store the state of a run. `reduceActivity` in `host/src/run-activity.ts` makes the state from the events: `phase` (`starting`, `reading`, `editing`, `replying`, `done` or `failed`), `tool`, `quote`, `text`, `final`, `before`, `anchor` and `version`. After the host saw the `edit_page` call, `final` is true and the text is exact.
 
 ### The transport
 

@@ -95,7 +95,7 @@ bun run test
 
 ## 7. Deploy the host
 
-Apply the D1 migrations first. The branch adds `0010_comment_edits_assistants.sql`.
+Apply the D1 migrations first. The branch adds `0013_comment_edits_assistants.sql`.
 
 ```sh
 bunx cf d1 migrations apply <database id> --dir migrations

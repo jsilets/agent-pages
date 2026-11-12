@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import '../../kit/explain.js';
-import { activeRuns, editEvents, handleRunProgress, locate, pageActivity, parseProgress, quoteText, recordActivity, reduceActivity, type ActivityEvent } from './activity';
+import { activeRuns, editEvents, handleRunProgress, locate, pageActivity, parseProgress, quoteText, recordActivity, reduceActivity, type ActivityEvent } from './run-activity';
 import { route } from './lib';
 import { testDb } from './testdb';
 import type { Env } from './types';

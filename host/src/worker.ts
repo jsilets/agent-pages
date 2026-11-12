@@ -6,7 +6,7 @@ import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
-import { handleRunProgress, pageActivity } from './activity';
+import { handleRunProgress, pageActivity } from './run-activity';
 import { onCommentCreated } from './agents';
 import { assistantStates, chooseModel, connectStatus, disconnect, RunnerError, sendCode, startConnect } from './assistants';
 import { addComment, deleteComment, editComment, getComment, listThreads, reopenThread, resolveThread } from './comments';

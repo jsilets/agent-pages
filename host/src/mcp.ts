@@ -1,7 +1,7 @@
 // The MCP connector at POST /s/_mcp/<token>: MCP Streamable HTTP with no session and no SSE.
 // Each POST carries one JSON-RPC 2.0 message, and the answer is one JSON body.
 // The connector token is the only check for a tool. The tools reach pages and comments, and nothing else.
-import { editEvents, noteActivity, recordActivity } from './activity';
+import { editEvents, noteActivity, recordActivity } from './run-activity';
 import { addComment, getComment, listThreads, MAX_COMMENT, resolveThread } from './comments';
 import { applyEdits, blobKey, isSlug, isToken, readJson, withoutKit, type Edit } from './lib';
 import { RpcError, type Comment, type Env, type Handler, type McpContext, type StoreVersion, type Thread } from './types';

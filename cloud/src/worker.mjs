@@ -72,16 +72,18 @@ export class Outbound extends WorkerEntrypoint {
   async fetch(req) {
     const u = new URL(req.url);
     if (u.hostname !== INTERNAL || u.protocol !== 'http:') return new Response('no route', { status: 403 });
-    const ns = this.env.USER_RUNNER;
+    const ns = this.ctx.exports.UserRunner;
     return ns.get(ns.idFromString(this.ctx.props.id)).fromContainer(req);
   }
 }
 
-const stubs = (env) => (key) => {
-  const stub = env.USER_RUNNER.getByName(key);
+// ctx.exports.UserRunner is the namespace of the Durable Object class of this Worker. A binding with the name of this
+// Worker is not possible: the deploy refuses a container on a class that a binding names by script.
+const stubs = (ns) => (key) => {
+  const stub = ns.getByName(key);
   return new Proxy({}, { get: (_t, method) => (body, t) => stub.call(key, method, body, t) });
 };
 
 export default {
-  fetch: (req, env) => handle(req, env, stubs(env)),
+  fetch: (req, env, ctx) => handle(req, env, stubs(ctx.exports.UserRunner)),
 };

@@ -43,7 +43,6 @@ export default defineConfig(({ mode }: ConfigContext) => {
         Outbound: exports.worker(),
       },
       env: {
-        USER_RUNNER: bindings.durableObject({ worker: name, exportName: 'UserRunner' }),
         CREDENTIALS: bindings.r2({ name: `${name}-credentials` }),
         ...(production ? { HOST: bindings.worker({ worker: process.env.HOST_WORKER || 'agent-pages' }) } : {}),
         HOST_ORIGINS: bindings.text(production ? process.env.HOST_ORIGINS! : process.env.HOST_ORIGINS || ''),

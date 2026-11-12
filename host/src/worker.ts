@@ -101,7 +101,7 @@ async function identify(req: Request, env: Env): Promise<Identity | null> {
   return verifyAccessJwt(req.headers.get('cf-access-jwt-assertion'), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD });
 }
 
-const PAGE_COLUMNS = 'slug, title, repo, kind, latest, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
+const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
 
 async function getPage(env: Env, slug: string) {
   return env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages WHERE slug = ?`).bind(slug).first<PageRow>();

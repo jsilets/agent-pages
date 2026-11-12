@@ -142,39 +142,45 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* Share popover */
 .v-sharepop { width: 344px; padding: 14px; }
 .v-sharepop h2 { margin: 0; font: 600 14px var(--sans); }
-.v-sharepop p { margin: 4px 0 12px; font-size: 12.5px; line-height: 1.45; color: var(--s); }
-.v-sharepop .v-seg { margin: 0 0 8px; }
 .v-create { width: 100%; height: 34px; border: 0; border-radius: 8px; background: var(--p); color: var(--bg); font: 600 13px var(--sans); cursor: pointer; }
 .v-create:hover:not(:disabled) { background: var(--press); }
 .v-create:disabled { opacity: 0.5; cursor: default; }
-.v-links { list-style: none; margin: 8px 0 0; padding: 0; }
+.v-links { list-style: none; margin: 0; padding: 0; }
 .v-links:empty { display: none; }
-.v-links li { display: flex; align-items: center; gap: 4px; height: 36px; padding-left: 2px; border-top: 0.5px solid var(--b); }
-.v-links code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
+.v-links li { display: flex; align-items: center; gap: 4px; height: 38px; }
 .v-links .v-tag { margin-right: 4px; }
 .v-links .v-icon { width: 28px; height: 28px; }
-/* Sharing, as in Google Docs: the people you add, each with their own link, then the general access of the page. */
+/* Sharing, as in Google Drive: the people you add, each with their own link, then the general access of the page. */
+.v-sharepop:not([hidden]) { gap: 0; }
+.v-sharepop h2 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .v-add { display: flex; gap: 6px; margin-top: 12px; }
 .v-add .v-create { flex: none; width: auto; height: 32px; padding: 0 14px; }
-.v-sharepop .v-hint { margin: 6px 0 0; font-size: 12px; color: var(--t); }
 .v-sec { margin: 16px 0 6px; font: 600 12px var(--sans); color: var(--s); }
+.v-links li .v-av { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-right: 6px; border-radius: 50%; background: var(--bg2); font: 600 11.5px var(--sans); color: var(--s); }
 .v-gen { display: flex; align-items: center; gap: 10px; }
-.v-gen-ic { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--bg2); color: var(--s); }
+.v-gen-ic { flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--bg2); color: var(--s); }
 .v-gen-ic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .v-gen.is-on .v-gen-ic { background: color-mix(in srgb, var(--link) 16%, transparent); color: var(--link); }
-.v-gen-t { flex: 1; min-width: 0; font-size: 13px; line-height: 17px; }
-.v-gen-t b { display: block; font-weight: 600; }
-.v-gen-t span { display: block; font-size: 12px; color: var(--s); }
-.v-switch { flex: none; position: relative; width: 34px; height: 20px; padding: 0; border: 0; border-radius: 999px; background: var(--b2); cursor: pointer; }
-.v-switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
-.v-switch[aria-checked="true"] { background: var(--link); }
-.v-switch[aria-checked="true"] i { transform: translateX(14px); }
-.v-pubrow { display: flex; align-items: center; gap: 4px; height: 36px; margin-top: 8px; padding-left: 2px; border-top: 0.5px solid var(--b); }
-.v-pubrow code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
-.v-pubrow .v-icon { width: 28px; height: 28px; }
-.v-check { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; cursor: pointer; }
+.v-gen-t { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+#gen-s { padding-left: 6px; font-size: 12px; line-height: 16px; color: var(--s); }
+/* A select that reads as text with a caret, as the "Restricted" menu of Google Drive. */
+.v-sel { position: relative; display: inline-flex; align-items: center; border-radius: 6px; }
+.v-sel:hover, .v-sel:focus-within { background: var(--bg2); }
+.v-sel select { appearance: none; -webkit-appearance: none; field-sizing: content; height: 26px; margin: 0; padding: 0 24px 0 6px; border: 0; background: transparent; color: var(--p); font: 600 13px var(--sans); cursor: pointer; }
+.v-sel select:focus-visible { outline: 2px solid var(--link); outline-offset: 0; border-radius: 6px; }
+.v-sel svg { position: absolute; right: 5px; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; pointer-events: none; color: var(--s); }
+.v-sel select option { background: var(--bg); color: var(--p); }
+.v-sel-box { align-self: flex-start; margin-left: -6px; }
+.v-sel-box select { font-weight: 500; }
+.v-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 42px; font-size: 13px; cursor: pointer; }
+.v-check[hidden] { display: none; }
 .v-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--link); }
-.v-check span { color: var(--t); font-size: 12px; }
+.v-foot { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+.v-foot .v-create { width: auto; height: 32px; margin-left: auto; padding: 0 18px; }
+.v-ghost { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--link); font: 600 13px var(--sans); cursor: pointer; }
+.v-ghost:hover { background: var(--bg2); }
+.v-ghost svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.v-ghost[hidden] { display: none; }
 .v-lname { display: block; box-sizing: border-box; flex: 1; min-width: 0; width: 100%; height: 32px; margin: 0; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px var(--sans); }
 .v-lname::placeholder { color: var(--t); }
 .v-links .v-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
@@ -314,7 +320,7 @@ $$('[data-pop]').forEach((btn) => {
 $$('.v-pop').forEach((pop) => {
   pop.addEventListener('click', (e) => e.stopPropagation());
   pop.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if ((e.key !== 'ArrowDown' && e.key !== 'ArrowUp') || e.target.matches('select, input')) return;
     const list = items(pop), i = list.indexOf(document.activeElement);
     list[(i + (e.key === 'ArrowDown' ? 1 : list.length - 1)) % list.length]?.focus();
     e.preventDefault();
@@ -454,24 +460,27 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-item is-danger c-red" id="del">${icon('trash')}<span>Delete page</span></button>
   </div>
   <div class="v-pop v-sharepop" id="pop-share" hidden>
-    <h2>Share</h2>
+    <h2>Share “${esc(title)}”</h2>
     <form class="v-add" id="add">
-      <input class="v-lname" id="pname" type="text" maxlength="80" placeholder="Add a person, for example Dana at Acme" aria-label="Name of the person" autocomplete="off">
+      <input class="v-lname" id="pname" type="text" maxlength="80" placeholder="Add a person by name" aria-label="Name of the person" autocomplete="off">
       <button type="submit" class="v-create">Add</button>
     </form>
-    <p class="v-hint">Each person gets their own link, so Views shows who read the page. Copy the link and send it to them.</p>
+    <div class="v-sec" id="people-h" hidden>People with their own link</div>
     <ul class="v-links" id="people"></ul>
     <div class="v-sec">General access</div>
     <div class="v-gen" id="gen">
       <span class="v-gen-ic" id="gen-ic"></span>
-      <span class="v-gen-t"><b id="gen-t"></b><span id="gen-s"></span></span>
-      <button type="button" class="v-switch" id="gen-on" role="switch" aria-checked="false" aria-label="Anyone with the link"><i></i></button>
+      <span class="v-gen-t">
+        <span class="v-sel"><select id="gen-sel" aria-label="General access"><option value="off">Restricted</option><option value="on">Anyone with the link</option></select>${icon('down')}</span>
+        <span id="gen-s"></span>
+      </span>
     </div>
-    <div id="pub"></div>
-    <div class="v-sec">New links point to</div>
-    <div class="v-seg" role="group" aria-label="New links point to">
-      <button type="button" data-target="latest" aria-pressed="true">Latest version</button>
-      <button type="button" data-target="${n}" aria-pressed="false">Only v${n}</button>
+    <label class="v-check" id="gate-row" hidden><input type="checkbox" id="gate">Require an email to view</label>
+    <div class="v-sec">New links open</div>
+    <span class="v-sel v-sel-box"><select id="ver" aria-label="New links open"><option value="latest">The latest version</option><option value="${n}">Version ${n} only</option></select>${icon('down')}</span>
+    <div class="v-foot">
+      <button type="button" class="v-ghost" id="copy-pub" hidden>${icon('link')}Copy link</button>
+      <button type="button" class="v-create" id="done">Done</button>
     </div>
   </div>
 </header>
@@ -509,13 +518,8 @@ $('#pop-more').addEventListener('open', () => { const b = $('#del'); b.classList
 
 // Sharing, as in Google Docs with DocSend's email gate: the people you add, each with a link of their own,
 // then the general access: off, or anyone with the link, with an email first if you want.
-let target = 'latest';
-$$('[data-target]').forEach((b) => b.addEventListener('click', () => {
-  target = b.dataset.target;
-  $$('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-}));
 const shareApi = '/api/pages/' + D.slug + '/shares';
-const versionOf = () => (target === 'latest' ? 'latest' : +target);
+const versionOf = () => ($('#ver').value === 'latest' ? 'latest' : +$('#ver').value);
 const mk = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; };
 function iconButton(name, label, tip, onclick, end) {
   const b = mk('button', 'v-icon'); b.type = 'button'; b.innerHTML = svg(name); b.setAttribute('aria-label', label); b.dataset.tip = tip;
@@ -538,10 +542,11 @@ async function loadLinks() {
   const list = await api(shareApi);
   const people = list.filter((s) => s.kind === 'person');
   publics = list.filter((s) => s.kind !== 'person');
+  $('#people-h').hidden = !people.length;
   $('#people').replaceChildren(...people.map((s) => {
     const li = mk('li');
     const nm = mk('span', 'v-nm', s.name); nm.title = s.url;
-    li.append(nm);
+    li.append(mk('span', 'v-av', s.name.trim()[0].toUpperCase()), nm);
     if (s.version) li.append(mk('span', 'v-tag', 'v' + s.version));
     li.append(iconButton('link', 'Copy the link for ' + s.name, 'Copy link', copyLink(s.url, 'Link for ' + s.name)), revokeButton(s));
     return li;
@@ -549,33 +554,21 @@ async function loadLinks() {
   const on = publics.length > 0, gated = on && publics.every((s) => s.require_email);
   $('#gen').classList.toggle('is-on', on);
   $('#gen-ic').innerHTML = svg(on ? 'globe' : 'lock');
-  $('#gen-t').textContent = on ? 'Anyone with the link' : 'Restricted';
-  $('#gen-s').textContent = on ? (gated ? 'Anyone with the link can view after they give an email' : 'Anyone on the internet with the link can view') : 'Only the people you add can open this page';
-  $('#gen-on').setAttribute('aria-checked', String(on));
-  const pub = $('#pub');
-  pub.replaceChildren();
-  for (const s of publics) {
-    const row = mk('div', 'v-pubrow');
-    const code = mk('code', '', s.url.replace(/^https?:\\/\\//, '')); code.title = s.url;
-    row.append(code);
-    if (s.version) row.append(mk('span', 'v-tag', 'v' + s.version));
-    row.append(iconButton('link', 'Copy the public link', 'Copy link', copyLink(s.url, 'Link'), true));
-    pub.append(row);
-  }
-  if (on) {
-    const lab = mk('label', 'v-check');
-    const box = mk('input'); box.type = 'checkbox'; box.checked = gated; box.id = 'gate';
-    box.onchange = async () => {
-      try {
-        await Promise.all(publics.map((s) => api('/api/shares/' + s.token, { method: 'PATCH', body: JSON.stringify({ require_email: box.checked }) })));
-        toast(box.checked ? 'Readers give an email first' : 'No email needed');
-      } catch (err) { toast('Could not change the link: ' + err.message); }
-      loadLinks();
-    };
-    lab.append(box, document.createTextNode('Require email to view'), mk('span', '', 'Views shows each email'));
-    pub.append(lab);
-  }
+  $('#gen-sel').value = on ? 'on' : 'off';
+  $('#gen-s').textContent = !on ? 'Only the people you add can open it' : gated ? 'Anyone with the link can view after they enter an email' : 'Anyone with the link can view';
+  $('#gate-row').hidden = !on;
+  $('#gate').checked = gated;
+  $('#copy-pub').hidden = !on;
 }
+$('#gate').addEventListener('change', async (e) => {
+  const want = e.currentTarget.checked;
+  try {
+    await Promise.all(publics.map((s) => api('/api/shares/' + s.token, { method: 'PATCH', body: JSON.stringify({ require_email: want }) })));
+  } catch (err) { toast('Could not change the link: ' + err.message); }
+  loadLinks();
+});
+$('#copy-pub').addEventListener('click', () => publics[0] && copyLink(publics[0].url, 'Link')());
+$('#done').addEventListener('click', () => closePop(true));
 $('#pop-share').addEventListener('open', loadLinks);
 $('#add').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -588,20 +581,19 @@ $('#add').addEventListener('submit', async (e) => {
     await loadLinks();
   } catch (err) { toast('Could not add ' + name + ': ' + err.message); }
 });
-// General access on makes the public link. Off revokes every public link at once, so nobody keeps an old one.
-$('#gen-on').addEventListener('click', async (e) => {
-  const b = e.currentTarget; b.disabled = true;
+// "Anyone with the link" makes the public link. "Restricted" revokes every public link at once, so nobody keeps an old one.
+$('#gen-sel').addEventListener('change', async (e) => {
+  const sel = e.currentTarget; sel.disabled = true;
   try {
-    if (publics.length) {
+    if (sel.value === 'off') {
       await Promise.all(publics.map((s) => api('/api/shares/' + s.token, { method: 'DELETE' })));
-      toast('Only the people you add can open this page');
-    } else {
+    } else if (!publics.length) {
       const s = await api(shareApi, { method: 'POST', body: JSON.stringify({ kind: 'public', version: versionOf() }) });
-      await copyText(s.url).then(() => toast('Public link copied'), () => toast('Public link made'));
+      await copyText(s.url).then(() => toast('Link copied'), () => {});
     }
-    await loadLinks();
   } catch (err) { toast('Could not change the access: ' + err.message); }
-  b.disabled = false;
+  sel.disabled = false;
+  await loadLinks();
 });
 `;
   return shell(title, nonce, body, script);
@@ -716,28 +708,25 @@ export function sharedHtml(input: { token: string; title: string; repo: string |
 
 /**
  * The email gate of a public link, as DocSend's "Require email to view": the reader gives an email, then the page shows.
- * The host keeps the pass in a cookie for the path of this link only. The page says who sees the email.
+ * The host keeps the pass in a cookie for the path of this link only.
  */
 export function gateHtml(input: { title: string }, nonce: string) {
   const body = `<style>
 .g { display: grid; place-items: center; min-height: 100%; padding: 24px 16px; box-sizing: border-box; }
 .g-card { width: 100%; max-width: 380px; }
-.g-card h1 { margin: 0 0 6px; font: 600 20px/26px var(--sans); letter-spacing: -0.01em; }
-.g-card p { margin: 0 0 18px; font-size: 13.5px; line-height: 20px; color: var(--s); }
-.g-card label { display: block; margin-bottom: 6px; font: 500 12.5px var(--sans); color: var(--s); }
+.g-card h1 { margin: 0 0 20px; font: 600 20px/26px var(--sans); letter-spacing: -0.01em; }
+.g-card label { display: block; margin-bottom: 8px; font: 500 14px var(--sans); color: var(--s); }
 .g-card input { display: block; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); color: var(--p); font: 15px var(--sans); }
 .g-card .v-create { height: 40px; margin-top: 10px; border-radius: 10px; font-size: 14px; }
-.g-card small { display: block; margin-top: 12px; font-size: 12px; line-height: 17px; color: var(--t); }
-.g-err { min-height: 18px; margin-top: 6px; font-size: 12.5px; color: var(--line, #c33); }
+.g-err { margin-top: 8px; font-size: 12.5px; color: var(--line, #c33); }
+.g-err:empty { display: none; }
 </style>
 <main class="g"><form class="g-card" id="gate">
   <h1>${esc(input.title)}</h1>
-  <p>Enter your email to view this page.</p>
-  <label for="email">Email</label>
-  <input id="email" type="email" autocomplete="email" required autofocus placeholder="you@company.com">
+  <label for="email">Enter your email to view this page</label>
+  <input id="email" type="email" autocomplete="email" required autofocus>
   <div class="g-err" id="err" role="alert"></div>
-  <button type="submit" class="v-create">Continue</button>
-  <small>The owner of this page sees your email and how long you read each part.</small>
+  <button type="submit" class="v-create">View page</button>
 </form></main>`;
   const script = `
 const form = document.getElementById('gate');

@@ -41,7 +41,8 @@ const MARK = `<svg class="h-mark" viewBox="24 32 208 192" aria-hidden="true">
 const LIB_CSS = `
 /* ─── Library ───────────────────────────────────────────── */
 body:has(> .l) { height: 100%; overflow: hidden; }
-.l { display: grid; grid-template-columns: 236px minmax(0, 1fr); height: 100%; }
+/* The one row has the height of the window. An automatic row grows with the pages, and then the main area cannot scroll in Chrome. */
+.l { display: grid; grid-template-columns: 236px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; }
 .l-main { display: flex; flex-direction: column; min-width: 0; height: 100%; }
 .h-scroll { flex: 1; min-height: 0; overflow: auto; }
 
@@ -210,7 +211,7 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .h-acc { display: grid; place-items: center; }
 .h-row .h-menu { top: 10px; background: transparent; box-shadow: none; }
 .h-row .h-menu:hover, .h-row .h-menu[aria-expanded="true"] { background: var(--bg3); }
-.h-kind { font: 500 11px var(--sans); color: var(--s); border: 0.5px solid var(--b2); border-radius: 4px; padding: 0 5px; line-height: 16px; }
+.h-kind { flex: none; font: 500 11px var(--sans); color: var(--s); border: 0.5px solid var(--b2); border-radius: 4px; padding: 0 5px; line-height: 16px; }
 
 /* Search results: the best match on each page. */
 .h-hits { display: flex; flex-direction: column; gap: 2px; max-width: 760px; }
@@ -238,6 +239,11 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
 .l-edit .is-danger { color: var(--s); }
 .l-movelist { max-height: 320px; overflow: auto; }
 
+/* A narrow window with the sidebar: the name of the place keeps its width, and the search field takes what is left. */
+@media (min-width: 761px) and (max-width: 1100px) {
+  .l-bar { grid-template-columns: minmax(88px, auto) minmax(0, 1fr) auto; }
+  .l-crumb { max-width: 38vw; }
+}
 /* The phone: the sidebar becomes a drawer, and two folders sit side by side. */
 .l-scrim { display: none; }
 @media (max-width: 760px) {

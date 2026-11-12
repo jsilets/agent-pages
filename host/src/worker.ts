@@ -8,7 +8,7 @@ import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { KIT, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
-import { libraryHtml, type FolderRow } from './library';
+import { libraryHtml, type FolderRow, type Opens } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
 interface Env {
@@ -110,6 +110,50 @@ async function getPage(env: Env, slug: string) {
 async function listPages(env: Env) {
   const { results } = await env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages ORDER BY updated_at DESC`).all<PageRow>();
   return results;
+}
+
+// ─── Opens ───────────────────────────────────────────────
+
+/**
+ * The first record of a reader. Every page counts as seen at its latest version, with no open time,
+ * so the library does not start with a wall of news. The statement does nothing for a reader with rows.
+ */
+const seedOpens = (env: Env, reader: string) =>
+  env.DB.prepare('INSERT OR IGNORE INTO page_opens (reader, slug, version, opened_at) SELECT ?1, slug, latest, NULL FROM pages WHERE NOT EXISTS (SELECT 1 FROM page_opens WHERE reader = ?1)').bind(reader);
+
+/** Reads what the reader opened. */
+async function listOpens(env: Env, reader: string): Promise<Opens> {
+  await seedOpens(env, reader).run();
+  const { results } = await env.DB.prepare('SELECT slug, version, opened_at FROM page_opens WHERE reader = ?').bind(reader).all<{ slug: string; version: number; opened_at: string | null }>();
+  return Object.fromEntries(results.map((r) => [r.slug, { version: r.version, at: r.opened_at }]));
+}
+
+/**
+ * Records that the reader saw a version in Activity, with no open of the page. The time of the last open stays.
+ * The body is { version }. The seen version never goes down.
+ */
+async function markSeen(req: Request, env: Env, reader: string, slug: string) {
+  const p = await getPage(env, slug);
+  if (!p) return fail(404, 'no such page');
+  const { version } = (await req.json().catch(() => ({}))) as { version?: unknown };
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1 || version > p.latest) return fail(400, 'version must be a version of the page');
+  await env.DB.batch([
+    seedOpens(env, reader),
+    env.DB.prepare(
+      'INSERT INTO page_opens (reader, slug, version, opened_at) VALUES (?, ?, ?, NULL) ON CONFLICT (reader, slug) DO UPDATE SET version = max(version, excluded.version)',
+    ).bind(reader, slug, version),
+  ]);
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+/** Records that the reader opened a version of a page. The seen version never goes down when the reader opens an older one. */
+function recordOpen(env: Env, reader: string, slug: string, version: number) {
+  return env.DB.batch([
+    seedOpens(env, reader),
+    env.DB.prepare(
+      'INSERT INTO page_opens (reader, slug, version, opened_at) VALUES (?, ?, ?, ?) ON CONFLICT (reader, slug) DO UPDATE SET version = max(version, excluded.version), opened_at = excluded.opened_at',
+    ).bind(reader, slug, version, now()),
+  ]);
 }
 
 // ─── Activity ────────────────────────────────────────────
@@ -372,6 +416,7 @@ async function deletePage(env: Env, slug: string) {
   } while (cursor);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM page_opens WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM versions WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM pages WHERE slug = ?').bind(slug),
@@ -450,17 +495,19 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'kit-css':
       return css();
     case 'library': {
-      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: await listActivity(env), me: who.who }, nonce), nonce);
+      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: await listActivity(env), opens: await listOpens(env, who.who), me: who.who }, nonce), nonce);
     }
     case 'api-activity':
       if (method !== 'GET') return fail(405, 'method not allowed');
-      return json({ pages: await listPages(env), activity: await listActivity(env) });
+      return json({ pages: await listPages(env), activity: await listActivity(env), opens: await listOpens(env, who.who) });
     case 'view': {
       const p = await getPage(env, r.slug);
       if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);
       const { results: versions } = await env.DB.prepare('SELECT version, sha, created_at FROM versions WHERE slug = ? ORDER BY version DESC').bind(r.slug).all<VersionRow>();
       const version = versions.find((v) => v.version === (r.version ?? p.latest));
       if (!version) return page(messageHtml('Version not found', `${r.slug} has no version ${r.version}.`, nonce), nonce, 404);
+      // A person who opens a page has seen that version. An agent that reads a page with a service token has not.
+      if (who.kind === 'person') ctx.waitUntil(recordOpen(env, who.who, p.slug, version.version));
       return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null }, nonce), nonce);
     }
     case 'raw': {
@@ -495,6 +542,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'api-page-folder':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return movePage(req, env, r.slug);
+    case 'api-seen':
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      return markSeen(req, env, who.who, r.slug);
     case 'api-refresh':
       if (method !== 'POST') return fail(405, 'method not allowed');
       return refresh(env, r.slug);

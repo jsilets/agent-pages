@@ -1,5 +1,5 @@
 -- Folders. A folder holds pages and other folders. parent_id NULL means the top level.
--- Numbered 0006 so 0004 and 0005 stay free for the comment and event migrations on another branch.
+-- Numbered 0010 so it comes after the comment and agent migrations (0004 to 0009) of the comment-agent-triggers branch.
 CREATE TABLE folders (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

@@ -21,34 +21,23 @@ function studyPlace(p, u) {
   return { ...p, type: v.type, mod: v.mod, in: v.in, acc: v.acc };
 }
 
-// ─── What the reader has opened. The browser keeps it, so a new version shows as news until the reader opens the page. ───
-const OPENED_KEY = 'pages-opened';
-let opened = {};
-function loadOpened() {
-  let o = null;
-  try { o = JSON.parse(localStorage.getItem(OPENED_KEY) || 'null'); } catch {}
-  // The first visit: every page counts as opened, so the library does not start with a wall of news.
-  if (!o || typeof o !== 'object') { o = {}; pages.forEach((p) => { o[p.slug] = p.latest; }); try { localStorage.setItem(OPENED_KEY, JSON.stringify(o)); } catch {} }
-  opened = o;
+// ─── What the reader has opened. The server keeps it, so a new version shows as news until the reader opens the page. ───
+// D.opens has, for each page, the newest version that the reader saw and the time of the last open.
+// The viewer records an open on the server. This script updates its copy at once, so the list does not wait for the server.
+let opened = {}, openedAt = {};
+function readOpens(opens) {
+  opened = {}; openedAt = {};
+  for (const [slug, o] of Object.entries(opens || {})) { opened[slug] = o.version; if (o.at) openedAt[slug] = o.at; }
 }
-loadOpened();
-function markOpened(slug, version) {
+readOpens(D.opens);
+/** The reader saw a version. With send, the server records it too: a change seen in Activity, where the page does not open. */
+function markOpened(slug, version, send) {
   if (!slug || (opened[slug] || 0) >= version) return false;
   opened[slug] = version;
-  try { localStorage.setItem(OPENED_KEY, JSON.stringify(opened)); } catch {}
+  if (send) fetch('/api/pages/' + slug + '/seen', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version }) }).catch(() => {});
   return true;
 }
-// The time of the last open of each page, in this browser. The page list can sort by it. The viewer writes it too.
-const OPENED_AT_KEY = 'pages-opened-at';
-let openedAt = {};
-function loadOpenedAt() {
-  try { const o = JSON.parse(localStorage.getItem(OPENED_AT_KEY) || '{}'); openedAt = o && typeof o === 'object' ? o : {}; } catch { openedAt = {}; }
-}
-loadOpenedAt();
-function markTime(slug) {
-  openedAt[slug] = new Date().toISOString();
-  try { localStorage.setItem(OPENED_AT_KEY, JSON.stringify(openedAt)); } catch {}
-}
+function markTime(slug) { openedAt[slug] = new Date().toISOString(); }
 // A link to a page marks the page as opened. A row in the room does not: it shows the change in the room.
 document.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a[href^="/p/"]');
@@ -60,8 +49,8 @@ document.addEventListener('click', (e) => {
   markTime(p.slug);
   if (news || order.sort === 'opened') setTimeout(render, 0);
 }, true);
-// The back button can show this document again from the cache. The viewer records what it showed, so read it again.
-addEventListener('pageshow', (e) => { if (e.persisted) { loadOpened(); loadOpenedAt(); render(); poll(); } });
+// The back button can show this document again from the cache. The viewer recorded what it showed on the server, so ask again.
+addEventListener('pageshow', (e) => { if (e.persisted) poll(); });
 
 // ─── News: what a page or an item has for the reader ───
 const seenVersion = (slug) => opened[slug] || 0;
@@ -80,29 +69,19 @@ function digest() {
   waiting = feed.filter(fresh).length;
 }
 
-/**
- * The sentence for an item, in one of three forms.
- * card: the state of the page in a few words, with no name. A file card is about the file.
- * row: the change itself, as the latest change of a page in a list of pages.
- * event: who did what, for a list of events. An assistant has its name only here, where it is the one that acts.
- */
-function say(x, form) {
-  const card = form === 'card', event = form === 'event';
-  if (x.kind === 'publish') return x.first ? (card ? 'New page' : 'Published') : card ? 'New version' : 'Version ' + x.version + ' published';
-  if (x.kind === 'note') return '<b>' + h(person(x.author)) + '</b>' + (card ? ' wrote a comment' : ' wrote: ' + h(x.body));
+/** The sentence for an item in Activity: who did what. An assistant has its name here, where it is the one that acts. */
+function say(x) {
+  if (x.kind === 'publish') return x.first ? 'Published' : 'Version ' + x.version + ' published';
+  if (x.kind === 'note') return '<b>' + h(person(x.author)) + '</b> wrote: ' + h(x.body);
   const a = '<b>' + h(actor(x.agent)) + '</b>';
-  if (x.state === 'working') return card ? 'Change in progress' : (event ? a + ' is working: ' : 'In progress: ') + h(x.ask);
-  if (x.state === 'changed') return card ? 'Changed' : (event ? a + ': ' : '') + h(x.reply || 'Changed the page for “' + x.ask + '”');
+  if (x.state === 'working') return a + ' is working: ' + h(x.ask);
+  if (x.state === 'changed') return a + ': ' + h(x.reply || 'Changed the page for “' + x.ask + '”');
   if (x.state === 'replied') {
     const asks = x.reply && /\?\s*$/.test(x.reply);
-    if (card) return asks ? 'Question for you' : 'No change';
-    if (event) return x.reply ? a + (asks ? ' asks: ' : ': ') + h(x.reply) : a + ' made no change for “' + h(x.ask) + '”';
-    return (asks ? 'Question: ' : 'No change: ') + h(x.reply || x.ask);
+    return x.reply ? a + (asks ? ' asks: ' : ': ') + h(x.reply) : a + ' made no change for “' + h(x.ask) + '”';
   }
-  if (card) return x.cause === 'not_connected' ? 'Request did not run' : 'Request did not finish';
   const off = x.cause === 'not_connected';
-  if (event) return a + (off ? ' is not connected' : x.cause === 'timeout' ? ' did not finish in time' : ' did not finish') + '. ' + (x.author === D.me ? 'Your request: ' : 'The request: ') + h(x.ask);
-  return (off ? 'Did not run, ' + h(actor(x.agent)) + ' is not connected: ' : x.cause === 'timeout' ? 'Did not finish in time: ' : 'Did not finish: ') + h(x.ask);
+  return a + (off ? ' is not connected' : x.cause === 'timeout' ? ' did not finish in time' : ' did not finish') + '. ' + (x.author === D.me ? 'Your request: ' : 'The request: ') + h(x.ask);
 }
 /** The glyph and the tone of an item. Blue is news or work in flight. A ramp colour needs the reader. */
 function look(x) {
@@ -424,13 +403,13 @@ addEventListener('popstate', () => {
   runSearch();
 });
 
-// ─── The room: Activity in Rooms ───
+// ─── The room: Activity ───
 const inRoom = () => place.list === 'activity' && !hits;
 const roomWide = () => inRoom() && matchMedia('(min-width: 1121px)').matches;
 function eRow(x, cur) {
   const p = pageOf(x.slug), l = look(x);
   return '<article class="e-row' + l.cls + (fresh(x) ? ' is-fresh' : '') + (cur && cur.id === x.id ? ' is-cur' : '') + '" data-slug="' + p.slug + '" data-ev="' + h(x.id) + '"><a class="e-link" href="' + itemHref(x) + '">'
-    + '<span class="e-g">' + glyph(x) + '</span><span class="e-title">' + h(p.title) + '</span><span class="e-when">' + clock(x.at) + '</span><span class="e-line">' + say(x, 'event') + '</span></a></article>';
+    + '<span class="e-g">' + glyph(x) + '</span><span class="e-title">' + h(p.title) + '</span><span class="e-when">' + clock(x.at) + '</span><span class="e-line">' + say(x) + '</span></a></article>';
 }
 let roomList = [], listTop = 0;
 function roomView(main, known) {
@@ -572,7 +551,7 @@ function drawReview(x) {
   // A change that shows here for 2 seconds counts as opened, as a message in a mail program counts as read.
   clearTimeout(dwell);
   if (x.version > seenVersion(x.slug)) dwell = setTimeout(() => {
-    if (shown === key && $('#rstage') && document.visibilityState === 'visible' && markOpened(x.slug, x.version)) render();
+    if (shown === key && $('#rstage') && document.visibilityState === 'visible' && markOpened(x.slug, x.version, true)) render();
   }, 2000);
 }
 /** Loads the two versions, compares them, and shows the newer one with the marks. */
@@ -727,7 +706,7 @@ async function restoreVersion(slug, n) {
     toast('Version ' + n + ' is the page again, as version ' + d.version, 3200);
     await poll();
     const made = makerOf(slug, d.version);
-    if (made) { place = { ...place, ev: made.id }; history.replaceState(history.state, '', urlOf(place)); markOpened(slug, d.version); }
+    if (made) { place = { ...place, ev: made.id }; history.replaceState(history.state, '', urlOf(place)); markOpened(slug, d.version, true); }
     render();
   } catch (err) { toast('Could not restore version ' + n + ': ' + err.message, 4200); }
 }
@@ -748,7 +727,7 @@ function pick(id, byHand) {
   if (!x) return;
   place = { ...place, ev: id };
   history.replaceState(history.state, '', urlOf(place));
-  if (byHand && x.version) markOpened(x.slug, x.version);
+  if (byHand && x.version) markOpened(x.slug, x.version, true);
   render();
 }
 /** A narrow window shows one thing at a time: a row opens its item in the place of the list, and Back shows the list again. */
@@ -758,7 +737,7 @@ function openItem(id) {
   listTop = $('#rlist') ? $('#rlist').scrollTop : 0;
   place = { ...place, ev: id };
   history.pushState({ fromList: true }, '', urlOf(place));
-  if (x.version) markOpened(x.slug, x.version);
+  if (x.version) markOpened(x.slug, x.version, true);
   render();
 }
 function closeItem() {
@@ -849,9 +828,10 @@ async function poll() {
     const r = await fetch('/api/activity');
     if (r.ok) {
       const d = await r.json();
-      const sig = () => JSON.stringify([feed, pages.map((p) => [p.slug, p.latest, p.thumb, p.updated_at, p.title])]);
+      const sig = () => JSON.stringify([feed, opened, openedAt, pages.map((p) => [p.slug, p.latest, p.thumb, p.updated_at, p.title])]);
       const was = sig();
       feed = d.activity;
+      readOpens(d.opens);
       for (const n of d.pages) { const p = pageOf(n.slug); if (p) Object.assign(p, { latest: n.latest, thumb: n.thumb, updated_at: n.updated_at, title: n.title, kind: n.kind, shared: n.shared }); else pages.push(n); }
       for (let i = pages.length - 1; i >= 0; i--) if (!d.pages.some((n) => n.slug === pages[i].slug)) pages.splice(i, 1);
       // A popover or a drag holds on to elements of the list, so the redraw waits for the next round.

@@ -1,7 +1,7 @@
 
-/* ─── The layout study: Rooms and Ledger ─────────────────────────
-   The sidebar holds doors: Home, Activity in Rooms, the pinned pages, the folders, and the shared pages at the foot.
-   A page shows its own news on its card or on its row, so Home stays a place for pages.
+/* ─── The views of the library: the lists of pages and Activity ─────────────────────────
+   The sidebar holds doors: Home, Activity, Recent, Shared by link, the pinned pages and the folders.
+   A page has one mark of its own, the dot of a version that the reader did not open. What an assistant did is in Activity.
    The tints mix the text colour into the surface, so they work on any surface in both themes. */
 .is-study { --tint: color-mix(in oklab, var(--p) 5%, transparent); --tint2: color-mix(in oklab, var(--p) 9%, transparent); --new: var(--link); }
 
@@ -14,7 +14,7 @@
 .l.is-study .l-sec { margin-top: 22px; }
 .s-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .is-study .l-nav .l-n { margin-left: 0; }
-/* A page in the sidebar: a pinned page, or a page below its folder in the Ledger outline. */
+/* A pinned page in the sidebar. */
 .l.is-study .l-nav.s-page { gap: 7px; padding-left: calc(8px + var(--d, 0) * 14px); font-weight: 400; }
 .l.is-study .l-nav.s-page:hover { color: var(--p); }
 #pins .l-nav.s-page { font-weight: 500; }
@@ -38,45 +38,22 @@
 .l-act:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .l-act svg { width: 14px; height: 14px; }
 
-/* ─── News: one glyph and one sentence. Blue means not seen yet or in flight, a ramp colour means it needs the reader. ─── */
-.n { display: flex; flex-wrap: wrap; min-width: 0; height: 18px; overflow: hidden; color: var(--s); }
-/* The glyph and the sentence stay on the first line. The age goes to a second line that does not show when it does not fit. */
-.n-m { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 100%; }
-.n-w { flex: none; height: 100%; white-space: pre; }
-.g-what .n { height: 20px; }
-.n-g { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; }
-.n .n-g svg { width: 13px; height: 13px; color: var(--t); }
-.n-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.n-t b { font-weight: 500; color: var(--p); }
-.n.is-new .n-g svg, .n.is-work .n-g svg { color: var(--new); }
-.n.is-warn .n-g svg { color: var(--line); }
-.n.is-quiet, .n.is-quiet .n-t b { color: var(--t); font-weight: 400; }
-.h-card .h-sub .n { flex: 1; }
-
-/* ─── The ledger: one row for each page, with its latest change. Also the list view of Rooms. ─── */
+/* ─── A row of a page list. The list view and its columns are below, with the head of the list. ─── */
 .g-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; }
 .g-row { position: relative; }
-.g-link { display: grid; grid-template-columns: 56px minmax(0, 5fr) minmax(0, 7fr) minmax(0, 164px) 68px 16px; align-items: center; gap: 16px; height: 48px; padding: 0 44px 0 8px; border-radius: 10px; color: inherit; text-decoration: none; outline: none; }
-.g-link:hover, .g-row.is-sel .g-link { background: var(--tint); text-decoration: none; }
-.g-row.is-sel .g-link, .g-link:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
 .g-row.is-dragging { opacity: 0.4; }
 .g-row .h-thumb { border-radius: 5px; }
 .g-row .h-ph { font-size: 10px; }
 .g-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .g-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/20px var(--sans); letter-spacing: -0.005em; color: var(--p); }
-.g-row.has-news .g-name { font-weight: 600; }
 .g-pin { flex: none; display: inline-grid; }
 .g-pin svg { width: 12px; height: 12px; color: var(--t); }
-.g-what { min-width: 0; font: 13px/20px var(--sans); }
 .g-where { min-width: 0; }
 .g-where .l-glyph { width: 14px; height: 14px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
 .g-where.is-none { color: var(--t); }
-.g-when { font-size: 12.5px; color: var(--s); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .g-row .h-menu { top: 10px; background: transparent; box-shadow: none; }
 .g-row .h-menu:hover, .g-row .h-menu[aria-expanded="true"] { background: var(--bg3); }
 .g-row:hover .h-menu, .g-row.is-sel .h-menu { opacity: 1; }
-.g-day { margin: 0; padding: 18px 8px 6px; font: 600 12.5px/18px var(--sans); color: var(--s); }
-.g-day:first-child { padding-top: 2px; }
 .g-none { margin: 0; padding: 6px 8px; font-size: 13.5px; color: var(--s); }
 /* The lens: two headings on one list. Pages has one row for each page, Activity one row for each event. */
 .g-tabs { display: flex; align-items: baseline; gap: 18px; }
@@ -86,12 +63,10 @@
 .g-tabs button:focus-visible { outline: 2px solid var(--link); outline-offset: 4px; border-radius: 4px; }
 .g-tabs .s-count { margin: 0; }
 
-/* ─── Home in Rooms: the pages as a drive ─────────────────────────
+/* ─── A list of pages, as a drive ─────────────────────────
    Folders are small objects and pages are larger cards, so more folders fit in a row. The folder object does not change.
    The head of a page list holds the filters, the sort and the layout. A control has no fill until the reader uses it.
    A filter that is set shows its value in a filled chip. */
-.l[data-layout="rooms"] .l-folders { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 24px 22px; }
-.l[data-layout="rooms"] .l-folders > .fo { max-width: 148px; }
 .d-head { flex-wrap: wrap; justify-content: flex-start; gap: 6px 12px; min-height: 28px; margin-bottom: 12px; }
 .d-head h2 { flex: none; white-space: nowrap; }
 .d-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; }
@@ -171,7 +146,7 @@
 .d-none { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; margin: 0; padding: 6px 0; font-size: 13.5px; color: var(--s); }
 .d-none .d-clear { color: var(--p); }
 
-/* ─── Activity in Rooms: the list of changes on the left, the page itself on the right. ─── */
+/* ─── Activity: the list of changes on the left, the page itself on the right. ─── */
 .h-scroll.is-room { overflow: hidden; }
 .is-room .h-main { height: 100%; max-width: none; padding: 0; box-sizing: border-box; }
 .r { display: grid; grid-template-columns: clamp(300px, 36%, 408px) minmax(0, 1fr); height: 100%; }
@@ -203,7 +178,7 @@
 .r-top { flex: none; display: flex; align-items: flex-start; gap: 10px 16px; padding: 18px 24px 0; }
 .r-id { flex: 1; min-width: 0; }
 .r-id h1 { margin: 0 0 2px; overflow: hidden; font: 600 17px/24px var(--sans); letter-spacing: -0.01em; white-space: nowrap; text-overflow: ellipsis; }
-/* The folder of the page shows at every width. A ledger row hides it when the window is narrow. */
+/* The folder of the page shows at every width. */
 .r-id .g-where { display: flex; }
 .r-acts { flex: none; display: flex; align-items: center; gap: 8px; }
 .r-open { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px 0 13px; border-radius: 9px; background: var(--tint2); color: var(--p); font: 600 13px var(--sans); text-decoration: none; }
@@ -286,7 +261,6 @@
 .r-none { margin: 0; padding: 24px 28px; font-size: 13.5px; color: var(--s); }
 
 @media (max-width: 1240px) {
-  .g-link { grid-template-columns: 56px minmax(0, 5fr) minmax(0, 7fr) 68px 16px; }
   .g-where { display: none; }
 }
 /* Below this width the room shows one thing at a time: the list, or the review of the row that the reader opened. */
@@ -300,7 +274,6 @@
   .r.is-open .r-back { display: inline-flex; }
 }
 @media (max-width: 760px) {
-  .l[data-layout="rooms"] .l-folders { grid-template-columns: none; grid-auto-columns: 30%; gap: 14px; }
   .d-head { gap: 8px 10px; }
   .d-tools { order: 1; }
   .d-chips { order: 2; flex: 0 0 calc(100% + 32px); flex-wrap: nowrap; gap: 6px; margin: 0 -16px; padding: 0 16px; box-sizing: border-box; overflow-x: auto; scrollbar-width: none; }
@@ -309,12 +282,8 @@
   .d-chips .d-chip { margin: 0; padding: 0 8px 0 12px; background: var(--tint); }
   .d-chips .d-chip.is-on { background: var(--tint2); }
   .d-lay button { height: 28px; }
-  .g-link { grid-template-columns: 52px minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 0 12px; height: auto; padding: 9px 40px 9px 8px; }
-  .g-link .h-thumb { grid-row: 1 / span 2; align-self: center; }
   .g-title { grid-column: 2; grid-row: 1; }
-  .g-what { grid-column: 2 / span 2; grid-row: 2; font-size: 12.5px; line-height: 18px; }
-  .g-when { grid-column: 3; grid-row: 1; font-size: 12px; }
-  .g-link .h-acc, .g-row .h-kind { display: none; }
+  .g-row .h-kind { display: none; }
   .g-row .h-menu { top: 14px; opacity: 1; }
   .e-link { padding: 10px 8px; }
   /* The review on a phone: the way back and the version on the first line, then the title. The page gets the width of the screen. */

@@ -39,7 +39,7 @@
  * @typedef {object} Ctx
  * @property {Date} now
  * @property {Folder[]} folders
- * @property {Record<string, string>} openedAt  For each page that the reader opened in this browser, the time of the last open.
+ * @property {Record<string, string>} openedAt  For each page that the reader opened, the time of the last open. The server keeps it.
  */
 /**
  * @typedef {object} Sort

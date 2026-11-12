@@ -86,6 +86,7 @@ export type Route =
   | { kind: 'api-folders' }
   | { kind: 'api-folder'; id: string }
   | { kind: 'api-page-folder'; slug: string }
+  | { kind: 'api-seen'; slug: string }
   | { kind: 'api-activity' }
   | { kind: 'thumb'; slug: string; version: number; theme: Theme }
   | { kind: 'pdf'; slug: string; version: number }
@@ -127,6 +128,7 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'pin') return { kind: 'api-pin', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'folder') return { kind: 'api-page-folder', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'seen') return { kind: 'api-seen', slug: s };
   }
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };

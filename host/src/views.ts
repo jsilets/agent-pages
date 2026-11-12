@@ -445,11 +445,6 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     COMMON_SCRIPT +
     `
 const D = JSON.parse($('#data').textContent);
-// The study layouts of the library show a new version as news until the reader opens the page. Record what this view shows.
-// The library makes the record on its first load, so do not start one here.
-try { const raw = localStorage.getItem('pages-opened'); if (raw) { const o = JSON.parse(raw); if (!(o[D.slug] >= D.version)) { o[D.slug] = D.version; localStorage.setItem('pages-opened', JSON.stringify(o)); } } } catch {}
-// The library can sort the pages by the time the reader last opened them. Record the time of this view.
-try { const at = JSON.parse(localStorage.getItem('pages-opened-at') || '{}'); at[D.slug] = new Date().toISOString(); localStorage.setItem('pages-opened-at', JSON.stringify(at)); } catch {}
 const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
 const api = (path, init = {}) => fetch(path, { ...init, headers: { 'content-type': 'application/json', ...(init.headers || {}) } })
   .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.status === 204 ? null : r.json(); });

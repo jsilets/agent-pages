@@ -213,6 +213,7 @@ describe('folders', () => {
     expect(route('/api/folders')).toEqual({ kind: 'api-folders' });
     expect(route(`/api/folders/${id}`)).toEqual({ kind: 'api-folder', id });
     expect(route('/api/pages/g/n/folder')).toEqual({ kind: 'api-page-folder', slug: 'g/n' });
+    expect(route('/api/pages/g/n/seen')).toEqual({ kind: 'api-seen', slug: 'g/n' });
     expect(route('/api/folders/short')).toEqual({ kind: 'not-found' });
     expect(route(`/api/folders/${id}/x`)).toEqual({ kind: 'not-found' });
   });

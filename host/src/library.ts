@@ -12,6 +12,9 @@ import frameCss from './review-frame.css?raw';
 import frameJs from './review-frame.js?raw';
 
 
+/** For each page, the newest version that the reader saw and the time of the last open (null when never opened). */
+export type Opens = Record<string, { version: number; at: string | null }>;
+
 export interface FolderRow {
   id: string;
   name: string;
@@ -30,7 +33,6 @@ const LUCIDE: Record<string, string> = {
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   folderPlus: '<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   move: '<path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"/><path d="M2 13h10"/><path d="m9 16 3-3-3-3"/>',
-  doc: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
   deck: '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
   panel: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
@@ -62,9 +64,9 @@ const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCI
  */
 const inlineModule = (name: string, source: string, exports: string[]) =>
   `const ${name} = (() => {\n${source.replace(/^export /gm, '').replace(/<!--/g, '<\\!--').replace(/<\/script/gi, '<\\/script')}\nreturn { ${exports.join(', ')} };\n})();\n`;
-/** The diff core: Activity in Rooms compares two versions of a page with it. */
+/** The diff core: Activity compares two versions of a page with it. */
 export const inlineDiff = (source: string) => inlineModule('Diff', source, ['diffHtml', 'summarize']);
-/** The rules of the page list: Home in Rooms filters and sorts the pages with them. */
+/** The rules of the page list: each list of pages filters and sorts the pages with them. */
 export const inlineDrive = (source: string) => inlineModule('Drive', source, ['TYPES', 'RANGES', 'ACCESS', 'SORTS', 'sortOf', 'parseView', 'viewQuery', 'isOn', 'filterPages', 'dateOf', 'applyView']);
 
 // The brand mark without its tile, drawn in the text colour: dark on light, white on dark. The tile is for tabs and home screens.
@@ -147,8 +149,6 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .l-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; }
 .l-head h2 { display: flex; align-items: center; gap: 6px; margin: 0; font: 600 14px/20px var(--sans); }
 .l-head h2 svg { width: 14px; height: 14px; color: var(--t); }
-.l-head .l-more { font-size: 12.5px; color: var(--s); text-decoration: none; padding: 3px 6px; border-radius: 6px; border: 0; background: none; cursor: pointer; font-family: var(--sans); }
-.l-head .l-more:hover { background: var(--bg2); color: var(--p); }
 .l-block + .l-block { margin-top: 36px; }
 
 /* ─── A folder: card stock with a tab, the newest pages standing in it ───
@@ -220,36 +220,22 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .h-sub { display: flex; align-items: center; gap: 6px; margin-top: 1px; min-width: 0; font: 12px/18px var(--sans); color: var(--s); }
 .h-sub > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .h-sub svg, .h-acc svg { width: 13px; height: 13px; color: var(--t); flex: none; }
-.h-v { margin-left: auto; font: 500 11.5px var(--mono); color: var(--t); }
 /* A card is narrow: its title gets two lines, and the version shows in the list and the viewer. */
-.h-card .h-v { display: none; }
 .h-card .h-title { display: -webkit-box; white-space: normal; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .h-menu { position: absolute; top: 15px; right: 8px; width: 28px; height: 28px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 2px 6px rgba(0, 0, 0, 0.08); opacity: 0; }
 .h-menu:hover, .h-menu[aria-expanded="true"] { background: var(--bg); }
-.h-card:hover .h-menu, .h-card.is-sel .h-menu, .h-row:hover .h-menu, .h-row.is-sel .h-menu, .h-menu:focus-visible, .h-menu[aria-expanded="true"] { opacity: 1; }
+.h-card:hover .h-menu, .h-card.is-sel .h-menu, .h-menu:focus-visible, .h-menu[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) {
   .h-card .h-menu { opacity: 1; top: auto; bottom: -5px; right: -8px; background: transparent; box-shadow: none; }
   .h-card .h-sub { padding-right: 22px; }
-  .h-row .h-menu { opacity: 1; }
 }
 
 /* The list: one row a page. */
-.h-list { display: flex; flex-direction: column; gap: 2px; }
-.h-row { position: relative; }
-.h-row .h-link { display: grid; grid-template-columns: 52px minmax(0, 1fr) minmax(0, 200px) 150px 32px 16px; align-items: center; gap: 14px; height: 48px; padding: 0 48px 0 8px; border-radius: 10px; }
-.h-row .h-link:hover, .h-row.is-sel .h-link { background: var(--bg2); }
-.h-row.is-sel .h-link, .h-hit.is-sel { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
-.h-row .h-thumb { border-radius: 5px; }
-.h-row .h-ph { font-size: 10px; }
-.h-row .h-title { margin: 0; font-weight: 500; }
+.h-hit.is-sel { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
 .h-where { min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--s); white-space: nowrap; }
 .h-where svg { width: 13px; height: 13px; color: var(--t); flex: none; }
 .h-where span { overflow: hidden; text-overflow: ellipsis; }
-.h-row .h-when { font-size: 12.5px; color: var(--s); white-space: nowrap; }
-.h-row .h-v { margin: 0; text-align: right; }
 .h-acc { display: grid; place-items: center; }
-.h-row .h-menu { top: 10px; background: transparent; box-shadow: none; }
-.h-row .h-menu:hover, .h-row .h-menu[aria-expanded="true"] { background: var(--bg3); }
 .h-kind { flex: none; font: 500 11px var(--sans); color: var(--s); border: 0.5px solid var(--b2); border-radius: 4px; padding: 0 5px; line-height: 16px; }
 
 /* Search results: the best match on each page. */
@@ -297,12 +283,11 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
   .h-main { padding: 16px 16px 56px; }
   .l-title h1 { font-size: 20px; line-height: 26px; }
   /* One swipeable row, so Recent stays on the first screen however many folders there are. */
-  .l-folders { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 42%; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 14px 16px 4px; scroll-padding-inline: 16px; }
+  .l-folders { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 30%; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 14px 16px 4px; scroll-padding-inline: 16px; }
   .l-folders::-webkit-scrollbar { display: none; }
   .l-folders > .fo { scroll-snap-align: start; }
   .h-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
-  .h-row .h-link { grid-template-columns: 52px minmax(0, 1fr) 32px; }
-  .h-row .h-where, .h-row .h-when, .h-row .h-acc, .h-card .h-v, .h-card .h-kind { display: none; }
+  .h-card .h-kind { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .fo-sheet, .fo-front, .l-caret, .l-side, .h-thumb { transition: none; }
@@ -318,6 +303,8 @@ export interface LibraryInput {
   folders: FolderRow[];
   /** What happened to the pages, newest first. Activity draws it. */
   activity: Item[];
+  /** What the reader opened, from the server. */
+  opens: Opens;
   /** The identity of the reader. A comment by this author shows as "You". */
   me: string;
 }
@@ -338,9 +325,9 @@ const SIDE = `
     <nav class="l-tree" id="tree" aria-label="Folders"></nav>`;
 
 export function libraryHtml(input: LibraryInput, nonce: string) {
-  const { pages, folders, activity, me } = input;
+  const { pages, folders, activity, opens, me } = input;
   const body = `<style>${LIB_CSS}${studyCss}</style>
-<div class="l is-study" id="app" data-layout="rooms">
+<div class="l is-study" id="app">
   <aside class="l-side" id="side" aria-label="Library">${SIDE}
   </aside>
   <div class="l-scrim" id="scrim"></div>
@@ -388,7 +375,7 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
 <div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>
 <div class="v-pop d-menu" id="pop-filter" data-anchor role="menu" hidden></div>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, activity, me, kit: KIT, frame: { css: frameCss, js: frameJs }, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } })}</script>`;
+<script type="application/json" id="data">${data({ pages, folders, activity, opens, me, kit: KIT, frame: { css: frameCss, js: frameJs }, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -404,7 +391,7 @@ const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let view = 'grid';
 try { if (localStorage.getItem('library-view') === 'list') view = 'list'; } catch {}
-// The sort of the page list. Rooms reads it from the address and keeps it from place to place.
+// The sort of the page list. The script reads it from the address and keeps it from place to place.
 let order = { sort: 'modified', dir: 'desc' };
 let hits = null, sel = -1, menuSlug = null, editId = null, editColor = null, dragSlug = null;
 const expanded = new Set();
@@ -756,7 +743,7 @@ async function runSearch() {
   const text = q.value.trim();
   q.parentElement.classList.toggle('has-q', !!q.value);
   if (ctl) ctl.abort();
-  // Rooms keeps the search in the address, with the filters of the list.
+  // The address keeps the search, with the filters of the list.
   const keep = () => history.replaceState(history.state, '', urlOf(place, true));
   if (!text) { hits = null; sel = -1; render(); keep(); return; }
   ctl = new AbortController();

@@ -1016,6 +1016,19 @@ function folds(ops, parent, ctx) {
 }
 
 /**
+ * The words for the blocks behind a fold, such as "3 paragraphs".
+ * One block with no name of its own, such as a grid of cards or the frame of a table, gets the name of its parts.
+ * @param {El[]} hidden
+ */
+function folded(hidden) {
+  const nouns = hidden.map(nounOf);
+  if (!nouns.every((x) => x === nouns[0])) return count('part', hidden.length);
+  if (hidden.length > 1 || nouns[0] !== 'part') return count(nouns[0], hidden.length);
+  const inner = hidden[0].kids.flatMap((c) => (c.t === 'el' ? [nounOf(c)] : []));
+  return inner.length && inner[0] !== 'part' && inner.every((x) => x === inner[0]) ? count(inner[0], inner.length) : count('part', 1);
+}
+
+/**
  * The children of a block of the newer version, with the marks.
  * @param {Op[]} ops
  * @param {string} tail
@@ -1025,7 +1038,8 @@ function folds(ops, parent, ctx) {
  */
 function kids(ops, tail, parent, ctx) {
   if (ctx.review && hasClass(parent, 'k-deck')) return deck(ops, tail, ctx);
-  const fold = ctx.review ? folds(ops, parent, ctx) : null;
+  // A slide has a fixed size and shows as a whole, so nothing folds inside a sheet.
+  const fold = ctx.review && !ctx.out ? folds(ops, parent, ctx) : null;
   let out = '';
   ops.forEach((op, i) => {
     const lead = op.type === 'del' ? blank(op.a.lead) : op.b.lead;
@@ -1035,8 +1049,9 @@ function kids(ops, tail, parent, ctx) {
       /** @type {El[]} */
       const hidden = [];
       for (let k = i; fold[k] === g; k++) { const o = ops[k]; if (o.type === 'same' && o.b.el) hidden.push(o.b.el); }
-      const nouns = hidden.map(nounOf), noun = nouns.every((x) => x === nouns[0]) ? nouns[0] : 'part';
-      out += lead + row(parent, 'data-diff-gap="' + g + '"', '<button type="button">' + count(noun, hidden.length) + ' with no changes</button>');
+      // The header of a page is one block, and the reader knows it as the top of the page.
+      const top = hidden.length === 1 && hidden[0].tag === 'header' && ['#root', 'body', 'main', 'article'].includes(parent.tag);
+      out += lead + row(parent, 'data-diff-gap="' + g + '"', '<button type="button">' + (top ? 'The top of the page has no changes' : folded(hidden) + ' with no changes') + '</button>');
     }
     pass(ctx, op.b);
     out += lead + withAttr(op.b.el.open, 'data-diff-skip="' + g + '"') + innerHtml(op.b.el) + op.b.el.close;

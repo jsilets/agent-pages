@@ -178,6 +178,25 @@ describe('the review of a document', () => {
       + '</main>');
   });
 
+  it('names the header of the page when it is the one block of a fold', () => {
+    const head = '<header><h1>Lead plan</h1><p>Draft of October 29.</p></header>';
+    expect(review('<main>' + head + '<p>We send 20 emails each day.</p></main>', '<main>' + head + '<p>We send 30 emails each day.</p></main>'))
+      .toBe('<main><div data-diff-gap="1"><button type="button">The top of the page has no changes</button></div><header data-diff-skip="1"><h1>Lead plan</h1><p>Draft of October 29.</p></header>'
+        + '<p data-diff="mod" data-diff-n="1">We send <del data-diff>20</del><ins data-diff>30</ins> emails each day.</p></main>');
+  });
+
+  it('names the parts of a block that has no name of its own: the cards of a grid, the table in a frame', () => {
+    const cards = '<div class="k-grid"><div class="k-card"><h3>Admin</h3><p>Live.</p></div><div class="k-card"><h3>Menus</h3><p>Live.</p></div><div class="k-card"><h3>Map</h3><p>Live.</p></div></div>';
+    const frame = '<div class="k-tframe"><table><tr><th>Service</th></tr><tr><td>AWS</td></tr></table></div>';
+    const page = (last: string) => '<main><h1>Status</h1>' + cards + '<p>All three are in the store build.</p><p>' + last + '</p><p>The costs follow.</p>' + frame + '</main>';
+    expect(review(page('We check this on Monday.'), page('We check this on Friday.')))
+      .toBe('<main><h1>Status</h1>'
+        + '<div data-diff-gap="1"><button type="button">3 cards with no changes</button></div>' + cards.replace('<div class="k-grid">', '<div class="k-grid" data-diff-skip="1">')
+        + '<p>All three are in the store build.</p><p data-diff="mod" data-diff-n="1">We check this on <del data-diff>Monday</del><ins data-diff>Friday</ins>.</p><p>The costs follow.</p>'
+        + '<div data-diff-gap="2"><button type="button">1 table with no changes</button></div>' + frame.replace('<div class="k-tframe">', '<div class="k-tframe" data-diff-skip="2">')
+        + '</main>');
+  });
+
   it('folds nothing without the review option', () => {
     expect(marked(page('c5 is old'), page('c5 is new'))).not.toContain('data-diff-gap');
   });
@@ -245,6 +264,15 @@ describe('the review of a deck', () => {
       { n: 2, slide: 3, gone: false, heading: 'Money', level: 2, what: 'New slide' },
       { n: 3, slide: 4, gone: false, heading: 'Pace', level: 2, what: 'Moved from slide 2' },
     ]);
+  });
+
+  it('folds nothing inside a slide, because a slide shows as a whole', () => {
+    const items = (last: string) => '<ul><li>One</li><li>Two</li><li>Three</li><li>Four</li><li>Five</li><li>Six</li><li>' + last + '</li></ul>';
+    const out = diffHtml(deck([title, slide('list', 'Seven items', items('Seven'))]), deck([title, slide('list', 'Seven items', items('Seven, the last one'))]), { review: true });
+    expect(out.html).toBe('<body><main class="k-deck-review">\n'
+      + '<div data-diff-gap="1"><button type="button">Slide 1 has no changes</button></div>\n' + same(1, 1, title) + '\n'
+      + '<div data-diff-sheet="mod" data-diff-n="1"><p data-diff-cap><b>Slide 2</b> <span>Changed</span></p><div class="k-frame">'
+      + '<section class="k-slide" id="list"><h2>Seven items</h2><ul><li>One</li><li>Two</li><li>Three</li><li>Four</li><li>Five</li><li>Six</li><li data-diff="mod">Seven<ins data-diff>, the last one</ins></li></ul></section></div></div>\n</main></body>');
   });
 
   it('marks a deck as a document without the review option', () => {

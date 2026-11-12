@@ -54,9 +54,25 @@ export function isToken(s: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(s);
 }
 
+/** A folder id: 12 random bytes in base64url. */
+export function newFolderId(): string {
+  const b = crypto.getRandomValues(new Uint8Array(12));
+  return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+export function isFolderId(s: string): boolean {
+  return /^[A-Za-z0-9_-]{16}$/.test(s);
+}
+
+/** The kit's color ramps. A folder takes one of them, or none. */
+export const FOLDER_COLORS = ['blue', 'teal', 'green', 'amber', 'coral', 'pink', 'purple', 'red', 'gray'] as const;
+export type FolderColor = (typeof FOLDER_COLORS)[number];
+export const isFolderColor = (v: unknown): v is FolderColor => (FOLDER_COLORS as readonly unknown[]).includes(v);
+
 export type Route =
   | { kind: 'library' }
   | { kind: 'view'; slug: string; version: number | null }
+  | { kind: 'views-page'; slug: string }
   | { kind: 'raw'; slug: string; version: number }
   | { kind: 'kit-css' }
   | { kind: 'share-css' }
@@ -68,11 +84,20 @@ export type Route =
   | { kind: 'api-pin'; slug: string }
   | { kind: 'api-refresh'; slug: string }
   | { kind: 'api-search' }
+  | { kind: 'api-folders' }
+  | { kind: 'api-folder'; id: string }
+  | { kind: 'api-page-folder'; slug: string }
+  | { kind: 'api-seen'; slug: string }
+  | { kind: 'api-activity' }
   | { kind: 'thumb'; slug: string; version: number; theme: Theme }
   | { kind: 'pdf'; slug: string; version: number }
   | { kind: 'share-view'; token: string }
   | { kind: 'share-raw'; token: string }
   | { kind: 'share-pdf'; token: string }
+  | { kind: 'share-start'; token: string }
+  | { kind: 'share-ping'; token: string }
+  | { kind: 'share-pass'; token: string }
+  | { kind: 'api-views'; slug: string }
   | { kind: 'not-found' };
 
 const NUM = /^[1-9][0-9]{0,8}$/;
@@ -92,11 +117,15 @@ export function route(path: string): Route {
   if (path === '/favicon.ico') return { kind: 'icon', name: 'favicon.ico' };
   if (p[0] === 's' && p[1] === '_' && p.length === 3 && (ICONS as readonly string[]).includes(p[2])) return { kind: 'icon', name: p[2] as IconName };
   if (p[0] === 'p' && ok && p.length === 3) return { kind: 'view', slug, version: null };
+  if (p[0] === 'p' && ok && p.length === 4 && p[3] === 'views') return { kind: 'views-page', slug };
   if (p[0] === 'p' && ok && p.length === 5 && p[3] === 'v' && NUM.test(p[4])) return { kind: 'view', slug, version: +p[4] };
   if (p[0] === 'raw' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'raw', slug, version: +p[3] };
   if (p[0] === 'pdf' && ok && p.length === 4 && NUM.test(p[3])) return { kind: 'pdf', slug, version: +p[3] };
   if (p[0] === 't' && ok && p.length === 5 && NUM.test(p[3]) && (p[4] === 'light.webp' || p[4] === 'dark.webp')) return { kind: 'thumb', slug, version: +p[3], theme: p[4] === 'light.webp' ? 'light' : 'dark' };
   if (path === '/api/search') return { kind: 'api-search' };
+  if (path === '/api/activity') return { kind: 'api-activity' };
+  if (path === '/api/folders') return { kind: 'api-folders' };
+  if (p[0] === 'api' && p[1] === 'folders' && p.length === 3 && isFolderId(p[2])) return { kind: 'api-folder', id: p[2] };
   if (p[0] === 'api' && p[1] === 'pages') {
     const s = p.length >= 4 ? `${p[2]}/${p[3]}` : '';
     if (p.length === 2) return { kind: 'api-list' };
@@ -104,11 +133,17 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'shares') return { kind: 'api-shares', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'pin') return { kind: 'api-pin', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'folder') return { kind: 'api-page-folder', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'seen') return { kind: 'api-seen', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'views') return { kind: 'api-views', slug: s };
   }
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'raw') return { kind: 'share-raw', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'pdf') return { kind: 'share-pdf', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'view') return { kind: 'share-start', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'ping') return { kind: 'share-ping', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'pass') return { kind: 'share-pass', token: p[1] };
   return { kind: 'not-found' };
 }
 

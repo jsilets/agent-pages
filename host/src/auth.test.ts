@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { clearKeyCache, verifyAccessJwt } from './auth';
+import { accessCookie, clearKeyCache, verifyAccessJwt } from './auth';
 
 const TEAM = 'team';
 const AUD = 'aud-123';
@@ -68,5 +68,15 @@ describe('verifyAccessJwt', () => {
     expect(fetches).toBe(1);
     expect(await verifyAccessJwt(await sign({ iss: ISS, aud: [AUD], exp, email: 'x@y.z' }, { kid: 'k2' }), opts)).toBe(null);
     expect(fetches).toBe(2);
+  });
+});
+
+describe('accessCookie', () => {
+  it('reads the Access token from the cookie header and nothing else', () => {
+    expect(accessCookie('theme=dark; CF_Authorization=a.b.c; other=1')).toBe('a.b.c');
+    expect(accessCookie('CF_Authorization=x.y.z')).toBe('x.y.z');
+    expect(accessCookie('XCF_Authorization=a.b.c')).toBe(null);
+    expect(accessCookie('CF_Authorization=')).toBe(null);
+    expect(accessCookie(null)).toBe(null);
   });
 });

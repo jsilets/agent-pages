@@ -5,9 +5,13 @@ import kitJs from '../../kit/explain.js?raw';
 import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
-import { verifyAccessJwt, type Identity } from './auth';
-import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
-import { KIT, libraryHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { accessCookie, verifyAccessJwt, type Identity } from './auth';
+import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
+import { KIT, READ_REPORTER, gateHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { MAX_ACTIVE_MS, PASS_COOKIE, PASS_DAYS, cleanEmail, cookieValue, cleanLabels, cleanPing, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
+import { viewsHtml } from './views-page';
+import { libraryHtml, type FolderRow, type Opens } from './library';
+import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
 interface Env {
   DB: D1Database;
@@ -69,8 +73,14 @@ function withClaimIds(res: Response) {
     .transform(res);
 }
 
-async function rawPage(obj: R2ObjectBody, immutable: boolean, theme: Theme | null) {
-  const html = withKit(await obj.text(), kitCss, kitJs);
+/** A version as a page. `extra` is a script for the end of the body: the reader report of a share link. */
+async function rawPage(obj: R2ObjectBody, immutable: boolean, theme: Theme | null, extra = '') {
+  let html = withKit(await obj.text(), kitCss, kitJs);
+  if (extra) {
+    const tag = `<script>${extra}</script>`;
+    const end = html.search(/<\/body>/i);
+    html = end < 0 ? html + tag : html.slice(0, end) + tag + html.slice(end);
+  }
   const body = theme ? withTheme(html, theme) : html;
   return withClaimIds(new Response(body, {
     headers: {
@@ -99,7 +109,7 @@ async function identify(req: Request, env: Env): Promise<Identity | null> {
   return verifyAccessJwt(req.headers.get('cf-access-jwt-assertion'), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD });
 }
 
-const PAGE_COLUMNS = 'slug, title, repo, kind, latest, updated_at, pinned_at, thumb, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
+const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug AND shares.revoked_at IS NULL) AS shared';
 
 async function getPage(env: Env, slug: string) {
   return env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages WHERE slug = ?`).bind(slug).first<PageRow>();
@@ -108,6 +118,147 @@ async function getPage(env: Env, slug: string) {
 async function listPages(env: Env) {
   const { results } = await env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages ORDER BY updated_at DESC`).all<PageRow>();
   return results;
+}
+
+// ─── Opens ───────────────────────────────────────────────
+
+/**
+ * The first record of a reader. Every page counts as seen at its latest version, with no open time,
+ * so the library does not start with a wall of news. The statement does nothing for a reader with rows.
+ */
+const seedOpens = (env: Env, reader: string) =>
+  env.DB.prepare('INSERT OR IGNORE INTO page_opens (reader, slug, version, opened_at) SELECT ?1, slug, latest, NULL FROM pages WHERE NOT EXISTS (SELECT 1 FROM page_opens WHERE reader = ?1)').bind(reader);
+
+/** Reads what the reader opened. */
+async function listOpens(env: Env, reader: string): Promise<Opens> {
+  await seedOpens(env, reader).run();
+  const { results } = await env.DB.prepare('SELECT slug, version, opened_at FROM page_opens WHERE reader = ?').bind(reader).all<{ slug: string; version: number; opened_at: string | null }>();
+  return Object.fromEntries(results.map((r) => [r.slug, { version: r.version, at: r.opened_at }]));
+}
+
+/**
+ * Records that the reader saw a version in Activity, with no open of the page. The time of the last open stays.
+ * The body is { version }. The seen version never goes down.
+ */
+async function markSeen(req: Request, env: Env, reader: string, slug: string) {
+  const p = await getPage(env, slug);
+  if (!p) return fail(404, 'no such page');
+  const { version } = (await req.json().catch(() => ({}))) as { version?: unknown };
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1 || version > p.latest) return fail(400, 'version must be a version of the page');
+  await env.DB.batch([
+    seedOpens(env, reader),
+    env.DB.prepare(
+      'INSERT INTO page_opens (reader, slug, version, opened_at) VALUES (?, ?, ?, NULL) ON CONFLICT (reader, slug) DO UPDATE SET version = max(version, excluded.version)',
+    ).bind(reader, slug, version),
+  ]);
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+/** Records that the reader opened a version of a page. The seen version never goes down when the reader opens an older one. */
+function recordOpen(env: Env, reader: string, slug: string, version: number) {
+  return env.DB.batch([
+    seedOpens(env, reader),
+    env.DB.prepare(
+      'INSERT INTO page_opens (reader, slug, version, opened_at) VALUES (?, ?, ?, ?) ON CONFLICT (reader, slug) DO UPDATE SET version = max(version, excluded.version), opened_at = excluded.opened_at',
+    ).bind(reader, slug, version, now()),
+  ]);
+}
+
+// ─── Activity ────────────────────────────────────────────
+
+/**
+ * The newest versions, comments and assistant runs, joined into one list. The comments and agent_runs
+ * tables come from the comment branch. A database without them has versions only.
+ * The query does not read the id of a run, because that id is a secret.
+ */
+async function listActivity(env: Env): Promise<Item[]> {
+  const { results: versions } = await env.DB.prepare('SELECT slug, version, created_at FROM versions ORDER BY created_at DESC LIMIT 400').all<VersionEvent>();
+  let comments: CommentRow[] = [];
+  let runs: RunRow[] = [];
+  try {
+    comments = (await env.DB.prepare('SELECT id, slug, version, anchor, quote, body, author, mention, parent_id, status, created_at FROM comments ORDER BY created_at DESC LIMIT 600').all<CommentRow>()).results;
+    runs = (await env.DB.prepare('SELECT comment_id, agent, status, started_at, finished_at, detail FROM agent_runs ORDER BY started_at DESC LIMIT 300').all<RunRow>()).results;
+  } catch {
+    // This database has no comments table or no agent_runs table.
+  }
+  return deriveActivity(versions, comments, runs, Date.now());
+}
+
+// ─── Folders ─────────────────────────────────────────────
+
+const FOLDER_COLUMNS = 'id, name, parent_id, color, created_at, updated_at';
+
+async function listFolders(env: Env) {
+  const { results } = await env.DB.prepare(`SELECT ${FOLDER_COLUMNS} FROM folders ORDER BY name COLLATE NOCASE`).all<FolderRow>();
+  return results;
+}
+
+const getFolder = (env: Env, id: string) => env.DB.prepare(`SELECT ${FOLDER_COLUMNS} FROM folders WHERE id = ?`).bind(id).first<FolderRow>();
+
+/** A folder name: trimmed, 1 to 80 characters, no slash. */
+function folderName(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const name = v.trim().replace(/\s+/g, ' ');
+  return name && name.length <= 80 && !name.includes('/') ? name : null;
+}
+
+/** True when `id` is `ancestor` or sits anywhere below it. Moving a folder under itself would make a loop. */
+async function isWithin(env: Env, id: string | null, ancestor: string) {
+  for (let at = id, hops = 0; at && hops < 64; hops++) {
+    if (at === ancestor) return true;
+    at = (await env.DB.prepare('SELECT parent_id FROM folders WHERE id = ?').bind(at).first<{ parent_id: string | null }>())?.parent_id ?? null;
+  }
+  return false;
+}
+
+async function createFolder(req: Request, env: Env) {
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; parent_id?: unknown; color?: unknown };
+  const name = folderName(body.name);
+  if (!name) return fail(400, 'name must be 1 to 80 characters with no slash');
+  const parent = body.parent_id ?? null;
+  if (parent !== null && (typeof parent !== 'string' || !(await getFolder(env, parent)))) return fail(400, 'no such parent folder');
+  const color = body.color ?? null;
+  if (color !== null && !isFolderColor(color)) return fail(400, 'unknown color');
+  const id = newFolderId(), at = now();
+  await env.DB.prepare('INSERT INTO folders (id, name, parent_id, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, name, parent, color, at, at).run();
+  return json(await getFolder(env, id), 201);
+}
+
+async function updateFolder(req: Request, env: Env, id: string) {
+  const f = await getFolder(env, id);
+  if (!f) return fail(404, 'no such folder');
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; parent_id?: unknown; color?: unknown };
+  const name = body.name === undefined ? f.name : folderName(body.name);
+  if (!name) return fail(400, 'name must be 1 to 80 characters with no slash');
+  const parent = body.parent_id === undefined ? f.parent_id : body.parent_id;
+  if (parent !== null) {
+    if (typeof parent !== 'string' || !(await getFolder(env, parent))) return fail(400, 'no such parent folder');
+    if (await isWithin(env, parent, id)) return fail(400, 'a folder cannot move into itself');
+  }
+  const color = body.color === undefined ? f.color : body.color;
+  if (color !== null && !isFolderColor(color)) return fail(400, 'unknown color');
+  await env.DB.prepare('UPDATE folders SET name = ?, parent_id = ?, color = ?, updated_at = ? WHERE id = ?').bind(name, parent, color, now(), id).run();
+  return json(await getFolder(env, id));
+}
+
+/** Deletes the folder only. Its pages and folders move up to its parent, so nothing is lost. */
+async function deleteFolder(env: Env, id: string) {
+  const f = await getFolder(env, id);
+  if (!f) return fail(404, 'no such folder');
+  await env.DB.batch([
+    env.DB.prepare('UPDATE pages SET folder_id = ? WHERE folder_id = ?').bind(f.parent_id, id),
+    env.DB.prepare('UPDATE folders SET parent_id = ? WHERE parent_id = ?').bind(f.parent_id, id),
+    env.DB.prepare('DELETE FROM folders WHERE id = ?').bind(id),
+  ]);
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+async function movePage(req: Request, env: Env, slug: string) {
+  const body = (await req.json().catch(() => ({}))) as { folder_id?: unknown };
+  const target = body.folder_id ?? null;
+  if (target !== null && (typeof target !== 'string' || !isFolderId(target) || !(await getFolder(env, target)))) return fail(400, 'no such folder');
+  const res = await env.DB.prepare('UPDATE pages SET folder_id = ? WHERE slug = ?').bind(target, slug).run();
+  return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such page');
 }
 
 /** Replaces the page's search rows with the text of this version. The title goes only on the first row, so a title match opens the top of the page. */
@@ -272,7 +423,11 @@ async function deletePage(env: Env, slug: string) {
     cursor = list.truncated ? list.cursor : undefined;
   } while (cursor);
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM share_passes WHERE token IN (SELECT token FROM shares WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM share_view_parts WHERE view_id IN (SELECT id FROM share_views WHERE slug = ?)').bind(slug),
+    env.DB.prepare('DELETE FROM share_views WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM page_opens WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM versions WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM pages WHERE slug = ?').bind(slug),
@@ -283,31 +438,152 @@ async function deletePage(env: Env, slug: string) {
 async function createShare(req: Request, env: Env, slug: string, origin: string) {
   const p = await getPage(env, slug);
   if (!p) return fail(404, 'no such page');
-  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest' };
+  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest'; name?: unknown; kind?: unknown; require_email?: unknown };
   const v = body.version ?? 'latest';
+  // Two kinds, as in Google Docs: a link for one person, named for that person, or the public link that anyone can use.
+  const kind = body.kind === 'person' ? 'person' : 'public';
+  const name = typeof body.name === 'string' ? body.name.replace(/\s+/g, ' ').trim().slice(0, 80) || null : null;
+  if (kind === 'person' && !name) return fail(400, 'a link for a person needs a name');
+  const requireEmail = kind === 'public' && body.require_email === true ? 1 : 0;
   let version: number | null = null;
   if (v !== 'latest') {
     if (!Number.isInteger(v) || !(await getVersion(env, slug, v))) return fail(400, 'no such version');
     version = v;
   }
   const token = newToken();
-  await env.DB.prepare('INSERT INTO shares (token, slug, version, created_at) VALUES (?, ?, ?, ?)').bind(token, slug, version, now()).run();
-  return json({ token, slug, version, url: `${origin}/s/${token}` }, 201);
+  await env.DB.prepare('INSERT INTO shares (token, slug, version, kind, name, require_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(token, slug, version, kind, name, requireEmail, now()).run();
+  return json({ token, slug, version, kind, name, require_email: requireEmail, url: `${origin}/s/${token}` }, 201);
+}
+
+/** Changes a link: whether its readers must give an email first. Only a public link has the gate. */
+async function updateShare(req: Request, env: Env, token: string) {
+  const body = (await req.json().catch(() => ({}))) as { require_email?: unknown };
+  if (typeof body.require_email !== 'boolean') return fail(400, 'require_email must be true or false');
+  const res = await env.DB.prepare("UPDATE shares SET require_email = ? WHERE token = ? AND kind = 'public' AND revoked_at IS NULL").bind(body.require_email ? 1 : 0, token).run();
+  return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such public link');
 }
 
 async function listShares(env: Env, slug: string, origin: string) {
-  const { results } = await env.DB.prepare('SELECT token, version, created_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<{ token: string; version: number | null; created_at: string }>();
+  const { results } = await env.DB.prepare('SELECT token, kind, name, require_email, version, created_at FROM shares WHERE slug = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+    .bind(slug).all<{ token: string; kind: string; name: string | null; require_email: number; version: number | null; created_at: string }>();
   return json(results.map((s) => ({ ...s, url: `${origin}/s/${s.token}` })));
+}
+
+// ─── Views of share links ────────────────────────────────
+
+/** The salt of today for the visitor hash. The first view of a day makes it and deletes the salts of two days ago and older. */
+async function daySalt(env: Env) {
+  const day = now().slice(0, 10);
+  const get = () => env.DB.prepare('SELECT salt FROM share_salts WHERE day = ?').bind(day).first<{ salt: string }>();
+  const row = await get();
+  if (row) return row.salt;
+  const old = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10);
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO share_salts (day, salt) VALUES (?, ?)').bind(day, newToken()),
+    env.DB.prepare('DELETE FROM share_salts WHERE day <= ?').bind(old),
+  ]);
+  return (await get())!.salt;
+}
+
+/**
+ * Starts a visit of a share link. The share page calls it from a script once the page in its frame has loaded,
+ * so a link preview that runs no script makes no visit. The body has the referrer and the headings of the parts.
+ * Each load is a new visit, as in Papermark and DocSend.
+ */
+async function startShareView(req: Request, env: Env, token: string) {
+  const hit = await resolveShare(env, token);
+  if (!hit) return fail(404, 'no such link');
+  const ua = req.headers.get('user-agent');
+  if (isBot(ua)) return json({ id: null });
+  // The owner and anyone else who signed in to the host is not a reader of the link. Their visit does not count.
+  if (await signedIn(req, env)) return json({ id: null });
+  const email = await passEmail(req, env, token);
+  if (hit.requireEmail && !email) return fail(403, 'this link needs an email');
+  const body = (await req.json().catch(() => ({}))) as { referrer?: unknown; parts?: unknown };
+  const labels = cleanLabels(body.parts);
+  const visitor = await visitorHash(await daySalt(env), req.headers.get('cf-connecting-ip') || '', ua || '');
+  const id = newToken().slice(0, 24), at = now();
+  const country = typeof req.cf?.country === 'string' ? req.cf.country : null;
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, os, country, referrer, email, started_at, last_at, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), osOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), email, at, at, labels.length),
+    ...labels.map((label, i) => env.DB.prepare('INSERT INTO share_view_parts (view_id, part, label) VALUES (?, ?, ?)').bind(id, i, label)),
+  ]);
+  return json({ id }, 201);
+}
+
+/** Adds a report of the share page to its visit: the active time on each part since the last report, and a download. */
+async function pingShareView(req: Request, env: Env, token: string) {
+  const body = await req.json().catch(() => null);
+  const id = body && typeof body === 'object' && typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : '';
+  const row = await env.DB.prepare('SELECT last_at, active_ms, parts FROM share_views WHERE id = ? AND token = ?').bind(id, token).first<{ last_at: string; active_ms: number; parts: number }>();
+  if (!row) return fail(404, 'no such view');
+  // A report can add at most the time since the visit last reported, and a little more for a slow network.
+  const room = Math.min(Math.max(0, Date.now() - Date.parse(row.last_at)) + 15_000, MAX_ACTIVE_MS - row.active_ms);
+  const p = cleanPing(body, row.parts, room);
+  if (!p) return fail(400, 'bad report');
+  let added = 0;
+  const writes = [...p.parts].map(([part, ms]) => {
+    added += ms;
+    // A page with no headings has one part, which the visit did not list when it started.
+    return env.DB.prepare('INSERT INTO share_view_parts (view_id, part, label, ms) VALUES (?, ?, ?, ?) ON CONFLICT (view_id, part) DO UPDATE SET ms = ms + excluded.ms')
+      .bind(id, part, 'The page', ms);
+  });
+  await env.DB.batch([
+    ...writes,
+    env.DB.prepare('UPDATE share_views SET active_ms = active_ms + ?, downloads = downloads + ?, last_at = ? WHERE id = ?').bind(added, p.download ? 1 : 0, now(), id),
+  ]);
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+/** The views of a page for its owner: the totals, the time on each part, the links, and each visit. Revoked links keep their visits. */
+async function listViews(env: Env, slug: string) {
+  const { results: links } = await env.DB.prepare('SELECT token, kind, name, require_email, version, created_at, revoked_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<LinkRow>();
+  const { results: views } = await env.DB.prepare('SELECT id, token, visitor, device, os, country, referrer, email, started_at, last_at, active_ms, parts, downloads FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 1000')
+    .bind(slug).all<ViewRow>();
+  const { results: parts } = await env.DB.prepare('SELECT p.view_id, p.part, p.label, p.ms FROM share_view_parts p JOIN share_views v ON v.id = p.view_id WHERE v.slug = ?')
+    .bind(slug).all<PartRow>();
+  return summarize(links, views, parts);
 }
 
 /** Resolves a share token to its page and version, or null when the page or version is gone. */
 async function resolveShare(env: Env, token: string) {
-  const s = await env.DB.prepare('SELECT slug, version FROM shares WHERE token = ?').bind(token).first<{ slug: string; version: number | null }>();
+  const s = await env.DB.prepare('SELECT slug, version, require_email FROM shares WHERE token = ? AND revoked_at IS NULL').bind(token).first<{ slug: string; version: number | null; require_email: number }>();
   if (!s) return null;
   const p = await getPage(env, s.slug);
   if (!p) return null;
   const v = await getVersion(env, s.slug, s.version ?? p.latest);
-  return v ? { page: p, version: v } : null;
+  return v ? { page: p, version: v, requireEmail: !!s.require_email } : null;
+}
+
+/** True when a person who signed in to the host sent the request. The owner sees a link as a reader does, with no gate and no visit. */
+async function signedIn(req: Request, env: Env) {
+  if (!env.ACCESS_AUD) return false;
+  return (await verifyAccessJwt(accessCookie(req.headers.get('cookie')), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD }))?.kind === 'person';
+}
+
+/** The email of the pass of the gate of a link that the request carries, or null. A pass lasts PASS_DAYS. */
+async function passEmail(req: Request, env: Env, token: string) {
+  const id = cookieValue(req.headers.get('cookie'), PASS_COOKIE);
+  if (!id) return null;
+  const since = new Date(Date.now() - PASS_DAYS * 86400_000).toISOString();
+  const row = await env.DB.prepare('SELECT email FROM share_passes WHERE id = ? AND token = ? AND created_at > ?').bind(id, token, since).first<{ email: string }>();
+  return row?.email ?? null;
+}
+
+/** The email gate: the reader gives an email, and the host sets a cookie for the path of this link only. */
+async function passGate(req: Request, env: Env, url: URL, token: string) {
+  const hit = await resolveShare(env, token);
+  if (!hit) return fail(404, 'no such link');
+  const email = cleanEmail(((await req.json().catch(() => ({}))) as { email?: unknown }).email);
+  if (!email) return fail(400, 'Enter an email address.');
+  const id = newToken();
+  await env.DB.prepare('INSERT INTO share_passes (id, token, email, created_at) VALUES (?, ?, ?, ?)').bind(id, token, email, now()).run();
+  const secure = url.protocol === 'https:' ? '; Secure' : '';
+  return new Response(null, {
+    status: 204,
+    headers: { ...BASE_HEADERS, 'set-cookie': `${PASS_COOKIE}=${id}; Path=/s/${token}; Max-Age=${PASS_DAYS * 86400}; HttpOnly; SameSite=Lax${secure}` },
+  });
 }
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -327,14 +603,26 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
 
   // Share links: Access lets /s/* through with no login, so the token is the only check.
+  // The share page reports its views with two writes. Only the share page itself may send them.
+  if (r.kind === 'share-start' || r.kind === 'share-ping' || r.kind === 'share-pass') {
+    if (method !== 'POST') return fail(405, 'method not allowed');
+    if (req.headers.get('origin') !== url.origin) return fail(403, 'cross-origin write refused');
+    if (r.kind === 'share-pass') return passGate(req, env, url, r.token);
+    return r.kind === 'share-start' ? startShareView(req, env, r.token) : pingShareView(req, env, r.token);
+  }
   if (r.kind === 'share-view' || r.kind === 'share-raw' || r.kind === 'share-pdf') {
     if (method !== 'GET') return fail(405, 'method not allowed');
     const hit = await resolveShare(env, r.token);
     if (!hit) return page(messageHtml('Link not found', 'This share link does not exist or was revoked.', nonce, '/s/_/explain.css'), nonce, 404);
+    // The email gate holds the page, its HTML and its PDF until the reader gives an email. A person who signed in passes.
+    if (hit.requireEmail && !(await passEmail(req, env, r.token)) && !(await signedIn(req, env))) {
+      if (r.kind !== 'share-view') return fail(403, 'this link needs an email');
+      return page(gateHtml({ title: hit.page.title }, nonce), nonce);
+    }
     if (r.kind === 'share-view') return page(sharedHtml({ token: r.token, title: hit.page.title, repo: hit.page.repo, kind: hit.page.kind, version: hit.version }, nonce), nonce);
     if (r.kind === 'share-pdf') return pagePdf(env, hit.page.slug, hit.version.version, pdfName(hit.page.title, hit.version.version));
     const obj = await env.PAGES.get(blobKey(hit.page.slug, hit.version.version));
-    return obj ? rawPage(obj, false, theme) : fail(404, 'no such version');
+    return obj ? rawPage(obj, false, theme, READ_REPORTER) : fail(404, 'no such version');
   }
 
   const who = await identify(req, env);
@@ -350,14 +638,20 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   switch (r.kind) {
     case 'kit-css':
       return css();
-    case 'library':
-      return page(libraryHtml(await listPages(env), nonce), nonce);
+    case 'library': {
+      return page(libraryHtml({ pages: await listPages(env), folders: await listFolders(env), activity: await listActivity(env), opens: await listOpens(env, who.who), me: who.who }, nonce), nonce);
+    }
+    case 'api-activity':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      return json({ pages: await listPages(env), activity: await listActivity(env), opens: await listOpens(env, who.who) });
     case 'view': {
       const p = await getPage(env, r.slug);
       if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);
       const { results: versions } = await env.DB.prepare('SELECT version, sha, created_at FROM versions WHERE slug = ? ORDER BY version DESC').bind(r.slug).all<VersionRow>();
       const version = versions.find((v) => v.version === (r.version ?? p.latest));
       if (!version) return page(messageHtml('Version not found', `${r.slug} has no version ${r.version}.`, nonce), nonce, 404);
+      // A person who opens a page has seen that version. An agent that reads a page with a service token has not.
+      if (who.kind === 'person') ctx.waitUntil(recordOpen(env, who.who, p.slug, version.version));
       return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null }, nonce), nonce);
     }
     case 'raw': {
@@ -381,6 +675,29 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       const res = await env.DB.prepare('UPDATE pages SET pinned_at = ? WHERE slug = ?').bind(method === 'PUT' ? now() : null, r.slug).run();
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such page');
     }
+    case 'api-folders':
+      if (method === 'GET') return json(await listFolders(env));
+      if (method === 'POST') return createFolder(req, env);
+      return fail(405, 'method not allowed');
+    case 'api-folder':
+      if (method === 'PATCH') return updateFolder(req, env, r.id);
+      if (method === 'DELETE') return deleteFolder(env, r.id);
+      return fail(405, 'method not allowed');
+    case 'api-page-folder':
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      return movePage(req, env, r.slug);
+    case 'views-page': {
+      const p = await getPage(env, r.slug);
+      if (!p) return page(messageHtml('Page not found', `No page has the slug ${r.slug}.`, nonce), nonce, 404);
+      return page(viewsHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, views: await listViews(env, p.slug) }, nonce), nonce);
+    }
+    case 'api-views':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      if (!(await getPage(env, r.slug))) return fail(404, 'no such page');
+      return json(await listViews(env, r.slug));
+    case 'api-seen':
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      return markSeen(req, env, who.who, r.slug);
     case 'api-refresh':
       if (method !== 'POST') return fail(405, 'method not allowed');
       return refresh(env, r.slug);
@@ -402,8 +719,10 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (method === 'GET') return listShares(env, r.slug, url.origin);
       return fail(405, 'method not allowed');
     case 'api-share': {
+      if (method === 'PATCH') return updateShare(req, env, r.token);
       if (method !== 'DELETE') return fail(405, 'method not allowed');
-      const res = await env.DB.prepare('DELETE FROM shares WHERE token = ?').bind(r.token).run();
+      // A revoked link stops at once. Its row stays, so its visits keep the name of the link.
+      const res = await env.DB.prepare('UPDATE shares SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL').bind(now(), r.token).run();
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such share');
     }
     default:

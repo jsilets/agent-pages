@@ -31,10 +31,12 @@ const LUCIDE: Record<string, string> = {
 };
 const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCIDE[name]}</svg>`;
 
-const MARK = `<svg class="h-mark" viewBox="24 32 208 192" aria-hidden="true">
-    <path opacity="0.3" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
-    <path opacity="0.55" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
-    <path fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
+// The brand mark on its tile, the same cut as the favicon (brand/mark-small.svg).
+const MARK = `<svg class="h-mark" viewBox="0 0 256 256" aria-hidden="true">
+    <rect class="h-tile" x="5" y="5" width="246" height="246" rx="44"/>
+    <path fill="#6b6962" d="M84 32 H172 A16 16 0 0 1 188 48 V60 H68 V48 A16 16 0 0 1 84 32 Z"/>
+    <path fill="#b3b0a6" d="M60 76 H196 A20 20 0 0 1 216 96 V104 H40 V96 A20 20 0 0 1 60 76 Z"/>
+    <path fill="#f7f6f3" fill-rule="evenodd" d="M48 120 H208 A24 24 0 0 1 232 144 V200 A24 24 0 0 1 208 224 H48 A24 24 0 0 1 24 200 V144 A24 24 0 0 1 48 120 Z M64 148 H140 A12 12 0 0 1 140 172 H64 A12 12 0 0 1 64 148 Z"/>
   </svg>`;
 
 const LIB_CSS = `
@@ -45,16 +47,24 @@ body:has(> .l) { height: 100%; overflow: hidden; }
 .h-scroll { flex: 1; min-height: 0; overflow: auto; }
 
 /* The sidebar. Its top row lines up with the bar. */
-.l-side { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow: auto; padding: 0 8px 16px; border-right: 0.5px solid var(--b); background: var(--bg); box-sizing: border-box; }
-.l-brand { color: var(--p); text-decoration: none; display: flex; align-items: center; gap: 7px; flex: none; height: 44px; padding: 0 8px; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; }
+.l-side { --side: color-mix(in oklab, var(--bg2) 55%, var(--bg)); display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow: auto; padding: 0 10px 16px; border-right: 0.5px solid var(--b); background: var(--side); box-sizing: border-box; }
+.l-brand { color: var(--p); text-decoration: none; display: flex; align-items: center; gap: 9px; flex: none; height: 44px; margin-bottom: 6px; padding: 0 6px; font: 600 13.5px/20px var(--sans); letter-spacing: -0.005em; }
 .l-brand:hover { text-decoration: none; }
-.h-mark { width: 14px; height: 13px; fill: currentColor; stroke: none; }
-.l-nav { position: relative; display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--s); font: 500 13px var(--sans); text-decoration: none; cursor: pointer; }
-.l-nav:hover { background: var(--bg2); color: var(--p); text-decoration: none; }
-.l-nav[aria-current="page"] { background: var(--bg2); color: var(--p); }
-.l-nav svg { width: 16px; height: 16px; }
-.l-nav .l-n { margin-left: auto; font: 500 11.5px var(--sans); color: var(--t); font-variant-numeric: tabular-nums; }
-.l-sec { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 2px; padding: 0 2px 0 8px; font: 500 11.5px var(--sans); color: var(--t); }
+.h-mark { flex: none; width: 20px; height: 20px; stroke: none; }
+/* The tile is near black. In dark mode a hairline ring keeps its squircle edge visible. */
+.h-tile { fill: #1a1a1a; stroke: rgba(255, 255, 255, 0); stroke-width: 10; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .h-tile { stroke: rgba(255, 255, 255, 0.28); } :root:not([data-theme="light"]) .l-nav[aria-current="page"] { background: var(--bg3); } }
+:root[data-theme="dark"] .h-tile { stroke: rgba(255, 255, 255, 0.28); }
+:root[data-theme="dark"] .l-nav[aria-current="page"] { background: var(--bg3); }
+.l-nav { position: relative; display: flex; align-items: center; gap: 9px; height: 28px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--s); font: 500 13px var(--sans); text-decoration: none; cursor: pointer; }
+.l-nav:hover { background: color-mix(in oklab, var(--bg3) 55%, var(--side)); color: var(--p); text-decoration: none; }
+.l-nav[aria-current="page"] { background: var(--bg); color: var(--p); box-shadow: 0 0 0 0.5px var(--b2), 0 1px 2px rgba(0, 0, 0, 0.06); }
+.l-nav svg { width: 15px; height: 15px; color: var(--t); }
+.l-nav[aria-current="page"] svg { color: var(--p); }
+/* Counts show only on hover and on the current row, so the list stays quiet. */
+.l-nav .l-n { margin-left: auto; font: 500 11.5px var(--sans); color: var(--t); font-variant-numeric: tabular-nums; opacity: 0; }
+.l-nav:hover .l-n, .l-nav[aria-current="page"] .l-n { opacity: 1; }
+.l-sec { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 4px; padding: 0 2px 0 8px; font: 500 11.5px var(--sans); color: var(--t); }
 .l-sec .v-icon { width: 24px; height: 24px; border-radius: 6px; }
 .l-sec .v-icon svg { width: 14px; height: 14px; }
 .l-tree { display: flex; flex-direction: column; gap: 1px; }
@@ -63,12 +73,12 @@ body:has(> .l) { height: 100%; overflow: hidden; }
 .l-caret svg { width: 12px; height: 12px; }
 .l-caret.is-open { transform: rotate(90deg); }
 .l-caret.is-none { visibility: hidden; }
-.l-tree .l-glyph { width: 15px; height: 15px; margin-right: 5px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
+.l-tree .l-glyph { width: 15px; height: 15px; margin-right: 6px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
 .l-tree .l-nav.is-drop, .fo.is-drop .fo-obj { outline: 2px solid var(--link); outline-offset: 2px; }
 .l-empty-tree { padding: 4px 8px; font-size: 12.5px; color: var(--t); }
 
 /* The bar: what you are looking at, search, then the tools. */
-.l-bar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 480px) minmax(0, 1fr); gap: 12px; padding: 0 8px 0 16px; }
+.l-bar { --bar: 44px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px) minmax(0, 1fr); align-items: center; gap: 12px; padding: 0 10px 0 24px; }
 .l-crumb { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 13.5px; }
 .l-crumb a, .l-crumb span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .l-crumb a { color: var(--s); text-decoration: none; padding: 2px 4px; border-radius: 6px; }
@@ -93,7 +103,8 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .h-keys dt { display: flex; gap: 3px; }
 .h-keys dd { margin: 0; }
 
-.h-main { max-width: 1240px; margin: 0 auto; padding: 22px 28px 72px; }
+/* Content starts at the bar's left edge, so the heading sits under the breadcrumb. */
+.h-main { max-width: 1480px; margin: 0; padding: 24px 28px 72px; }
 .l-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 24px; }
 .l-title h1 { margin: 0; font: 600 22px/28px var(--sans); letter-spacing: -0.015em; text-wrap: balance; }
 .l-title p { margin: 0; font-size: 13px; color: var(--s); }
@@ -121,7 +132,7 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .fo-obj::after { content: ""; position: absolute; left: 6%; right: 6%; bottom: -4%; height: 10%; border-radius: 50%; background: radial-gradient(closest-side, rgba(0, 0, 0, 0.16), transparent); z-index: -1; }
 .fo-back { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--fo-back); stroke: none; overflow: visible; }
 /* The pages. --i is 0 (back) to 2 (front, the newest). Closed, the back pages stand a little higher and narrower, so their edges show. */
-.fo-sheet { position: absolute; left: 8%; right: 8%; top: 12%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 2px; background: #fff; box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.1);
+.fo-sheet { position: absolute; left: 8%; right: 8%; top: 12%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 3px; background: #fff; box-shadow: 0 0 0 0.75px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12);
   transform: translateY(calc((2 - var(--i)) * -5%)) scaleX(calc(1 - (2 - var(--i)) * 0.045));
   transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1); transition-delay: calc((2 - var(--i)) * 20ms); }
 /* The front page is zoomed to its top left, so its heading is large enough to read above the front panel. */
@@ -146,9 +157,9 @@ kbd { display: inline-grid; place-items: center; min-width: 18px; height: 18px; 
 .fo:focus-visible .fo-obj { outline: 2px solid var(--link); outline-offset: 4px; border-radius: 8px; }
 @media (hover: none) { .fo-menu { display: none; } }
 /* Dark: the ramp's fill is its deep tone and its line the light one. The stock stays deep, with a lifted front. */
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fo { --fo-front: color-mix(in oklab, var(--fill) 76%, var(--line)); --fo-back: color-mix(in oklab, var(--fill) 90%, var(--line)); --fo-edge: var(--line); } :root:not([data-theme="light"]) .fo-sheet { background: #222; } :root:not([data-theme="light"]) .fo-front { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -1px 3px rgba(0, 0, 0, 0.3); } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .fo { --fo-front: color-mix(in oklab, var(--fill) 76%, var(--line)); --fo-back: color-mix(in oklab, var(--fill) 90%, var(--line)); --fo-edge: var(--line); } :root:not([data-theme="light"]) .fo-sheet { background: #222; box-shadow: 0 0 0 0.75px rgba(255, 255, 255, 0.2), 0 2px 6px rgba(0, 0, 0, 0.5); } :root:not([data-theme="light"]) .fo-front { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -1px 3px rgba(0, 0, 0, 0.3); } }
 :root[data-theme="dark"] .fo { --fo-front: color-mix(in oklab, var(--fill) 76%, var(--line)); --fo-back: color-mix(in oklab, var(--fill) 90%, var(--line)); --fo-edge: var(--line); }
-:root[data-theme="dark"] .fo-sheet { background: #222; }
+:root[data-theme="dark"] .fo-sheet { background: #222; box-shadow: 0 0 0 0.75px rgba(255, 255, 255, 0.2), 0 2px 6px rgba(0, 0, 0, 0.5); }
 :root[data-theme="dark"] .fo-front { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 -1px 3px rgba(0, 0, 0, 0.3); }
 
 /* ─── A page card: the top of the page, then its title. Each version after the first adds a sheet behind it, up to two. ─── */
@@ -426,7 +437,8 @@ const row = (p) => '<article class="h-row" data-slug="' + p.slug + '" draggable=
   + '<span class="h-when">Published ' + ago(p.updated_at) + '</span><span class="h-v">v' + p.latest + '</span>' + access(p) + '</a>' + menu(p) + '</article>';
 
 // The fan: the back page leans left, the middle one right, the newest stands in front.
-const FAN = [{ x: '-17%', y: '-30%', r: '-7deg', s: 0.86 }, { x: '17%', y: '-28%', r: '6deg', s: 0.86 }, { x: '0%', y: '-20%', r: '-1deg', s: 1 }];
+// Open, the pages rise out of the folder and spread a little. They stay inside the back panel's width, so its edges and tab still show.
+const FAN = [{ x: '-6%', y: '-24%', r: '-4deg', s: 0.8 }, { x: '6%', y: '-22%', r: '3.5deg', s: 0.8 }, { x: '0%', y: '-14%', r: '0deg', s: 0.9 }];
 // The back and its tab, on a 300 by 200 grid: a rounded tab on the left that slopes down into the back panel.
 const FOLDER_BACK = '<svg class="fo-back" viewBox="0 0 300 200" preserveAspectRatio="none" aria-hidden="true"><path d="M0 12C0 5.4 5.4 0 12 0H92C98 0 101.5 2.4 104.6 6.6L111 15.4C113.6 19 116.4 20 121 20H288C294.6 20 300 25.4 300 32V188C300 194.6 294.6 200 288 200H12C5.4 200 0 194.6 0 188Z"/></svg>';
 function folderCard(f) {

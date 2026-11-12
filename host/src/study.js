@@ -6,6 +6,7 @@
 // Ledger: each page row shows its latest change, and one switch turns the list into the log.
 
 const LAYOUT = D.layout;
+const ROOMS = LAYOUT === 'rooms';
 let feed = D.activity;
 const AGENTS = { claude: 'Claude', chatgpt: 'ChatGPT' };
 const actor = (name) => AGENTS[name] || name;
@@ -17,8 +18,12 @@ const plain = (e) => !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
 function studyPlace(p, u) {
   const af = u.get('af') || '';
   if (D.layout === 'rooms') {
-    if (p.list !== 'activity') return p;
-    return { list: 'activity', af: folders.some((f) => f.id === af) ? af : '', only: u.get('only') === 'waiting' ? 'waiting' : '', ev: u.get('e') || '' };
+    if (p.list === 'activity') return { list: 'activity', af: folders.some((f) => f.id === af) ? af : '', only: u.get('only') === 'waiting' ? 'waiting' : '', ev: u.get('e') || '' };
+    // Each other place of Rooms is a list of pages. The address holds its view: the filters, the sort and the layout.
+    const v = Drive.parseView(u, folders), lay = u.get('view');
+    order = { sort: v.sort, dir: v.dir };
+    if (lay === 'list' || lay === 'grid') view = lay;
+    return { ...(p.list === 'recent' ? { list: 'home' } : p), type: v.type, mod: v.mod, in: v.in, acc: v.acc };
   }
   // Ledger has no Activity place. The Activity lens of Home is that list.
   if (p.list === 'activity') return { list: 'home', lens: 'activity' };
@@ -42,16 +47,30 @@ function markOpened(slug, version) {
   try { localStorage.setItem(OPENED_KEY, JSON.stringify(opened)); } catch {}
   return true;
 }
+// The time of the last open of each page, in this browser. The page list can sort by it. The viewer writes it too.
+const OPENED_AT_KEY = 'pages-opened-at';
+let openedAt = {};
+function loadOpenedAt() {
+  try { const o = JSON.parse(localStorage.getItem(OPENED_AT_KEY) || '{}'); openedAt = o && typeof o === 'object' ? o : {}; } catch { openedAt = {}; }
+}
+loadOpenedAt();
+function markTime(slug) {
+  openedAt[slug] = new Date().toISOString();
+  try { localStorage.setItem(OPENED_AT_KEY, JSON.stringify(openedAt)); } catch {}
+}
 // A link to a page marks the page as opened. A row in the room does not: it shows the change in the room.
 document.addEventListener('click', (e) => {
   const a = e.target.closest && e.target.closest('a[href^="/p/"]');
   if (!a || (a.closest('.e-row') && inRoom() && plain(e))) return;
   const m = a.getAttribute('href').match(/^\/p\/([a-z0-9-]+\/[a-z0-9-]+)/);
   const p = m && pageOf(m[1]);
-  if (p && markOpened(p.slug, p.latest)) setTimeout(render, 0);
+  if (!p) return;
+  const news = markOpened(p.slug, p.latest);
+  markTime(p.slug);
+  if (news || order.sort === 'opened') setTimeout(render, 0);
 }, true);
 // The back button can show this document again from the cache. The viewer records what it showed, so read it again.
-addEventListener('pageshow', (e) => { if (e.persisted) { loadOpened(); render(); poll(); } });
+addEventListener('pageshow', (e) => { if (e.persisted) { loadOpened(); loadOpenedAt(); render(); poll(); } });
 
 // ─── News: what a page or an item has for the reader ───
 const seenVersion = (slug) => opened[slug] || 0;
@@ -146,21 +165,25 @@ function took(x) {
 // ─── The sidebar ───
 const dot = (cls) => '<span class="s-mark ' + (cls || '') + '"><i></i></span>';
 const MARKS = { work: () => '<span class="s-mark">' + icn('loader', 'is-spin') + '</span>', failed: () => dot('c-red'), question: () => dot('c-amber'), new: () => dot() };
-const markOf = (p) => { const n = newsOf(p); return n ? MARKS[n.kind]() : ''; };
+/** True when the page has a version that the reader did not open. */
+const isNew = (p) => p.latest > seenVersion(p.slug);
+// In Rooms a page has one mark: the dot of a version that the reader did not open. What an assistant did is in Activity.
+const markOf = (p) => { if (ROOMS) return isNew(p) ? '<span class="s-mark" title="New version"><i></i></span>' : ''; const n = newsOf(p); return n ? MARKS[n.kind]() : ''; };
 /** A folder that is closed shows the strongest mark of the pages in it. */
 function folderMark(f) {
   const kinds = new Set(pagesUnder(f.id).map((p) => (newsOf(p) || {}).kind));
   const k = ['work', 'failed', 'question', 'new'].find((x) => kinds.has(x));
   return k ? MARKS[k]() : '';
 }
-const sidePage = (p, d) => '<a class="l-nav s-page" href="' + pageHref(p, newsOf(p)) + '" style="--d:' + d + '" title="' + h(p.title) + '">' + icn(p.kind === 'deck' ? 'deck' : 'file') + '<span class="s-name">' + h(p.title) + '</span>' + markOf(p) + '</a>';
+const sidePage = (p, d) => '<a class="l-nav s-page" href="' + (ROOMS ? '/p/' + p.slug : pageHref(p, newsOf(p))) + '" style="--d:' + d + '" title="' + h(p.title) + '">' + icn(p.kind === 'deck' ? 'deck' : 'file') + '<span class="s-name">' + h(p.title) + '</span>' + markOf(p) + '</a>';
 
 function studySide() {
   digest();
   const here = place.folder, outline = LAYOUT === 'ledger';
   pathOf(here).forEach((f) => f.id !== here && expanded.add(f.id));
   $('#scroll').classList.toggle('is-room', !hits && place.list === 'activity');
-  $('.h-tools .v-seg').style.display = outline || place.list === 'activity' ? 'none' : '';
+  // The layout switch of the bar is for the classic library. Ledger has one layout, and Rooms has the switch in the head of its list.
+  $('.h-tools .v-seg').style.display = 'none';
   $$('[data-nav]').forEach((a) => { if (!here && a.dataset.nav === place.list) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   const act = $('#n-activity');
   if (act) act.innerHTML = (working ? icn('loader', 'is-spin') : '') + (waiting ? '<span>' + waiting + '</span>' : '');
@@ -195,14 +218,6 @@ function whereChip(p) {
   if (place.folder && p.folder_id === place.folder) return '<span class="g-where"></span>';
   return f ? '<span class="h-where g-where ' + ramp(f) + '"><svg class="l-glyph fo" viewBox="0 0 24 24" aria-hidden="true">' + D.icons.folder + '</svg><span>' + h(f.name) + '</span></span>' : '<span class="h-where g-where is-none"><span>Not in a folder</span></span>';
 }
-/** The card of the grid. A page that has news says it in the place of its folder and date. The share mark stays. The kind gives its space to the news. */
-function sCard(p) {
-  const n = newsOf(p);
-  const sub = shared(p) + (n ? (n.item ? news(n.item, 'card', n.kind === 'work' ? '' : ', ' + ago(n.item.at)) : newsLine(' is-new', icn('upload'), 'New version', ', ' + ago(p.updated_at)))
-    : kind(p) + '<span>' + h(place.folder ? 'Published ' + ago(p.updated_at) : where(p) + ', ' + ago(p.updated_at)) + '</span>');
-  return '<article class="h-card' + (n ? ' has-news' : '') + '" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="' + pageHref(p, n) + '" draggable="false">'
-    + thumb(p, Math.min(2, p.latest - 1)) + '<span class="h-title">' + h(p.title) + '</span><span class="h-sub">' + sub + '</span></a>' + menu(p) + '</article>';
-}
 /** The ledger row: the page, its latest change, its folder, the time of the change. */
 function gRow(p) {
   const n = newsOf(p), last = lastItem(p);
@@ -222,8 +237,6 @@ function byDay(list, row, cls) {
   let day = '';
   return list.map((x) => { const d = dayOf(x.at), head = d === day ? '' : '<h3 class="' + cls + '">' + h(d) + '</h3>'; day = d; return head + row(x); }).join('');
 }
-const pageBlock = (title, list, more) => '<section class="l-block"><div class="l-head"><h2>' + title + '</h2>' + (more || '') + '</div>'
-  + (view === 'grid' ? '<div class="h-grid">' + list.map(sCard).join('') + '</div>' : '<div class="g-list">' + list.map(gRow).join('') + '</div>') + '</section>';
 const seeAll = (n) => '<button type="button" class="l-more" data-see="recent">See all ' + n + '</button>';
 /** The Ledger list: Pages or Activity, for the pages and the events of one place. */
 function lensBlock(list, events, cap) {
@@ -241,29 +254,27 @@ function lensBlock(list, events, cap) {
 
 // ─── The views ───
 function studyMain(main) {
-  const top = childrenOf(null), all = [...pages].sort(byLast);
   const known = feed.filter((x) => pageOf(x.slug));
+  if (ROOMS) {
+    document.title = 'Pages';
+    if (hits) return driveHits(main);
+    return place.list === 'activity' ? roomView(main, known) : driveMain(main);
+  }
+  // Ledger: each place is one list with two lenses.
+  const top = childrenOf(null), all = [...pages].sort(byLast);
   if (place.folder) {
     const f = folderOf(place.folder), kids = childrenOf(f.id), here = pages.filter((p) => p.folder_id === f.id), under = pagesUnder(f.id);
     const slugs = new Set(under.map((p) => p.slug)), events = known.filter((x) => slugs.has(x.slug));
     const newest = under.map((p) => p.updated_at).sort().pop();
     document.title = f.name + ' – Pages';
     main.innerHTML = '<div class="l-title"><h1>' + h(f.name) + '</h1><button type="button" class="v-icon" data-edit="' + f.id + '" aria-label="Edit folder" data-tip="Edit folder" aria-expanded="false">' + svg('pencil') + '</button>'
-      + '<p>' + under.length + (under.length === 1 ? ' page' : ' pages') + (newest ? ', last published ' + ago(newest) : '') + '</p>'
-      + (LAYOUT === 'rooms' && events.length ? '<button type="button" class="l-act" data-room="' + f.id + '">' + icn('activity') + 'Activity in this folder</button>' : '') + '</div>'
+      + '<p>' + under.length + (under.length === 1 ? ' page' : ' pages') + (newest ? ', last published ' + ago(newest) : '') + '</p></div>'
       + (kids.length ? folderBlock(kids, 'Folders') : '')
-      + (LAYOUT === 'ledger' && under.length ? lensBlock(here, events, 200)
-        : here.length ? pageBlock('Pages', here.sort(byLast))
-        : kids.length ? '' : '<div class="l-empty"><b>This folder is empty</b><span>Drag a page here, or choose Move to folder from a page’s menu.</span></div>');
+      + (under.length ? lensBlock(here, events, 200) : kids.length ? '' : '<div class="l-empty"><b>This folder is empty</b><span>Drag a page here, or choose Move to folder from a page’s menu.</span></div>');
     return;
   }
   document.title = 'Pages';
-  if (place.list === 'activity') return roomView(main, known);
-  if (place.list === 'home') {
-    main.innerHTML = (top.length ? folderBlock(top, 'Folders') : '')
-      + (LAYOUT === 'ledger' ? lensBlock(pages, known, 24) : pageBlock('Recent', all.slice(0, 12), all.length > 12 ? seeAll(all.length) : ''));
-    return;
-  }
+  if (place.list === 'home') { main.innerHTML = (top.length ? folderBlock(top, 'Folders') : '') + lensBlock(pages, known, 24); return; }
   const lists = {
     recent: ['Recent', all, ''],
     pinned: ['Pinned', all.filter((p) => p.pinned_at), '<div class="l-empty"><b>No pinned pages</b><span>Pin a page from its menu, or press p.</span></div>'],
@@ -271,8 +282,237 @@ function studyMain(main) {
     unfiled: ['Not in a folder', all.filter((p) => !p.folder_id), '<div class="l-empty"><b>Every page is in a folder</b><span>A page that an agent publishes shows here until you move it.</span></div>'],
   };
   const [title, list, empty] = lists[place.list];
-  main.innerHTML = list.length ? (LAYOUT === 'ledger' ? '<section class="l-block"><div class="l-head"><h2>' + title + '</h2></div><div class="g-list">' + list.map(gRow).join('') + '</div></section>' : pageBlock(title, list)) : empty;
+  main.innerHTML = list.length ? '<section class="l-block"><div class="l-head"><h2>' + title + '</h2></div><div class="g-list">' + list.map(gRow).join('') + '</div></section>' : empty;
 }
+
+// ─── Home in Rooms: the pages as a drive ───────────────────────────
+// A place of Rooms that is not Activity is a list of pages: Home, a folder, the shared pages, the pages in no folder.
+// drive.js holds the rules: which pages pass the filters, and their order. This part draws the controls and the list.
+// The address holds the filters, the sort and the layout, so a view can be shared and it survives a reload.
+// A page has one mark of its own here: a dot for a version that the reader did not open. What an assistant did is in Activity.
+const NEW_DOT = '<span class="d-new" role="img" aria-label="New version" title="A new version since you last opened this page"></span>';
+/** The filters that this place offers. A folder is its own location, and the shared pages are their own access. A search looks in every folder. */
+function filtersHere() {
+  const keys = ['type', 'mod'];
+  if (hits || (!place.folder && place.list !== 'unfiled')) keys.push('in');
+  if (hits || place.list !== 'shared') keys.push('acc');
+  return keys;
+}
+/** The view of this place: the filters that it offers, and the sort. */
+function viewHere() {
+  const v = { type: '', mod: '', in: '', acc: '', sort: order.sort, dir: order.dir };
+  for (const k of filtersHere()) v[k] = place[k] || '';
+  return v;
+}
+/** The folders as the choices of the Folder filter: the tree, then the pages in no folder. */
+function folderChoices() {
+  const out = [];
+  const walk = (parent, d) => childrenOf(parent).forEach((f) => { out.push({ id: f.id, name: f.name, depth: d, folder: f }); walk(f.id, d + 1); });
+  walk(null, 0);
+  out.push({ id: 'none', name: 'Not in a folder', depth: 0, folder: null, rule: out.length > 0 });
+  return out;
+}
+const FILTERS = {
+  type: { name: 'Type', any: 'Any type', choices: () => Drive.TYPES },
+  mod: { name: 'Modified', any: 'Any time', choices: () => Drive.RANGES },
+  in: { name: 'Folder', any: 'Any folder', choices: folderChoices },
+  acc: { name: 'Access', any: 'Any access', choices: () => Drive.ACCESS },
+};
+const folderGlyph = '<svg class="l-glyph fo" viewBox="0 0 24 24" aria-hidden="true">' + D.icons.folder + '</svg>';
+/** A filter in the head of the list. It has no fill until it is set. Then it shows its value. */
+function chip(key, v) {
+  const f = FILTERS[key], cur = v[key] ? f.choices().find((c) => c.id === v[key]) : null;
+  return '<button type="button" class="d-chip' + (cur ? ' is-on' : '') + (cur && cur.folder ? ' ' + ramp(cur.folder) : '') + '" data-filter="' + key + '" aria-haspopup="menu" aria-expanded="false"'
+    + (cur ? ' aria-label="' + h(f.name + ': ' + cur.name) + '"' : '') + '>' + (cur && cur.folder ? folderGlyph : '') + '<span>' + h(cur ? cur.name : f.name) + '</span>' + icn('down') + '</button>';
+}
+/** The head of a page list: its name or its count, the filters, then the sort and the layout. */
+function driveHead(title, v) {
+  const s = Drive.sortOf(v.sort);
+  const lay = (name, label, end) => '<button type="button" data-layout-of="' + name + '" aria-label="' + label + '" data-tip="' + label + '"' + (end ? ' data-tip-end' : '') + ' aria-pressed="' + (view === name) + '">' + icn(name) + '</button>';
+  return '<div class="l-head d-head"><h2>' + title + '</h2>'
+    + '<div class="d-chips" role="group" aria-label="Filters">' + filtersHere().map((k) => chip(k, v)).join('') + (Drive.isOn(v) ? '<button type="button" class="d-clear" data-clear>Clear</button>' : '') + '</div>'
+    + (hits ? '' : '<div class="d-tools"><button type="button" class="d-chip d-sort" data-sort-menu aria-haspopup="menu" aria-expanded="false" aria-label="' + h('Sort: ' + s.name + ', ' + s[v.dir].toLowerCase()) + '"><span>' + h(s.name) + '</span>' + icn(v.dir === 'asc' ? 'arrowUp' : 'arrowDown') + '</button>'
+      + '<div class="v-seg d-lay" role="group" aria-label="Layout">' + lay('grid', 'Grid') + lay('list', 'List', true) + '</div></div>') + '</div>';
+}
+
+/** A time for a card or a row: the age of a new time, the day of an older one, with the year when it is not this year. */
+function dWhen(iso) {
+  const d = new Date(iso);
+  return Date.now() - d.getTime() < 604800000 || d.getFullYear() === new Date().getFullYear() ? ago(iso) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+/** The small line of a page: its folder, and the time that the sort uses. The sort names that time, and the full time shows on hover.
+    A page that the reader did not open has no time under the sort by the last open, so its line is the folder only.
+    In a folder the line has no folder name, so a word says which time it is: "Created Oct 13", "Not opened".
+    The line has two parts. When the line is too long, the name of the folder gets shorter and the time stays whole. */
+function subLine(p, v) {
+  const at = Drive.dateOf(p, v.sort, openedAt), here = place.folder && p.folder_id === place.folder;
+  const verb = v.sort === 'opened' ? 'Opened' : v.sort === 'created' ? 'Created' : 'Modified';
+  const when = at ? (here ? verb + ' ' : '') + dWhen(at) : here ? 'Not opened' : '';
+  const full = at ? verb + ' ' + new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  return (here ? '' : '<span class="d-in">' + h(where(p)) + (when ? ',' : '') + '</span>')
+    + (when ? '<span class="d-at"' + (full ? ' title="' + h(full) + '"' : '') + '>' + h(when) + '</span>' : '');
+}
+function dCard(p, v) {
+  const fresh = isNew(p);
+  return '<article class="h-card' + (fresh ? ' is-new' : '') + '" data-slug="' + p.slug + '" draggable="true"><a class="h-link" href="/p/' + p.slug + '" draggable="false">'
+    + thumb(p, Math.min(2, p.latest - 1)) + '<span class="h-title">' + (fresh ? NEW_DOT : '') + h(p.title) + '</span>'
+    + '<span class="h-sub">' + shared(p) + kind(p) + '<span class="d-line">' + subLine(p, v) + '</span></span></a>' + menu(p) + '</article>';
+}
+/** The time column shows the time that the sort uses: the last open, the first publish, or the last change. */
+const dateKey = (v) => (v.sort === 'opened' || v.sort === 'created' ? v.sort : 'modified');
+/** The names of the columns. A click sorts the list by that column, and a second click turns the order. */
+function dCols(v) {
+  const col = (key, name, cell) => {
+    const on = v.sort === key, s = Drive.sortOf(key);
+    return '<span class="d-cell ' + cell + '"><button type="button" class="d-col' + (on ? ' is-on' : '') + '" data-sort="' + key + '" aria-label="' + h(on ? name + ', sorted, ' + s[v.dir].toLowerCase() : 'Sort by ' + name.toLowerCase()) + '">'
+      + '<span>' + name + '</span>' + (on ? icn(v.dir === 'asc' ? 'arrowUp' : 'arrowDown') : '') + '</button></span>';
+  };
+  const key = dateKey(v);
+  return '<div class="d-cols">' + col('name', 'Name', 'is-name') + col('folder', 'Folder', 'is-where') + col(key, { modified: 'Modified', opened: 'Opened', created: 'Created' }[key], 'is-when')
+    + col('versions', 'Versions', 'is-vers') + col('access', 'Access', 'is-acc') + '</div>';
+}
+function dRow(p, v) {
+  const fresh = isNew(p), at = Drive.dateOf(p, v.sort, openedAt);
+  return '<article class="g-row d-row' + (fresh ? ' is-new' : '') + '" data-slug="' + p.slug + '" draggable="true"><a class="d-link" href="/p/' + p.slug + '" draggable="false">' + thumb(p, 0)
+    + '<span class="d-cell is-name"><span class="g-title">' + (fresh ? NEW_DOT : '') + '<span class="g-name">' + h(p.title) + '</span>' + kind(p) + (p.pinned_at ? '<span class="g-pin" title="Pinned">' + svg('pin') + '</span>' : '') + '</span>'
+    + '<span class="d-sub d-line">' + subLine(p, v) + '</span></span>'
+    + '<span class="d-cell is-where">' + whereChip(p) + '</span>'
+    + '<span class="d-cell is-when"' + (at ? ' title="' + h(new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })) + '"' : '') + '>' + (at ? dWhen(at) : 'Not opened') + '</span>'
+    + '<span class="d-cell is-vers">' + p.latest + '</span>'
+    + '<span class="d-cell is-acc' + (p.shared ? ' is-shared' : '') + '">' + svg(p.shared ? 'globe' : 'lock') + '<span>' + (p.shared ? 'Shared by link' : 'Private') + '</span></span>'
+    + '</a>' + menu(p) + '</article>';
+}
+
+// A long list shows its first pages, and one button shows the rest. The choice holds for the view that the reader made it in.
+let cap = 120, allOf = '';
+const viewKey = () => JSON.stringify([place.folder || place.list, viewHere(), view]);
+const pagesWord = (n) => (n ? n + (n === 1 ? ' page' : ' pages') : 'No pages');
+const noMatch = (text) => '<p class="d-none">' + text + '. <button type="button" class="d-clear" data-clear>Clear filters</button></p>';
+function driveMain(main) {
+  const v = viewHere(), on = Drive.isOn(v), f = place.folder ? folderOf(place.folder) : null;
+  // The bar names the place, so the head of the list says only what the list holds.
+  let top = '', scope = pages, none = '<div class="l-empty"><b>No pages yet</b><span>Publish one with <code>agent-pages publish &lt;page&gt;</code>.</span></div>';
+  if (f) {
+    const kids = childrenOf(f.id), under = pagesUnder(f.id), slugs = new Set(under.map((p) => p.slug));
+    const newest = under.map((p) => p.updated_at).sort().pop();
+    document.title = f.name + ' – Pages';
+    top = '<div class="l-title"><h1>' + h(f.name) + '</h1><button type="button" class="v-icon" data-edit="' + f.id + '" aria-label="Edit folder" data-tip="Edit folder" aria-expanded="false">' + svg('pencil') + '</button>'
+      + '<p>' + under.length + (under.length === 1 ? ' page' : ' pages') + (newest ? ', last modified ' + ago(newest) : '') + '</p>'
+      + (feed.some((x) => slugs.has(x.slug)) ? '<button type="button" class="l-act" data-room="' + f.id + '">' + icn('activity') + 'Activity in this folder</button>' : '') + '</div>'
+      + (kids.length && !on ? folderBlock(kids, 'Folders') : '');
+    if (!under.length) { main.innerHTML = top + (kids.length ? '' : '<div class="l-empty"><b>This folder is empty</b><span>Drag a page here, or choose Move to folder from a page’s menu.</span></div>'); return; }
+    // With no filter, a folder shows its own pages. A filter looks in the folders below it too.
+    scope = on ? under : pages.filter((p) => p.folder_id === f.id);
+    none = '<p class="g-none">This folder has no pages of its own. A filter looks in its folders too.</p>';
+  } else if (place.list === 'pinned') {
+    scope = pages.filter((p) => p.pinned_at);
+    none = '<div class="l-empty"><b>No pinned pages</b><span>Pin a page from its menu, or press p.</span></div>';
+  } else if (place.list === 'shared') {
+    scope = pages.filter((p) => p.shared);
+    none = '<div class="l-empty"><b>No shared pages</b><span>A page shows here once it has a share link.</span></div>';
+  } else if (place.list === 'unfiled') {
+    scope = pages.filter((p) => !p.folder_id);
+    none = '<div class="l-empty"><b>Every page is in a folder</b><span>A page that an agent publishes shows here until you move it.</span></div>';
+  } else {
+    const shelf = childrenOf(null);
+    top = shelf.length && !on ? folderBlock(shelf, 'Folders') : '';
+  }
+  // A place with no pages has nothing to filter, so it shows only what the reader can do next.
+  if (!f && !scope.length) { main.innerHTML = top + none; return; }
+  const list = Drive.applyView(scope, v, { now: new Date(), folders, openedAt });
+  const shown = allOf === viewKey() ? list : list.slice(0, cap);
+  // The folder column has no use when each page of the list is in the folder of the place.
+  const noWhere = (f && !on) || place.list === 'unfiled';
+  const body = !list.length ? (on ? noMatch('No page matches these filters') : none)
+    : (view === 'grid' ? '<div class="h-grid">' + shown.map((p) => dCard(p, v)).join('') + '</div>'
+      : '<div class="g-list d-list' + (noWhere ? ' no-where' : '') + '">' + dCols(v) + shown.map((p) => dRow(p, v)).join('') + '</div>')
+      + (list.length > shown.length ? '<button type="button" class="d-more" data-all-pages>Show all ' + list.length + ' pages</button>' : '');
+  main.innerHTML = top + '<section class="l-block">' + driveHead(on ? pagesWord(list.length) : 'Pages', v) + body + '</section>';
+}
+/** The results of a search, with the filters above them. A search looks in every folder, and the best match comes first. */
+function driveHits(main) {
+  const v = viewHere(), on = Drive.isOn(v), text = h($('#q').value.trim());
+  if (!hits.length && !on) { main.innerHTML = '<p class="h-none">No page has text that matches “' + text + '”.</p>'; return; }
+  const keep = on ? new Set(Drive.filterPages(pages, v, { now: new Date(), folders, openedAt }).map((p) => p.slug)) : null;
+  const list = keep ? hits.filter((x) => keep.has(x.slug)) : hits;
+  main.innerHTML = '<section class="l-block">' + driveHead(list.length ? list.length + (list.length === 1 ? ' page matches' : ' pages match') : 'No matches', v)
+    + (list.length ? '<div class="h-hits">' + list.map(hit).join('') + '</div>'
+      : hits.length ? noMatch('No page with these filters has text that matches “' + text + '”') : '<p class="h-none">No page has text that matches “' + text + '”.</p>') + '</section>';
+}
+
+/** Changes the filters of this place. The address gets a new entry, so Back shows the list as it was. */
+function setFilters(next) {
+  place = { ...place, ...next };
+  history.pushState(null, '', urlOf(place, true));
+  sel = -1;
+  render();
+}
+/** Changes the sort. The address follows, with no new entry. */
+function setOrder(next) {
+  order = next;
+  history.replaceState(history.state, '', urlOf(place, true));
+  render();
+}
+/** Changes the layout of the list: a grid of cards, or rows with columns. The browser keeps the choice. */
+function setLayout(name) {
+  view = name;
+  try { localStorage.setItem('library-view', view); } catch {}
+  history.replaceState(history.state, '', urlOf(place, true));
+  render();
+}
+
+// The menu of a filter and the menu of the sort share one element. Each choice is a radio item with a check mark.
+const option = (set, id, name, on, more) => '<button type="button" class="v-item d-opt' + ((more && more.cls) || '') + '" role="menuitemradio" aria-checked="' + !!on + '" data-set="' + set + '" data-value="' + h(id) + '"' + ((more && more.attr) || '') + '>'
+  + '<span class="d-tick">' + svg('check') + '</span>' + ((more && more.lead) || '') + '<span>' + h(name) + '</span></button>';
+const RULE = '<div class="v-hr" role="separator"></div>';
+function openMenu(btn, html, label, viaKey, fromLeft) {
+  const pop = $('#pop-filter');
+  pop.innerHTML = html;
+  pop.setAttribute('aria-label', label);
+  openPop(btn, pop, viaKey);
+  if (!open) return;
+  // The filters stand at the left side of the list, so their menu opens in line with the left side of its filter.
+  if (fromLeft) pop.style.right = Math.max(8, innerWidth - btn.getBoundingClientRect().left - pop.offsetWidth) + 'px';
+  const on = viaKey && $('[aria-checked="true"]', pop);
+  if (on) on.focus();
+}
+function openFilter(btn, viaKey) {
+  const key = btn.dataset.filter, f = FILTERS[key], cur = viewHere()[key];
+  openMenu(btn, option(key, '', f.any, !cur) + RULE + f.choices().map((c) => (c.rule ? RULE : '')
+    + option(key, c.id, c.name, cur === c.id, c.folder ? { cls: ' ' + ramp(c.folder), attr: ' style="padding-left:' + (8 + c.depth * 14) + 'px"', lead: folderGlyph } : null)).join(''), f.name, viaKey, true);
+}
+function openSort(btn, viaKey) {
+  const v = viewHere(), s = Drive.sortOf(v.sort);
+  // A sort that only a column offers shows in the menu while the list uses it.
+  openMenu(btn, '<div class="v-label">Sort by</div>' + Drive.SORTS.filter((x) => !x.column || x.id === s.id).map((x) => option('sort', x.id, x.name, x.id === s.id)).join('')
+    + RULE + [s.first, s.first === 'asc' ? 'desc' : 'asc'].map((d) => option('dir', d, s[d], v.dir === d)).join(''), 'Sort', viaKey, false);
+}
+if ($('#pop-filter')) $('#pop-filter').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-set]');
+  if (!b) return;
+  const key = b.dataset.set, value = b.dataset.value, viaKey = e.detail === 0;
+  closePop();
+  if (key === 'sort') setOrder({ sort: value, dir: Drive.sortOf(value).first });
+  else if (key === 'dir') setOrder({ sort: order.sort, dir: value });
+  else setFilters({ [key]: value });
+  // The list is new, so its controls are new too. For a reader who uses the keys, the focus goes back to the control.
+  const again = viaKey && (key === 'sort' || key === 'dir' ? $('#main [data-sort-menu]') : $('#main [data-filter="' + key + '"]'));
+  if (again) again.focus();
+});
+// The keys of the page list: f goes to the filters, and v changes the layout.
+document.addEventListener('keydown', (e) => {
+  if (!ROOMS || e.metaKey || e.ctrlKey || e.altKey || open || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (e.key === 'f') { const c = $('#main .d-chip'); if (c) { e.preventDefault(); c.focus(); } }
+  else if (e.key === 'v' && $('#main .d-lay')) { e.preventDefault(); setLayout(view === 'grid' ? 'list' : 'grid'); }
+});
+// Back and Forward can change the search text of the address. The field and the results follow.
+addEventListener('popstate', () => {
+  if (!ROOMS) return;
+  const text = new URLSearchParams(location.search).get('q') || '';
+  if (!text && !$('#q').value) return;
+  $('#q').value = text;
+  runSearch();
+});
 
 // ─── The room: Activity in Rooms ───
 const inRoom = () => LAYOUT === 'rooms' && place.list === 'activity' && !hits;
@@ -625,9 +865,31 @@ function studySelected(el) {
   pickTimer = setTimeout(() => pick(el.dataset.ev, true), 140);
 }
 
+// A folder in Rooms is narrow. A name that does not fit shows in full when the pointer is on it.
+$('#main').addEventListener('mouseover', (e) => {
+  const name = ROOMS && e.target.closest('.fo-name');
+  if (name) name.title = name.scrollWidth > name.clientWidth ? name.textContent : '';
+});
+
 $('#main').addEventListener('click', (e) => {
   const row = e.target.closest('.e-row');
   if (row && inRoom() && plain(e)) { e.preventDefault(); sel = entries().indexOf(row); if (roomWide()) pick(row.dataset.ev, true); else openItem(row.dataset.ev); return; }
+  const fil = e.target.closest('[data-filter]');
+  if (fil) { e.stopPropagation(); openFilter(fil, e.detail === 0); return; }
+  const srt = e.target.closest('[data-sort-menu]');
+  if (srt) { e.stopPropagation(); openSort(srt, e.detail === 0); return; }
+  if (e.target.closest('[data-clear]')) { setFilters({ type: '', mod: '', in: '', acc: '' }); const c = e.detail === 0 && $('#main .d-chip'); if (c) c.focus(); return; }
+  const col = e.target.closest('[data-sort]');
+  if (col) {
+    const k = col.dataset.sort;
+    setOrder(k === order.sort ? { sort: k, dir: order.dir === 'asc' ? 'desc' : 'asc' } : { sort: k, dir: Drive.sortOf(k).first });
+    const again = e.detail === 0 && $('#main [data-sort="' + k + '"]');
+    if (again) again.focus();
+    return;
+  }
+  const lay = e.target.closest('[data-layout-of]');
+  if (lay) { setLayout(lay.dataset.layoutOf); const again = e.detail === 0 && $('#main [data-layout-of="' + view + '"]'); if (again) again.focus(); return; }
+  if (e.target.closest('[data-all-pages]')) { allOf = viewKey(); render(); return; }
   const lens = e.target.closest('[data-lens]');
   if (lens) { place = { ...place, lens: lens.dataset.lens }; history.replaceState(null, '', urlOf(place)); sel = -1; render(); return; }
   const only = e.target.closest('[data-only]');
@@ -692,3 +954,5 @@ async function poll() {
 }
 if (feed.some((x) => x.kind === 'request' && x.state === 'working')) pollTimer = setTimeout(poll, 4000);
 addEventListener('focus', () => { if (Date.now() - lastPoll > 10000) poll(); });
+// An address with a search text shows that search again.
+if (ROOMS) { const text = new URLSearchParams(location.search).get('q'); if (text) { $('#q').value = text; runSearch(); } }

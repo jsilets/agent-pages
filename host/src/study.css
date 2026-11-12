@@ -87,6 +87,91 @@
 .g-tabs button:focus-visible { outline: 2px solid var(--link); outline-offset: 4px; border-radius: 4px; }
 .g-tabs .s-count { margin: 0; }
 
+/* ─── Home in Rooms: the pages as a drive ─────────────────────────
+   Folders are small objects and pages are larger cards, so more folders fit in a row. The folder object does not change.
+   The head of a page list holds the filters, the sort and the layout. A control has no fill until the reader uses it.
+   A filter that is set shows its value in a filled chip. */
+.l[data-layout="rooms"] .l-folders { grid-template-columns: repeat(auto-fill, minmax(144px, 1fr)); gap: 22px 20px; }
+.l[data-layout="rooms"] .l-folders > .fo { max-width: 176px; }
+.d-head { flex-wrap: wrap; justify-content: flex-start; gap: 6px 12px; min-height: 28px; margin-bottom: 12px; }
+.d-head h2 { flex: none; white-space: nowrap; }
+.d-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.d-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.d-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 232px; height: 26px; padding: 0 6px 0 10px; border: 0; border-radius: 999px; background: none; color: var(--s); font: 500 12.5px var(--sans); white-space: nowrap; cursor: pointer; }
+.d-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.d-chip > svg { flex: none; width: 12px; height: 12px; color: var(--t); }
+.d-chip:hover, .d-chip[aria-expanded="true"] { background: var(--tint); color: var(--p); }
+.d-chip:focus-visible, .d-clear:focus-visible, .d-col:focus-visible, .d-more:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.d-chip.is-on { margin: 0 3px; background: var(--tint2); color: var(--p); font-weight: 600; }
+.d-chip.is-on > svg { color: var(--s); }
+.d-chip > .l-glyph { width: 13px; height: 13px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
+.d-clear { flex: none; height: 26px; margin-left: 2px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: var(--s); font: 500 12.5px var(--sans); cursor: pointer; }
+.d-clear:hover { background: var(--tint); color: var(--p); }
+.d-sort > svg { width: 13px; height: 13px; }
+.d-lay { margin: 0; }
+.d-lay button { position: relative; flex: none; width: 30px; height: 24px; padding: 0; }
+/* The dot of a version that the reader did not open. It is the one mark of a page in this list. */
+.d-new { flex: none; display: inline-block; width: 6px; height: 6px; margin: 0 6px 2px 0; border-radius: 50%; background: var(--new); vertical-align: middle; }
+.g-title .d-new { margin: 0 -2px 0 0; }
+/* The small line of a page has two parts: the folder and the time. A line that is too long cuts the name of the folder first.
+   The large shrink number gives the folder all of the cut. A smaller number takes a part of a pixel from the time, and that shows as "…". */
+.d-line { display: flex; gap: 0.3em; min-width: 0; white-space: nowrap; }
+.d-in { flex: 0 1000000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.d-at { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The menu of a filter and of the sort: each choice has a place for a check mark. */
+.d-menu { min-width: 204px; max-height: min(440px, calc(100vh - 96px)); overflow-y: auto; }
+.d-menu > * { flex: none; }
+.d-opt { min-height: 30px; gap: 8px; padding: 5px 12px 5px 8px; }
+.d-tick { flex: none; display: inline-grid; place-items: center; width: 14px; height: 14px; }
+.d-tick svg { width: 14px; height: 14px; color: var(--p); }
+.d-opt[aria-checked="false"] .d-tick svg { visibility: hidden; }
+.d-opt .l-glyph { flex: none; width: 15px; height: 15px; fill: var(--fo-front); stroke: var(--fo-edge); stroke-width: 1.4; }
+/* The list: one row for each page, below the names of the columns. Each name sorts the list.
+   A cell has the same width in the head and in each row. When the list is narrow, cells go away from the right. */
+.d-list { container-type: inline-size; }
+.d-cols, .d-link { display: flex; align-items: center; gap: 16px; padding: 0 44px 0 8px; }
+.d-cols { height: 30px; margin-bottom: 3px; box-shadow: 0 0.5px 0 var(--b); }
+.d-link { height: 48px; border-radius: 10px; color: inherit; text-decoration: none; outline: none; }
+.d-link:hover, .d-row.is-sel .d-link { background: var(--tint); text-decoration: none; }
+.d-row.is-sel .d-link, .d-link:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--link) 55%, transparent); }
+.d-link .h-thumb { flex: none; width: 56px; }
+.d-cell { flex: none; min-width: 0; font-size: 12.5px; color: var(--s); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.d-cell.is-name { flex: 1; }
+.d-cell.is-where { width: 176px; }
+.d-cell.is-when { width: 100px; }
+.d-cell.is-vers { width: 60px; text-align: right; }
+.d-cell.is-acc { display: flex; align-items: center; gap: 6px; width: 128px; margin-left: 8px; color: var(--t); }
+.d-cell.is-acc.is-shared { color: var(--s); }
+.d-cell.is-acc svg { flex: none; width: 13px; height: 13px; }
+.d-cell.is-acc > span { overflow: hidden; text-overflow: ellipsis; }
+.d-list .g-where { display: flex; }
+.d-row.is-new .g-name { font-weight: 600; }
+.d-sub { display: none; }
+.d-col { display: inline-flex; align-items: center; gap: 4px; height: 24px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--s); font: 500 12px var(--sans); white-space: nowrap; cursor: pointer; }
+.d-col:hover { background: var(--tint); color: var(--p); }
+.d-col.is-on { color: var(--p); font-weight: 600; }
+.d-col svg { width: 12px; height: 12px; }
+.d-list.no-where .is-where { display: none; }
+@container (max-width: 860px) {
+  .d-cell.is-acc { width: 14px; }
+  .d-cell.is-acc > span, .d-cols .is-acc .d-col { display: none; }
+}
+@container (max-width: 700px) { .d-cell.is-vers { display: none; } }
+@container (max-width: 580px) { .d-cell.is-where { display: none; } }
+/* A narrow list has two lines for each page: the name, then the folder and the time. */
+@container (max-width: 460px) {
+  .d-cols, .d-cell.is-when, .d-cell.is-acc, .d-row .h-kind { display: none; }
+  .d-link { height: auto; gap: 12px; padding: 9px 40px 9px 8px; }
+  .d-link .h-thumb { width: 52px; }
+  .d-sub { display: flex; font-size: 12.5px; line-height: 18px; }
+  .d-row .h-menu { top: 14px; opacity: 1; }
+}
+.d-more { display: block; margin: 16px 0 0; padding: 0 12px; height: 30px; border: 0; border-radius: 8px; background: var(--tint); color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
+.d-more:hover { background: var(--tint2); }
+/* No page passes the filters: one sentence, and the way out next to it. */
+.d-none { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; margin: 0; padding: 6px 0; font-size: 13.5px; color: var(--s); }
+.d-none .d-clear { color: var(--p); }
+
 /* ─── Activity in Rooms: the list of changes on the left, the page itself on the right. ─── */
 .h-scroll.is-room { overflow: hidden; }
 .is-room .h-main { height: 100%; max-width: none; padding: 0; box-sizing: border-box; }
@@ -216,6 +301,15 @@
   .r.is-open .r-back { display: inline-flex; }
 }
 @media (max-width: 760px) {
+  .l[data-layout="rooms"] .l-folders { grid-template-columns: none; grid-auto-columns: 34%; gap: 14px; }
+  .d-head { gap: 8px 10px; }
+  .d-tools { order: 1; }
+  .d-chips { order: 2; flex: 0 0 calc(100% + 32px); flex-wrap: nowrap; gap: 6px; margin: 0 -16px; padding: 0 16px; box-sizing: border-box; overflow-x: auto; scrollbar-width: none; }
+  .d-chips::-webkit-scrollbar { display: none; }
+  .d-chips .d-chip, .d-chips .d-clear { flex: none; height: 30px; }
+  .d-chips .d-chip { margin: 0; padding: 0 8px 0 12px; background: var(--tint); }
+  .d-chips .d-chip.is-on { background: var(--tint2); }
+  .d-lay button { height: 28px; }
   .g-link { grid-template-columns: 52px minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 0 12px; height: auto; padding: 9px 40px 9px 8px; }
   .g-link .h-thumb { grid-row: 1 / span 2; align-self: center; }
   .g-title { grid-column: 2; grid-row: 1; }

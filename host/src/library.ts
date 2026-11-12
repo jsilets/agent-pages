@@ -7,6 +7,7 @@ import type { Item } from './activity';
 import studyCss from './study.css?raw';
 import studyJs from './study.js?raw';
 import diffJs from './diff.js?raw';
+import driveJs from './drive.js?raw';
 import frameCss from './review-frame.css?raw';
 import frameJs from './review-frame.js?raw';
 
@@ -55,17 +56,23 @@ const LUCIDE: Record<string, string> = {
   link2: '<path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
   up: '<path d="m7 14 5-5 5 5"/>',
+  arrowUp: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  arrowDown: '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
 };
 const lu = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${LUCIDE[name]}</svg>`;
 
 /**
- * The diff core as a part of the library script. The page has one inline script and no modules, so the exports go,
- * and a function scope keeps the names of the core apart from the names of the library.
+ * A module as a part of the library script. The page has one inline script and no modules, so the exports go,
+ * and a function scope keeps the names of the module apart from the names of the library.
  * A backslash goes into each "<!--" and "</script" of the source: in a string they mean the same,
  * and the HTML parser does not read them as the start of a comment or the end of the script.
  */
-export const inlineDiff = (source: string) =>
-  `const Diff = (() => {\n${source.replace(/^export /gm, '').replace(/<!--/g, '<\\!--').replace(/<\/script/gi, '<\\/script')}\nreturn { diffHtml, summarize };\n})();\n`;
+const inlineModule = (name: string, source: string, exports: string[]) =>
+  `const ${name} = (() => {\n${source.replace(/^export /gm, '').replace(/<!--/g, '<\\!--').replace(/<\/script/gi, '<\\/script')}\nreturn { ${exports.join(', ')} };\n})();\n`;
+/** The diff core: Activity in Rooms compares two versions of a page with it. */
+export const inlineDiff = (source: string) => inlineModule('Diff', source, ['diffHtml', 'summarize']);
+/** The rules of the page list: Home in Rooms filters and sorts the pages with them. */
+export const inlineDrive = (source: string) => inlineModule('Drive', source, ['TYPES', 'RANGES', 'ACCESS', 'SORTS', 'sortOf', 'parseView', 'viewQuery', 'isOn', 'filterPages', 'dateOf', 'applyView']);
 
 // The brand mark without its tile, drawn in the text colour: dark on light, white on dark. The tile is for tabs and home screens.
 const MARK = `<svg class="h-mark" viewBox="24 32 208 192" aria-hidden="true">
@@ -376,7 +383,7 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
           <dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous page</dd>
           <dt><kbd>o</kbd></dt><dd>Open</dd>
           <dt><kbd>c</kbd></dt><dd>Copy link</dd>
-          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>n</kbd><kbd>N</kbd></dt><dd>Next and previous change, in Activity</dd>\n          <dt><kbd>s</kbd></dt><dd>Show or hide the changes</dd>' : ''}
+          <dt><kbd>p</kbd></dt><dd>Pin or unpin</dd>${layout === 'rooms' ? '\n          <dt><kbd>f</kbd></dt><dd>Filter the pages</dd>\n          <dt><kbd>v</kbd></dt><dd>Grid or list</dd>\n          <dt><kbd>n</kbd><kbd>N</kbd></dt><dd>Next and previous change, in Activity</dd>\n          <dt><kbd>s</kbd></dt><dd>Show or hide the changes</dd>' : ''}
         </dl>
       </div>
     </header>
@@ -396,11 +403,13 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
   <div class="l-edit-row"><button type="button" class="v-create" id="fsave">Create folder</button></div>
   <button type="button" class="v-item is-danger" id="fdelete" hidden>${icon('trash')}Delete folder, keep its pages</button>
 </div>
-${layout === 'rooms' ? '<div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>\n' : ''}<div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, ...(layout === 'rooms' ? { frame: { css: frameCss, js: frameJs } } : {}), icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo } : {}) } })}</script>`;
+${layout === 'rooms' ? '<div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>\n<div class="v-pop d-menu" id="pop-filter" data-anchor role="menu" hidden></div>\n' : ''}<div class="v-toast" id="toast" role="status" hidden></div>
+<script type="application/json" id="data">${data({ pages, folders, activity, layout, me, kit: KIT, ...(layout === 'rooms' ? { frame: { css: frameCss, js: frameJs } } : {}), icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, doc: LUCIDE.doc, ...(study ? { activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } : {}) } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
+    // The rules of the page list come first: the script reads the view from the address before it draws.
+    (layout === 'rooms' ? inlineDrive(driveJs) : 'const Drive = null;\n') +
     `
 const D = JSON.parse($('#data').textContent);
 const svg = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + D.icons[name] + '</svg>';
@@ -419,6 +428,8 @@ try {
 
 let view = 'grid';
 try { if (localStorage.getItem('library-view') === 'list') view = 'list'; } catch {}
+// The sort of the page list. Rooms reads it from the address and keeps it from place to place.
+let order = { sort: 'modified', dir: 'desc' };
 let hits = null, sel = -1, menuSlug = null, editId = null, editColor = null, dragSlug = null;
 const expanded = new Set();
 try { JSON.parse(localStorage.getItem('library-open') || '[]').forEach((id) => expanded.add(id)); } catch {}
@@ -433,7 +444,9 @@ function placeFromUrl() {
 }
 let place = placeFromUrl();
 // The address keeps the layout, and in a study layout the lens, the filters and the open item too.
-const urlOf = (p) => {
+// In Rooms it keeps the view of the page list: the filters of the place, the sort, the list layout,
+// and the search text when the address is for the view on the screen.
+const urlOf = (p, withSearch) => {
   const q = new URLSearchParams();
   if (STUDY) q.set('layout', D.layout);
   if (p.folder) q.set('f', p.folder); else if (p.list !== 'home') q.set('v', p.list);
@@ -441,6 +454,12 @@ const urlOf = (p) => {
   if (p.af) q.set('af', p.af);
   if (p.only) q.set('only', p.only);
   if (p.ev) q.set('e', p.ev);
+  if (Drive && p.list !== 'activity') {
+    for (const [k, v] of Drive.viewQuery({ type: p.type, mod: p.mod, in: p.in, acc: p.acc, ...order })) q.set(k, v);
+    if (view === 'list') q.set('view', 'list');
+    const find = withSearch && hits ? $('#q').value.trim() : '';
+    if (find) q.set('q', find);
+  }
   const text = q.toString();
   return text ? '/?' + text : '/';
 };
@@ -539,7 +558,8 @@ function folderCard(f) {
     return '<span class="fo-sheet' + (i === 2 ? ' is-front' : '') + (p && p.thumb ? '' : ' is-blank') + '" style="--i:' + i + ';--x:' + fan.x + ';--y:' + fan.y + ';--r:' + fan.r + ';--s:' + fan.s + '"' + (p ? ' data-sheet="' + p.slug + '"' : '') + '>' + (p && p.thumb ? imgs(p, '') : '') + '</span>';
   }).join('');
   const bits = [inside.length + (inside.length === 1 ? ' page' : ' pages')];
-  if (kids) bits.push(kids + (kids === 1 ? ' folder' : ' folders'));
+  // In Rooms a folder is narrow. Its line has the number of pages and the age, and the folders show when it opens.
+  if (kids && !Drive) bits.push(kids + (kids === 1 ? ' folder' : ' folders'));
   const when = inside[0] ? ago(inside[0].updated_at) : '';
   return '<a class="fo ' + ramp(f) + '" href="' + urlOf({ folder: f.id }) + '" data-folder="' + f.id + '">'
     + '<span class="fo-obj">' + FOLDER_BACK + sheets + '<span class="fo-front"></span></span>'
@@ -583,7 +603,7 @@ function render() {
   $$('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   renderTree();
   renderCrumb();
-  if (hits) {
+  if (hits && !Drive) {
     main.innerHTML = hits.length
       ? '<div class="l-head"><h2>' + hits.length + (hits.length === 1 ? ' page matches' : ' pages match') + '</h2></div><div class="h-hits">' + hits.map(hit).join('') + '</div>'
       : '<p class="h-none">No page has text that matches \\u201c' + h($('#q').value.trim()) + '\\u201d.</p>';
@@ -822,7 +842,7 @@ $$('[data-layout-set]').forEach((b) => b.addEventListener('click', () => {
   const q = new URLSearchParams(location.search);
   try { localStorage.setItem('library-layout', b.dataset.layoutSet); } catch {}
   if (b.dataset.layoutSet === 'classic') q.delete('layout'); else q.set('layout', b.dataset.layoutSet);
-  ['lens', 'af', 'only', 'e'].forEach((k) => q.delete(k));
+  ['lens', 'af', 'only', 'e', 'type', 'mod', 'in', 'acc', 'sort', 'dir', 'view', 'q'].forEach((k) => q.delete(k));
   if (!['recent', 'pinned', 'shared'].includes(q.get('v'))) q.delete('v');
   const text = q.toString();
   location.href = text ? '/?' + text : '/';
@@ -835,7 +855,9 @@ async function runSearch() {
   const text = q.value.trim();
   q.parentElement.classList.toggle('has-q', !!q.value);
   if (ctl) ctl.abort();
-  if (!text) { hits = null; sel = -1; render(); return; }
+  // Rooms keeps the search in the address, with the filters of the list.
+  const keep = () => { if (Drive) history.replaceState(history.state, '', urlOf(place, true)); };
+  if (!text) { hits = null; sel = -1; render(); keep(); return; }
   ctl = new AbortController();
   try {
     const r = await fetch('/api/search?q=' + encodeURIComponent(text), { signal: ctl.signal });
@@ -843,6 +865,7 @@ async function runSearch() {
     hits = await r.json();
     sel = hits.length ? 0 : -1;
     render();
+    keep();
   } catch (err) { if (err.name !== 'AbortError') toast('Search failed'); }
 }
 q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 120); });

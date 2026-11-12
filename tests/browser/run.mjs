@@ -175,10 +175,17 @@ async function signIns(want) {
   }
 }
 /** What a person sees on the status chip: its name, its tooltip, its text, and the color of each dot. */
-const chipSeen = (page) => page.evaluate(() => {
-  const c = document.querySelector('#assist-chip');
+const chipSeen = (page, sel = '#assist-chip') => page.evaluate((sel) => {
+  const c = document.querySelector(sel);
   return { name: c.getAttribute('aria-label'), tip: c.dataset.tip, text: c.innerText.trim(), width: c.getBoundingClientRect().width,
     dots: [...c.querySelectorAll('.a-mark')].filter((m) => m.getClientRects().length).map((m) => { const d = m.querySelector('.a-dot'); if (!d || !d.getClientRects().length) return null; const s = getComputedStyle(d); return { bg: s.backgroundColor, border: s.borderTopWidth }; }) };
+}, sel);
+/** Where the Assistants row sits in the library sidebar: its box, the box of the sidebar, and the last row of the folder tree. */
+const sideBox = (page) => page.evaluate(() => {
+  const r = (e) => e && e.getBoundingClientRect(), row = r(document.querySelector('#assist-side')), side = r(document.querySelector('#side'));
+  const nav = r(document.querySelector('.l-side .l-nav:not(.a-side)'));
+  return { row: row && { top: row.top, bottom: row.bottom, left: row.left, right: row.right, h: row.height }, side: { top: side.top, bottom: side.bottom, left: side.left, right: side.right }, navH: nav && nav.height,
+    visible: !!document.querySelector('#assist-side')?.checkVisibility?.() || !!document.querySelector('#assist-side')?.getClientRects().length };
 });
 const CLAUDE_ONLY = 'Assistants: Claude connected, ChatGPT not connected';
 const NONE = 'Connect an assistant. Assistants: Claude not connected, ChatGPT not connected';
@@ -894,11 +901,15 @@ const TESTS = {
     try {
       for (const path of ['/', '/p/' + slug]) {
         await page.goto(BASE + path);
+        // The library shows the state in a row at the bottom of its sidebar. The viewer shows it in a chip in the bar.
+        const sel = path === '/' ? '#assist-side' : '#assist-chip';
         const chip = page.getByRole('button', { name: CLAUDE_ONLY, exact: true });
         await until(() => chip.isVisible(), `${path}: the chip says "${CLAUDE_ONLY}"`);
-        const seen = await chipSeen(page);
+        ok(await chip.count() === 1 && await chip.evaluate((e, sel) => e.matches(sel), sel), `${path}: the one visible control is ${sel}`);
+        const seen = await chipSeen(page, sel);
         ok(seen.tip === CLAUDE_ONLY, `${path}: the tooltip has the same text (${seen.tip})`);
-        ok(seen.text === 'C\nC' || seen.text.replace(/\s/g, '') === 'CC', `${path}: the chip shows two marks and no long text (${JSON.stringify(seen.text)})`);
+        if (path === '/') ok(seen.text.replace(/\s/g, '') === 'AssistantsCG', `/: the row says "Assistants" and shows two marks (${JSON.stringify(seen.text)})`);
+        else ok(seen.text === 'C\nG' || seen.text.replace(/\s/g, '') === 'CG', `${path}: the chip shows two marks and no long text (${JSON.stringify(seen.text)})`);
         ok(seen.dots.length === 2 && seen.dots[0].bg === 'rgb(59, 155, 84)', `${path}: Claude has a solid green dot (${JSON.stringify(seen.dots)})`);
         ok(seen.dots[1].bg !== 'rgb(59, 155, 84)' && parseFloat(seen.dots[1].border) > 0, `${path}: ChatGPT has a hollow dot (${JSON.stringify(seen.dots)})`);
         await shot(page, 'chip-' + (path === '/' ? 'library' : 'viewer'));
@@ -920,6 +931,16 @@ const TESTS = {
       await until(() => none.isVisible(), `after the disconnect the chip says "${NONE}"`);
       ok((await chipSeen(page)).text === 'Connect an assistant', 'the chip shows the text "Connect an assistant"');
       await shot(page, 'chip-none');
+      // The library row says the same, and keeps a hollow dot for each assistant.
+      await page.goto(BASE + '/');
+      await until(() => page.getByRole('button', { name: NONE, exact: true }).isVisible(), `the library row says "${NONE}"`);
+      const row = await chipSeen(page, '#assist-side');
+      ok(row.text.replace(/\s/g, '') === 'ConnectanassistantCG', `the row reads "Connect an assistant" with two marks (${JSON.stringify(row.text)})`);
+      ok(row.dots.length === 2 && row.dots.every((d) => d && parseFloat(d.border) > 0), `the row has two hollow dots (${JSON.stringify(row.dots)})`);
+      await page.getByRole('button', { name: NONE, exact: true }).click();
+      await until(() => page.isVisible('#assist'), 'a click on the row opens the Assistants dialog');
+      await page.click('#assist-x');
+      await shot(page, 'chip-none-library');
     } finally {
       await signIns({ claude: true, chatgpt: false });
     }
@@ -934,21 +955,35 @@ const TESTS = {
           await page.setViewportSize({ width: w, height: 800 });
           for (const path of ['/', '/p/' + slug]) {
             await page.goto(BASE + path);
-            await until(() => page.evaluate(() => !document.querySelector('#assist-chip').classList.contains('is-wait')), `${path} at ${w} px: the chip gets its state`);
+            // The library has a sidebar above 760 px. There the row at its bottom shows the state, and the bar has no chip.
+            const side = path === '/' && w > 760;
+            const sel = side ? '#assist-side' : '#assist-chip';
+            await until(() => page.evaluate((sel) => !document.querySelector(sel).classList.contains('is-wait'), sel), `${path} at ${w} px: the chip gets its state`);
             const m = await page.evaluate(() => {
               const bar = document.querySelector('header'), b = bar.getBoundingClientRect();
               const kids = [...bar.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== 'absolute').map((e) => e.getBoundingClientRect());
               const more = document.querySelector('header [data-pop="pop-more"]').getBoundingClientRect(), chip = document.querySelector('#assist-chip').getBoundingClientRect();
-              return { h: b.height, overflow: bar.scrollWidth - bar.clientWidth, page: document.documentElement.scrollWidth - innerWidth, out: kids.filter((r) => r.right > b.right + 0.5 || r.left < b.left - 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5).length, chipRight: chip.right, chipLeft: chip.left, chipH: chip.height, moreLeft: more.left };
+              return { h: b.height, overflow: bar.scrollWidth - bar.clientWidth, page: document.documentElement.scrollWidth - innerWidth, out: kids.filter((r) => r.right > b.right + 0.5 || r.left < b.left - 0.5 || r.top < b.top - 0.5 || r.bottom > b.bottom + 0.5).length, chipRight: chip.right, chipLeft: chip.left, chipH: chip.height, chipShown: chip.width > 0, moreLeft: more.left };
             });
             const where = `${path} at ${w} px (${want.claude ? 'Claude connected' : 'none connected'})`;
             ok(m.h === 44 && m.out === 0, `${where}: the bar keeps one row of 44 px (${m.h} px, ${m.out} items outside)`);
             ok(m.overflow <= 0 && m.page <= 0, `${where}: nothing overflows (bar ${m.overflow} px, page ${m.page} px)`);
-            ok(m.chipH === 32 && m.chipLeft >= 0, `${where}: the chip has the height of the other controls (${m.chipH} px)`);
-            ok(path === '/' || m.chipRight <= m.moreLeft, `${where}: the chip is before More`);
-            const seen = await chipSeen(page);
-            if (w < 1000) ok(seen.width <= 64 && seen.text.replace(/\s/g, '').length <= 2, `${where}: the chip shows marks and dots only (${seen.width} px, ${JSON.stringify(seen.text)})`);
-            if (w < 1000 && !want.claude) ok(seen.dots.length === 1 && parseFloat(seen.dots[0].border) > 0, `${where}: one icon with one hollow dot`);
+            if (side) {
+              ok(!m.chipShown, `${where}: the bar has no chip, because the sidebar has the row`);
+              const s = await sideBox(page);
+              ok(s.visible && s.row, `${where}: the sidebar shows the Assistants row`);
+              ok(Math.abs(s.row.bottom - s.side.bottom) <= 10 && s.row.left >= s.side.left && s.row.right <= s.side.right, `${where}: the row sits at the bottom of the sidebar (row ${JSON.stringify(s.row)}, sidebar ${JSON.stringify(s.side)})`);
+              ok(Math.abs(s.row.h - s.navH) <= 0.5, `${where}: the row has the height of the other sidebar rows (${s.row.h} and ${s.navH} px)`);
+              const seen = await chipSeen(page, sel);
+              ok(seen.dots.length === 2 && seen.dots.every((d) => d), `${where}: the row shows a mark and a dot for each assistant (${JSON.stringify(seen.dots)})`);
+              ok(seen.text.replace(/\s/g, '') === (want.claude ? 'AssistantsCG' : 'ConnectanassistantCG'), `${where}: the row text (${JSON.stringify(seen.text)})`);
+            } else {
+              ok(m.chipH === 32 && m.chipLeft >= 0, `${where}: the chip has the height of the other controls (${m.chipH} px)`);
+              ok(m.chipRight <= m.moreLeft, `${where}: the chip is before More`);
+              const seen = await chipSeen(page);
+              if (w < 1000) ok(seen.width <= 64 && seen.text.replace(/\s/g, '').length <= 2, `${where}: the chip shows marks and dots only (${seen.width} px, ${JSON.stringify(seen.text)})`);
+              if (w < 1000 && !want.claude) ok(seen.dots.length === 1 && parseFloat(seen.dots[0].border) > 0, `${where}: one icon with one hollow dot`);
+            }
             await shot(page, `chip-bar-${path === '/' ? 'library' : 'viewer'}-${want.claude ? 'claude' : 'none'}-${w}`);
           }
         }

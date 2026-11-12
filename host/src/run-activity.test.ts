@@ -173,7 +173,7 @@ describe('the activity routes', () => {
     expect(route(`/s/_run/${RUN}`)).toEqual({ kind: 'run-result', id: RUN });
     expect(route('/s/_run/short/progress')).toEqual({ kind: 'not-found' });
     expect(route(`/s/_run/${RUN}/progress/x`)).toEqual({ kind: 'not-found' });
-    expect(route('/api/pages/g/n/activity')).toEqual({ kind: 'api-activity', slug: 'g/n' });
+    expect(route('/api/pages/g/n/activity')).toEqual({ kind: 'api-page-activity', slug: 'g/n' });
     expect(route('/api/pages/g/activity')).toEqual({ kind: 'api-page', slug: 'g/activity' });
     expect(route(`/api/comments/${'a'.repeat(24)}/run`)).toEqual({ kind: 'api-comment-run', id: 'a'.repeat(24) });
     expect(route('/api/comments/nope/run')).toEqual({ kind: 'not-found' });

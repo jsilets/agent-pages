@@ -81,3 +81,16 @@ export async function verifyAccessJwt(
 export function clearKeyCache() {
   cache.clear();
 }
+
+/**
+ * The Access token from the CF_Authorization cookie. A share link skips Access, so its requests carry no
+ * Cf-Access-Jwt-Assertion header, but the browser of a person who signed in still sends this cookie.
+ */
+export function accessCookie(cookie: string | null): string | null {
+  if (!cookie) return null;
+  for (const part of cookie.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === 'CF_Authorization') return part.slice(i + 1).trim() || null;
+  }
+  return null;
+}

@@ -48,7 +48,7 @@ const Assistants = (() => {
     const rows = Object.keys(PROVIDER).map((a) => {
       const s = state(a) || { handled: false, connected: null, models: [], default_model: null, model: null };
       const row = el('section', 'a-row ' + tone(a)), top = el('div', 'a-top'), whoEl = el('div', 'a-who');
-      const ava = el('span', 'cm-ava is-agent', PROVIDER[a].name[0]); ava.setAttribute('aria-hidden', 'true');
+      const ava = el('span', 'cm-ava is-agent', a === 'chatgpt' ? 'G' : PROVIDER[a].name[0]); ava.setAttribute('aria-hidden', 'true');
       const stEl = el('span', 'a-state' + (s.error ? ' is-warn' : s.connected === true ? ' is-on' : ''), words(s));
       whoEl.append(el('b', '', PROVIDER[a].name), stEl);
       top.append(ava, whoEl);
@@ -202,32 +202,40 @@ const Assistants = (() => {
 // One button in the bar. It shows a mark for each assistant that the host offers, with a dot: solid green for connected,
 // hollow grey for not connected, amber when the runner could not check the sign-in. With no assistant connected, it says
 // "Connect an assistant". With no runner, it says "Assistants" and has no dots. A click opens the Assistants dialog.
+// The library also has a second form of the chip, a row at the bottom of its sidebar (#assist-side). The row always has a
+// label, and it shows the marks of the assistants also when none is connected. Both forms get the same name and tooltip.
 (() => {
-  const chip = $('#assist-chip');
-  if (!chip) return;
-  const marks = $('.a-chip-marks', chip), lbl = $('.a-chip-lbl', chip);
+  const chips = [$('#assist-chip'), $('#assist-side')].filter(Boolean);
+  if (!chips.length) return;
   const P = Assistants.PROVIDER;
   // The shape of the last answer, so the chip keeps its width until the first answer of this page comes.
   const SHAPE = 'assistants-chip';
   let shown = null;
   const mark = (a, dot) => {
-    const m = el('span', 'a-mark ' + tone(a), P[a].name[0]);
+    const m = el('span', 'a-mark ' + tone(a), a === 'chatgpt' ? 'G' : P[a].name[0]);
     if (dot) { m.dataset.state = dot; m.append(el('i', 'a-dot is-' + dot)); }
     return m;
   };
-  function draw(shape, states, tip) {
-    chip.className = 'v-icon a-chip is-' + shape;
-    if (shape === 'list') {
-      marks.replaceChildren(...Object.keys(states).map((a) => {
-        const m = mark(a, states[a]);
-        // A dot that changes its state fades in.
-        if (shown && shown[a] && shown[a] !== states[a]) m.lastChild.classList.add('is-new');
-        return m;
-      }));
-      lbl.textContent = '';
+  const marksOf = (states) => Object.keys(states).map((a) => {
+    const m = mark(a, states[a]);
+    // A dot that changes its state fades in.
+    if (shown && shown[a] && shown[a] !== states[a]) m.lastChild.classList.add('is-new');
+    return m;
+  });
+  function drawOne(chip, shape, states, tip) {
+    const side = chip.id === 'assist-side';
+    const marks = $('.a-chip-marks', chip), lbl = $('.a-chip-lbl', chip);
+    chip.className = (side ? 'l-nav a-side' : 'v-icon a-chip') + ' is-' + shape;
+    if (shape === 'list' || (side && shape === 'none')) {
+      marks.replaceChildren(...marksOf(states));
+      lbl.textContent = !side ? '' : shape === 'none' ? 'Connect an assistant' : 'Assistants';
     } else if (shape === 'wait') {
       marks.replaceChildren(...Object.keys(P).map((a) => mark(a, '')));
-      lbl.textContent = '';
+      lbl.textContent = side ? 'Assistants' : '';
+    } else if (side) {
+      // The row has its own icon. With no runner it has no marks.
+      marks.replaceChildren();
+      lbl.textContent = shape === 'none' ? 'Connect an assistant' : 'Assistants';
     } else {
       // One icon. With no connection it has one hollow dot, which shows when the label does not.
       const one = el('span', 'a-mark is-icon');
@@ -239,6 +247,7 @@ const Assistants = (() => {
     chip.setAttribute('aria-label', tip);
     chip.dataset.tip = tip;
   }
+  const draw = (shape, states, tip) => chips.forEach((c) => drawOne(c, shape, states, tip));
   function update() {
     const { data, failed } = Assistants.summary();
     if (!data && !failed) return;
@@ -265,8 +274,8 @@ const Assistants = (() => {
   let last = 'list';
   try { last = localStorage.getItem(SHAPE) || 'list'; } catch {}
   if (last === 'list') draw('wait', {}, 'Assistants: checking');
-  else { draw(last, {}, 'Assistants: checking'); chip.classList.add('is-wait'); }
+  else { draw(last, {}, 'Assistants: checking'); chips.forEach((c) => c.classList.add('is-wait')); }
   Assistants.onChange(update);
   update();
-  chip.addEventListener('click', (e) => { e.stopPropagation(); closePop(); Assistants.open(); });
+  chips.forEach((c) => c.addEventListener('click', (e) => { e.stopPropagation(); closePop(); Assistants.open(); }));
 })();

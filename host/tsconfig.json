@@ -6,8 +6,10 @@
     "lib": ["es2023"],
     "types": ["@cloudflare/workers-types", "vite/client", "node"],
     "strict": true,
+    "allowJs": true,
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "cloudflare.config.ts", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "cloudflare.config.ts", "vite.config.ts", "vitest.config.ts"],
+  "exclude": ["src/study.js"]
 }

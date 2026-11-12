@@ -19,7 +19,7 @@ git apply cloud/host.patch
 cd host && npx tsc --noEmit && npx vitest run src/sandbox.test.ts
 ```
 
-On 2026-11-12, `git apply --check` passed on the branch `comment-agent-triggers`. The type check passed on a patched copy, and `src/sandbox.test.ts` passed (14 tests). The two other engineers edit `host/src/*`. If the check fails later, apply the four changes by hand. Each change is one line.
+On 2026-11-12, `git apply --check` passed on the branch `comment-agent-triggers`, also after the merge of `main` with the folders, sharing and views. The type check passed on a patched copy, and `src/sandbox.test.ts` passed (15 tests). The two other engineers edit `host/src/*`. If the check fails later, apply the four changes by hand. Each change is one line.
 
 The same diff is in `cloud/host.patch`, so `git apply` can read it.
 

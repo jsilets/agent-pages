@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { applyEdits, auditFromHtml, auditLines, blobKey, ftsQuery, isId, isSlug, isToken, newId, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseMention, parseTheme, pdfKey, plainText, readJson, route, thumbKey, withKit, withoutKit, withTheme } from './lib';
+import { applyEdits, auditFromHtml, auditLines, blobKey, ftsQuery, isFolderColor, isFolderId, isId, isSlug, isToken, newFolderId, newId, newToken, overflowFix, pageChunks, pageKind, parseMeta, parseMention, parseTheme, pdfKey, plainText, readJson, route, thumbKey, withKit, withoutKit, withTheme } from './lib';
 
 describe('isSlug', () => {
   it('takes <group>/<name>', () => {
@@ -56,6 +56,8 @@ describe('route', () => {
     expect(route('/p/g/n/v/3')).toEqual({ kind: 'view', slug: 'g/n', version: 3 });
     expect(route('/raw/g/n/12')).toEqual({ kind: 'raw', slug: 'g/n', version: 12 });
     expect(route('/api/pages')).toEqual({ kind: 'api-list' });
+    expect(route('/api/activity')).toEqual({ kind: 'api-activity' });
+    expect(route('/api/activity/x')).toEqual({ kind: 'not-found' });
     expect(route('/api/pages/g/n')).toEqual({ kind: 'api-page', slug: 'g/n' });
     expect(route('/api/pages/g/n/shares')).toEqual({ kind: 'api-shares', slug: 'g/n' });
     expect(route(`/api/shares/${t}`)).toEqual({ kind: 'api-share', token: t });
@@ -296,5 +298,60 @@ describe('readJson', () => {
     expect(await readJson(req('{'), 100)).toBe(undefined);
     expect(await readJson(req(JSON.stringify({ a: 'é'.repeat(60) })), 100)).toBe(undefined);
     expect(await readJson(req('{}', { 'content-length': '101' }), 100)).toBe(undefined);
+  });
+});
+
+describe('folders', () => {
+  it('routes the folder API', () => {
+    const id = newFolderId();
+    expect(route('/api/folders')).toEqual({ kind: 'api-folders' });
+    expect(route(`/api/folders/${id}`)).toEqual({ kind: 'api-folder', id });
+    expect(route('/api/pages/g/n/folder')).toEqual({ kind: 'api-page-folder', slug: 'g/n' });
+    expect(route('/api/pages/g/n/seen')).toEqual({ kind: 'api-seen', slug: 'g/n' });
+    expect(route('/api/pages/g/n/views')).toEqual({ kind: 'api-views', slug: 'g/n' });
+    expect(route('/p/g/n/views')).toEqual({ kind: 'views-page', slug: 'g/n' });
+    const t = 'a'.repeat(43);
+    expect(route(`/s/${t}/view`)).toEqual({ kind: 'share-start', token: t });
+    expect(route(`/s/${t}/ping`)).toEqual({ kind: 'share-ping', token: t });
+    expect(route(`/s/${t}/pass`)).toEqual({ kind: 'share-pass', token: t });
+    expect(route('/s/short/ping')).toEqual({ kind: 'not-found' });
+    expect(route('/api/folders/short')).toEqual({ kind: 'not-found' });
+    expect(route(`/api/folders/${id}/x`)).toEqual({ kind: 'not-found' });
+  });
+  it('makes ids that it accepts, and refuses other shapes', () => {
+    for (let i = 0; i < 20; i++) expect(isFolderId(newFolderId())).toBe(true);
+    for (const s of ['', 'abc', 'A'.repeat(15), 'A'.repeat(17), 'AAAAAAAAAAAAAAA/', '../AAAAAAAAAAAAA']) expect(isFolderId(s)).toBe(false);
+  });
+  it('takes only the kit ramps as colors', () => {
+    expect(isFolderColor('blue')).toBe(true);
+    expect(isFolderColor('chartreuse')).toBe(false);
+    expect(isFolderColor(null)).toBe(false);
+  });
+});
+
+describe('the two activity routes and the paths under /s/', () => {
+  const t = 'A'.repeat(43), u = '_'.repeat(43);
+  it('keeps the library activity and the page activity apart', () => {
+    expect(route('/api/activity')).toEqual({ kind: 'api-activity' });
+    expect(route('/api/pages/g/n/activity')).toEqual({ kind: 'api-page-activity', slug: 'g/n' });
+    expect(route('/api/activity/g/n').kind).toBe('not-found');
+  });
+  it('sends the connector and the runner paths to their handlers, not to a share link', () => {
+    expect(route('/s/_mcp/discover')).toEqual({ kind: 'mcp', token: 'discover' });
+    for (const w of ['view', 'ping', 'pass', 'pdf', 'raw']) expect(route(`/s/_mcp/${w}`)).toEqual({ kind: 'mcp', token: w });
+    expect(route(`/s/_run/${t}`)).toEqual({ kind: 'run-result', id: t });
+    expect(route(`/s/_run/${t}/progress`)).toEqual({ kind: 'run-progress', id: t });
+    for (const w of ['view', 'ping', 'pass']) expect(route(`/s/_run/${t}/${w}`).kind).toBe('not-found');
+  });
+  it('sends the share paths to the share handlers, also for a token that starts with an underscore', () => {
+    for (const tok of [t, u]) {
+      expect(route(`/s/${tok}`)).toEqual({ kind: 'share-view', token: tok });
+      expect(route(`/s/${tok}/view`)).toEqual({ kind: 'share-start', token: tok });
+      expect(route(`/s/${tok}/ping`)).toEqual({ kind: 'share-ping', token: tok });
+      expect(route(`/s/${tok}/pass`)).toEqual({ kind: 'share-pass', token: tok });
+      expect(route(`/s/${tok}/progress`).kind).toBe('not-found');
+    }
+    expect(route('/s/_mcp').kind).toBe('not-found');
+    expect(route('/s/_run').kind).toBe('not-found');
   });
 });

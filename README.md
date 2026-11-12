@@ -45,6 +45,13 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 - A second Access application bypasses Access for `/s/*`. On that path the Worker checks only the share token, which is 32 random bytes.
 - A person writes comments on a page in the viewer. D1 stores them. A comment with `@claude` or `@chatgpt` has that name as its mention.
 - An outside assistant reaches pages and comments through the MCP connector at `/s/_mcp/<token>`. The connector token is 32 random bytes, and it is the only check on that path. The connector gives access to pages and comments only.
+- The host records the visits to share links on the model of Papermark and DocSend. One load of a link is one visit. The share page counts time only while the tab shows and the reader was active in the last 5 minutes, on the slide or section on screen. It reports every 10 seconds and with `sendBeacon` when the tab hides or closes. Completion is the share of the parts that the visit saw for at least 1 second.
+- Sharing follows Google Docs and DocSend. A page has two kinds of share link:
+  - A link for one person (`kind = 'person'`). The owner adds the person by name, and the Views page names each visit by that person.
+  - The public link (`kind = 'public'`). General access turns it on as "Anyone with the link". When the owner turns General access off, the host revokes the public link. The links for each person keep working.
+- The owner can require an email on the public link, as DocSend does. The share page then shows a form for the email before the page. The host stores the email in `share_passes` and sets the `ap_pass` cookie on the path of that one link for 30 days. Without a pass, the page, its raw HTML and its PDF return 403. The host does not verify the email. A person who signed in to the host skips the form.
+- A visit keeps no IP address. It keeps an email only when the reader gave one at the form. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. Link previews, crawlers, headless browsers and people who signed in to the host do not count. The owner sees the visits on the Views page of each document, `/p/<group>/<name>/views`.
+- The host records which version of each page a person last saw and when they last opened it. The library uses the record for the blue dot of a new version, for Recent, and for the sort by the last open.
 
 | Route | Auth | Does |
 |---|---|---|
@@ -60,9 +67,17 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `PUT`, `DELETE /api/pages/<group>/<name>/pin` | Access | Pin or unpin a page |
 | `POST /api/pages/<group>/<name>/refresh` | Access | Index the latest version and take its thumbnails again |
 | `PUT /api/pages/<group>/<name>` | Access | Store a new version. The body is the HTML. |
-| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links, its comments and its runs. The route also deletes the connector tokens that have this page as their scope. |
-| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
-| `DELETE /api/shares/<token>` | Access | Revoke a share link |
+| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links and their visits, its comments and its runs, and what each reader opened. The route also deletes the connector tokens that have this page as their scope. |
+| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }`, and `"kind"`: `"person"` with a `"name"`, or `"public"` with an optional `"require_email": true` |
+| `PATCH /api/shares/<token>` | Access | Turn the email requirement of the public link on or off. Body: `{ "require_email": true }` |
+| `DELETE /api/shares/<token>` | Access | Revoke a share link. Its visits stay. |
+| `GET /api/activity` | Access | The pages, the activity list and what the reader opened, for the library to poll |
+| `GET`, `POST /api/folders` | Access | List or make folders. POST body: `{ "name", "color", "parent_id" }` |
+| `PATCH`, `DELETE /api/folders/<id>` | Access | Rename, recolor or move a folder, or delete it and move its pages and folders to its parent |
+| `PUT /api/pages/<group>/<name>/folder` | Access | Move a page to a folder. Body: `{ "folder_id" }`, or null for no folder |
+| `GET /p/<group>/<name>/views` | Access | The Views page of a document: the totals, the average time on each part, each visit, and the links |
+| `GET /api/pages/<group>/<name>/views` | Access | The same data as JSON |
+| `PUT /api/pages/<group>/<name>/seen` | Access | Record that the reader saw a version in Activity. Body: `{ "version": n }` |
 | `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies. `run` is the latest sandbox run of the thread or `null`. `runs` has the latest run of each comment that started one, by comment id. `?status=open` or `?status=resolved` keeps one status. |
 | `POST /api/pages/<group>/<name>/comments` | Access | Add a comment. Body: `{ "body": "...", "quote": "...", "prefix": "...", "suffix": "...", "anchor": "...", "slide": "...", "parent_id": "..." }`. Only `body` is necessary. `prefix` and `suffix` are the text before and after the quote. The host keeps at most 64 characters of each, next to the quote, and drops them for a comment with no quote. `slide` is the id of the deck slide, at most 200 characters. The host stores the latest version with the comment. The author is the Access identity. |
 | `PATCH /api/comments/<id>` | Access | Change the body of your own comment. Body: `{ "body": "..." }`. The host sets `edited_at` and reads the mention again. A changed mention starts no run. The route answers 403 for the comment of another person. |
@@ -82,8 +97,10 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `POST /s/_mcp/<token>` | Token | The MCP connector: one JSON-RPC 2.0 message for each request, with a JSON answer. `GET` returns 405. |
 | `POST /s/_run/<run id>` | Run id | The sandbox runner reports the result of a run. The run id is a secret. |
 | `POST /s/_run/<run id>/progress` | Run id | The sandbox runner reports one progress event of a run that is running. An unknown run and a run that has ended get 404. |
-| `GET /s/<token>` | Token | The shared page |
-| `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
+| `GET /s/<token>` | Token | The shared page, or the email form when the link requires an email and the reader has no pass |
+| `GET /s/<token>/pdf` | Token, and a pass when the link requires an email | The shared document or deck as a PDF attachment |
+| `POST /s/<token>/pass` | Token, same origin | Give an email at the form. Body: `{ "email" }`. The host sets the `ap_pass` cookie. A bad email gets 400. |
+| `POST /s/<token>/view`, `POST /s/<token>/ping` | Token, same origin | The share page starts a visit and reports the time on each part. Other origins get 403. |
 
 ## The MCP connector
 
@@ -230,7 +247,7 @@ cd host && SANDBOX_RUNNER_URL=http://localhost:8812/run bunx vite --port 8787
 
 Each person connects Claude and ChatGPT with their own plan. The sandbox runner holds each sign-in. The host passes each request on with the identity of the person and the header `x-runner-secret`, and it checks each answer. The assistant routes take requests from the viewer of the host only: the host refuses a `Sec-Fetch-Site` of `cross-site` or `same-site`, and a write with another `Origin`.
 
-The ⋯ menu in the bar and the `@` list in a comment box open "Assistants". It shows the state of each assistant, a Connect or Disconnect button, and the models.
+The ⋯ menu in the bar and the `@` list in a comment box open "Assistants". The library shows the state of each assistant in a row at the bottom of its sidebar. The viewer shows it in a chip in the bar. Under 761 px the library has no sidebar, so its bar shows the chip. A click on the row or on the chip opens "Assistants" too. It shows the state of each assistant, a Connect or Disconnect button, and the models.
 
 - Connect opens one main button, "Continue to Claude" or "Continue to ChatGPT". It opens the page of the provider in a new tab. The person signs in there.
 - Claude then shows a code. The person pastes it into the dialog, with Cmd+V or with the Paste button. The dialog sends a pasted code at once.

@@ -7,7 +7,8 @@ import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
-import { KIT, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { KIT, READ_REPORTER, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { MAX_ACTIVE_MS, SESSION_MS, addParts, cleanPing, deviceOf, isBot, referrerHost, summarize, visitorHash, type ShareViewRow } from './share-views';
 import { libraryHtml, type FolderRow, type Opens } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
@@ -71,8 +72,14 @@ function withClaimIds(res: Response) {
     .transform(res);
 }
 
-async function rawPage(obj: R2ObjectBody, immutable: boolean, theme: Theme | null) {
-  const html = withKit(await obj.text(), kitCss, kitJs);
+/** A version as a page. `extra` is a script for the end of the body: the reader report of a share link. */
+async function rawPage(obj: R2ObjectBody, immutable: boolean, theme: Theme | null, extra = '') {
+  let html = withKit(await obj.text(), kitCss, kitJs);
+  if (extra) {
+    const tag = `<script>${extra}</script>`;
+    const end = html.search(/<\/body>/i);
+    html = end < 0 ? html + tag : html.slice(0, end) + tag + html.slice(end);
+  }
   const body = theme ? withTheme(html, theme) : html;
   return withClaimIds(new Response(body, {
     headers: {
@@ -101,7 +108,7 @@ async function identify(req: Request, env: Env): Promise<Identity | null> {
   return verifyAccessJwt(req.headers.get('cf-access-jwt-assertion'), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD });
 }
 
-const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared';
+const PAGE_COLUMNS = 'slug, title, repo, kind, latest, created_at, updated_at, pinned_at, thumb, folder_id, (SELECT COUNT(*) FROM shares WHERE shares.slug = pages.slug) AS shared, (SELECT COUNT(*) FROM share_views WHERE share_views.slug = pages.slug) AS views';
 
 async function getPage(env: Env, slug: string) {
   return env.DB.prepare(`SELECT ${PAGE_COLUMNS} FROM pages WHERE slug = ?`).bind(slug).first<PageRow>();
@@ -416,6 +423,7 @@ async function deletePage(env: Env, slug: string) {
   } while (cursor);
   await env.DB.batch([
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM share_views WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_opens WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_text WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM versions WHERE slug = ?').bind(slug),
@@ -442,6 +450,70 @@ async function createShare(req: Request, env: Env, slug: string, origin: string)
 async function listShares(env: Env, slug: string, origin: string) {
   const { results } = await env.DB.prepare('SELECT token, version, created_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<{ token: string; version: number | null; created_at: string }>();
   return json(results.map((s) => ({ ...s, url: `${origin}/s/${s.token}` })));
+}
+
+// ─── Views of share links ────────────────────────────────
+
+/** The salt of today for the visitor hash. The first view of a day makes it and deletes the salts of two days ago and older. */
+async function daySalt(env: Env) {
+  const day = now().slice(0, 10);
+  const get = () => env.DB.prepare('SELECT salt FROM share_salts WHERE day = ?').bind(day).first<{ salt: string }>();
+  const row = await get();
+  if (row) return row.salt;
+  const old = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10);
+  await env.DB.batch([
+    env.DB.prepare('INSERT OR IGNORE INTO share_salts (day, salt) VALUES (?, ?)').bind(day, newToken()),
+    env.DB.prepare('DELETE FROM share_salts WHERE day <= ?').bind(old),
+  ]);
+  return (await get())!.salt;
+}
+
+/**
+ * Starts a view of a share link, or continues the view of the same visitor in the last 30 minutes.
+ * The share page calls it once it runs. A link preview or a crawler gets no view.
+ */
+async function startShareView(req: Request, env: Env, token: string) {
+  const hit = await resolveShare(env, token);
+  if (!hit) return fail(404, 'no such link');
+  const ua = req.headers.get('user-agent');
+  if (isBot(ua)) return json({ id: null });
+  const body = (await req.json().catch(() => ({}))) as { referrer?: unknown };
+  const visitor = await visitorHash(await daySalt(env), req.headers.get('cf-connecting-ip') || '', ua || '');
+  const at = now();
+  const prev = await env.DB.prepare('SELECT id FROM share_views WHERE token = ? AND visitor = ? AND last_at > ? ORDER BY last_at DESC LIMIT 1')
+    .bind(token, visitor, new Date(Date.now() - SESSION_MS).toISOString()).first<{ id: string }>();
+  if (prev) {
+    await env.DB.prepare('UPDATE share_views SET last_at = ? WHERE id = ?').bind(at, prev.id).run();
+    return json({ id: prev.id });
+  }
+  const id = newToken().slice(0, 24);
+  const country = typeof req.cf?.country === 'string' ? req.cf.country : null;
+  await env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, country, referrer, started_at, last_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), at, at).run();
+  return json({ id }, 201);
+}
+
+/** Adds a report of the share page to its view: active time, how far the reader got, the time on each part, a download. */
+async function pingShareView(req: Request, env: Env, token: string) {
+  const body = await req.json().catch(() => null);
+  const id = body && typeof body === 'object' && typeof (body as { id?: unknown }).id === 'string' ? (body as { id: string }).id : '';
+  const row = await env.DB.prepare('SELECT last_at, active_ms, parts FROM share_views WHERE id = ? AND token = ?').bind(id, token).first<{ last_at: string; active_ms: number; parts: string }>();
+  if (!row) return fail(404, 'no such view');
+  // A report can add at most the time since the view last reported, and a little more for a slow network.
+  const p = cleanPing(body, Math.max(0, Date.now() - Date.parse(row.last_at)) + 15_000);
+  if (!p) return fail(400, 'bad report');
+  await env.DB.prepare('UPDATE share_views SET active_ms = ?, depth = max(depth, ?), slides = max(slides, ?), downloads = downloads + ?, parts = ?, last_at = ? WHERE id = ?')
+    .bind(Math.min(row.active_ms + p.active, MAX_ACTIVE_MS), p.depth, p.slides, p.download ? 1 : 0, addParts(row.parts, p.parts), now(), id).run();
+  return new Response(null, { status: 204, headers: BASE_HEADERS });
+}
+
+/** The views of the share links of a page, for its owner. */
+async function listViews(env: Env, slug: string) {
+  if (!(await getPage(env, slug))) return fail(404, 'no such page');
+  const { results: shares } = await env.DB.prepare('SELECT token FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<{ token: string }>();
+  const { results: rows } = await env.DB.prepare('SELECT id, token, visitor, device, country, referrer, started_at, last_at, active_ms, depth, slides, downloads, parts FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 2000')
+    .bind(slug).all<ShareViewRow>();
+  return json(summarize(shares.map((s) => s.token), rows));
 }
 
 /** Resolves a share token to its page and version, or null when the page or version is gone. */
@@ -471,6 +543,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   }
 
   // Share links: Access lets /s/* through with no login, so the token is the only check.
+  // The share page reports its views with two writes. Only the share page itself may send them.
+  if (r.kind === 'share-start' || r.kind === 'share-ping') {
+    if (method !== 'POST') return fail(405, 'method not allowed');
+    if (req.headers.get('origin') !== url.origin) return fail(403, 'cross-origin write refused');
+    return r.kind === 'share-start' ? startShareView(req, env, r.token) : pingShareView(req, env, r.token);
+  }
   if (r.kind === 'share-view' || r.kind === 'share-raw' || r.kind === 'share-pdf') {
     if (method !== 'GET') return fail(405, 'method not allowed');
     const hit = await resolveShare(env, r.token);
@@ -478,7 +556,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     if (r.kind === 'share-view') return page(sharedHtml({ token: r.token, title: hit.page.title, repo: hit.page.repo, kind: hit.page.kind, version: hit.version }, nonce), nonce);
     if (r.kind === 'share-pdf') return pagePdf(env, hit.page.slug, hit.version.version, pdfName(hit.page.title, hit.version.version));
     const obj = await env.PAGES.get(blobKey(hit.page.slug, hit.version.version));
-    return obj ? rawPage(obj, false, theme) : fail(404, 'no such version');
+    return obj ? rawPage(obj, false, theme, READ_REPORTER) : fail(404, 'no such version');
   }
 
   const who = await identify(req, env);
@@ -542,6 +620,9 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     case 'api-page-folder':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return movePage(req, env, r.slug);
+    case 'api-views':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      return listViews(env, r.slug);
     case 'api-seen':
       if (method !== 'PUT') return fail(405, 'method not allowed');
       return markSeen(req, env, who.who, r.slug);
@@ -567,7 +648,11 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       return fail(405, 'method not allowed');
     case 'api-share': {
       if (method !== 'DELETE') return fail(405, 'method not allowed');
-      const res = await env.DB.prepare('DELETE FROM shares WHERE token = ?').bind(r.token).run();
+      // A revoked link takes its views with it.
+      const [res] = await env.DB.batch([
+        env.DB.prepare('DELETE FROM shares WHERE token = ?').bind(r.token),
+        env.DB.prepare('DELETE FROM share_views WHERE token = ?').bind(r.token),
+      ]);
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such share');
     }
     default:

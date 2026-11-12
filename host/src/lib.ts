@@ -93,6 +93,9 @@ export type Route =
   | { kind: 'share-view'; token: string }
   | { kind: 'share-raw'; token: string }
   | { kind: 'share-pdf'; token: string }
+  | { kind: 'share-start'; token: string }
+  | { kind: 'share-ping'; token: string }
+  | { kind: 'api-views'; slug: string }
   | { kind: 'not-found' };
 
 const NUM = /^[1-9][0-9]{0,8}$/;
@@ -129,11 +132,14 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'folder') return { kind: 'api-page-folder', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'seen') return { kind: 'api-seen', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'views') return { kind: 'api-views', slug: s };
   }
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'raw') return { kind: 'share-raw', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'pdf') return { kind: 'share-pdf', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'view') return { kind: 'share-start', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'ping') return { kind: 'share-ping', token: p[1] };
   return { kind: 'not-found' };
 }
 

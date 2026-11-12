@@ -151,7 +151,7 @@ $('#tree').addEventListener('click', (e) => {
 });
 
 // ─── A page in a list ───
-const shared = (p) => (p.shared ? '<span class="h-acc" title="Shared by link">' + svg('globe') + '</span>' : '');
+const shared = (p) => (p.shared ? '<span class="h-acc" title="Shared by link' + (p.views ? ', ' + p.views + (p.views === 1 ? ' view' : ' views') : '') + '">' + svg('globe') + '</span>' : '');
 function whereChip(p) {
   const f = folderOf(p.folder_id);
   if (place.folder && p.folder_id === place.folder) return '<span class="g-where"></span>';
@@ -264,7 +264,7 @@ function dRow(p, v) {
     + '<span class="d-cell is-where">' + whereChip(p) + '</span>'
     + '<span class="d-cell is-when"' + (at ? ' title="' + h(new Date(at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })) + '"' : '') + '>' + (at ? dWhen(at) : 'Not opened') + '</span>'
     + '<span class="d-cell is-vers">' + p.latest + '</span>'
-    + '<span class="d-cell is-acc' + (p.shared ? ' is-shared' : '') + '">' + svg(p.shared ? 'globe' : 'lock') + '<span>' + (p.shared ? 'Shared by link' : 'Private') + '</span></span>'
+    + '<span class="d-cell is-acc' + (p.shared ? ' is-shared' : '') + '">' + svg(p.shared ? 'globe' : 'lock') + '<span>' + (p.shared ? (p.views ? 'Shared, ' + p.views + (p.views === 1 ? ' view' : ' views') : 'Shared by link') : 'Private') + '</span></span>'
     + '</a>' + menu(p) + '</article>';
 }
 
@@ -832,7 +832,7 @@ async function poll() {
       const was = sig();
       feed = d.activity;
       readOpens(d.opens);
-      for (const n of d.pages) { const p = pageOf(n.slug); if (p) Object.assign(p, { latest: n.latest, thumb: n.thumb, updated_at: n.updated_at, title: n.title, kind: n.kind, shared: n.shared }); else pages.push(n); }
+      for (const n of d.pages) { const p = pageOf(n.slug); if (p) Object.assign(p, { latest: n.latest, thumb: n.thumb, updated_at: n.updated_at, title: n.title, kind: n.kind, shared: n.shared, views: n.views }); else pages.push(n); }
       for (let i = pages.length - 1; i >= 0; i--) if (!d.pages.some((n) => n.slug === pages[i].slug)) pages.splice(i, 1);
       // A popover or a drag holds on to elements of the list, so the redraw waits for the next round.
       if (sig() !== was && !open && !dragSlug && !hits) render();

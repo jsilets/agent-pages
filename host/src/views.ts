@@ -151,6 +151,22 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-links code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
 .v-links .v-tag { margin-right: 4px; }
 .v-links .v-icon { width: 28px; height: 28px; }
+/* The views of a link: one line under the link. */
+.v-links li.v-stat { height: auto; padding: 0 2px 8px; border-top: 0; font-size: 12px; line-height: 16px; color: var(--t); font-variant-numeric: tabular-nums; }
+/* How people read the page: the time on each section, then the newest visits. Counts only, with no names. */
+.v-reads:empty { display: none; }
+.v-reads { margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--b); max-height: 46vh; overflow: auto; }
+.v-reads h3 { margin: 8px 0 6px; font: 600 12px var(--sans); color: var(--s); }
+.v-reads h3:first-child { margin-top: 0; }
+.v-part { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; margin-bottom: 7px; font-size: 12.5px; line-height: 16px; }
+.v-part span:first-child { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--p); }
+.v-part span:nth-child(2) { color: var(--s); font-variant-numeric: tabular-nums; }
+.v-part i { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--link) 70%, transparent); }
+.v-visit { display: flex; gap: 8px; padding: 5px 0; border-top: 0.5px solid var(--b); font-size: 12px; line-height: 16px; color: var(--s); font-variant-numeric: tabular-nums; }
+.v-visit:first-of-type { border-top: 0; }
+.v-visit b { flex: none; width: 62px; font-weight: 500; color: var(--p); }
+.v-visit span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.v-reads p { margin: 4px 0 0; font-size: 11.5px; line-height: 15px; color: var(--t); }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
 
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
@@ -205,6 +221,8 @@ export interface PageRow {
   thumb: number | null;
   /** The number of active share links. */
   shared: number;
+  /** The number of views of the share links of the page. */
+  views: number;
   /** 'deck' for a slide deck, 'page' otherwise. */
   kind: string;
   /** The folder that holds the page, or null. */
@@ -434,6 +452,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     </div>
     <button type="button" class="v-create" id="create">Create link</button>
     <ul class="v-links" id="links"></ul>
+    <div class="v-reads" id="reads"></div>
   </div>
 </header>
 <iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
@@ -474,10 +493,47 @@ $$('[data-target]').forEach((b) => b.addEventListener('click', () => {
   target = b.dataset.target;
   $$('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
 }));
+// The views of the links: counts with no names, the time on each section, and the newest visits.
+const dur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm' + (s % 60 ? ' ' + (s % 60) + 's' : '') : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; };
+const since = (iso) => { const s = (Date.now() - Date.parse(iso)) / 1000; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+function statLine(st) {
+  if (!st || !st.views) return 'No views yet';
+  return [plural(st.views, 'view', 'views'), plural(st.people, 'person', 'people'), st.median_ms ? dur(st.median_ms) + ' typical read' : '', 'last ' + since(st.last_at), st.downloads ? plural(st.downloads, 'download', 'downloads') : ''].filter(Boolean).join(' \u00b7 ');
+}
+function drawReads(v) {
+  const box = $('#reads');
+  box.replaceChildren();
+  if (!v || !v.recent.length) return;
+  const add = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; box.append(el); return el; };
+  const parts = v.parts.filter((p) => p.ms >= 1000);
+  if (parts.length) {
+    add('h3', '', 'Time on each part');
+    const top = Math.max(...parts.map((p) => p.ms));
+    for (const p of parts.slice(0, 12)) {
+      const row = add('div', 'v-part');
+      const a = document.createElement('span'); a.textContent = p.key; a.title = p.key;
+      const b = document.createElement('span'); b.textContent = dur(p.ms) + ' \u00b7 ' + plural(p.views, 'view', 'views');
+      const bar = document.createElement('i'); bar.style.width = Math.max(2, Math.round((p.ms / top) * 100)) + '%';
+      row.append(a, b, bar);
+    }
+  }
+  add('h3', '', 'Recent views');
+  for (const r of v.recent.slice(0, 8)) {
+    const row = add('div', 'v-visit');
+    const b = document.createElement('b'); b.textContent = since(r.started_at);
+    const s = document.createElement('span');
+    s.textContent = [r.active_ms ? dur(r.active_ms) : 'Under 1s', 'read ' + r.reach + '%', r.device, r.country, r.referrer ? 'from ' + r.referrer : '', r.downloads ? 'downloaded' : ''].filter(Boolean).join(' \u00b7 ');
+    row.append(b, s);
+  }
+  add('p', '', 'Counts are anonymous. A person is one browser on one day. Time counts only while the page is on screen and the reader is active.');
+}
 async function loadLinks() {
-  const list = await api('/api/pages/' + D.slug + '/shares');
+  const [list, views] = await Promise.all([api('/api/pages/' + D.slug + '/shares'), api('/api/pages/' + D.slug + '/views').catch(() => null)]);
+  const statOf = (t) => views && views.links.find((l) => l.token === t);
+  drawReads(views);
   const ul = $('#links');
-  ul.replaceChildren(...list.map((s) => {
+  ul.replaceChildren(...list.flatMap((s) => {
     const li = document.createElement('li');
     const code = document.createElement('code'); code.textContent = s.url.replace(/^https?:\\/\\//, ''); code.title = s.url;
     const tag = document.createElement('span'); tag.className = 'v-tag'; tag.textContent = s.version ? 'v' + s.version : 'Latest';
@@ -489,7 +545,8 @@ async function loadLinks() {
       await api('/api/shares/' + s.token, { method: 'DELETE' }); toast('Link revoked'); loadLinks();
     };
     li.append(code, tag, c, r);
-    return li;
+    const st = document.createElement('li'); st.className = 'v-stat'; st.textContent = statLine(statOf(s.token));
+    return [li, st];
   }));
 }
 $('#pop-share').addEventListener('open', loadLinks);
@@ -505,6 +562,98 @@ $('#create').addEventListener('click', async (e) => {
 `;
   return shell(title, nonce, body, script);
 }
+
+/**
+ * The reader report of a share link. The host adds it to the page in the frame of the share page.
+ * Each second it notes if the page is on screen and the reader did something in the last minute. Only that time counts.
+ * It notes how far the reader got and which section or slide is in the middle of the screen.
+ * Every 5 seconds it sends what it noted to the share page, which sends it to the host. It keeps nothing in the browser.
+ */
+export const READ_REPORTER = String.raw`(() => {
+  if (parent === window) return;
+  const deck = document.querySelector('main.k-deck');
+  const slides = deck ? [...deck.querySelectorAll('.k-slide')] : [];
+  const heads = deck ? [] : [...document.querySelectorAll('h1, h2')];
+  let last = Date.now(), input = Date.now(), active = 0, depth = 0, parts = {};
+  const mark = () => { input = Date.now(); };
+  for (const t of ['scroll', 'wheel', 'keydown', 'pointerdown', 'pointermove', 'touchstart']) addEventListener(t, mark, { passive: true, capture: true });
+  addEventListener('message', (e) => { const d = e.data; if (e.source === parent && d && d.ns === 'ap-read' && d.type === 'input') mark(); });
+  const text = (el) => (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 70);
+  function part() {
+    const mid = innerHeight / 2;
+    if (deck) {
+      // A slide that is not on screen has hidden="until-found". It keeps its box, so the box alone does not say which slide shows.
+      const i = slides.findIndex((s) => { if (s.hidden) return false; const r = s.getBoundingClientRect(); return r.height > 0 && r.top <= mid && r.bottom >= mid; });
+      if (i < 0) return '';
+      depth = Math.max(depth, i + 1);
+      const h = slides[i].querySelector('h1, h2, blockquote');
+      return (i + 1) + (h && text(h) ? '. ' + text(h) : '');
+    }
+    let cur = null;
+    for (const h of heads) { if (h.getBoundingClientRect().top <= mid) cur = h; else break; }
+    return cur ? text(cur) : heads.length ? 'Start of the page' : '';
+  }
+  setInterval(() => {
+    const t = Date.now(), dt = Math.min(t - last, 2000);
+    last = t;
+    if (document.visibilityState !== 'visible' || t - input > 60000) return;
+    active += dt;
+    const k = part();
+    if (k) parts[k] = (parts[k] || 0) + dt;
+    if (!deck) {
+      const se = document.scrollingElement || document.documentElement;
+      depth = Math.max(depth, se.scrollHeight <= innerHeight ? 100 : Math.round(((se.scrollTop + innerHeight) / se.scrollHeight) * 100));
+    }
+  }, 1000);
+  const flush = () => { if (!active) return; parent.postMessage({ ns: 'ap-read', type: 'tick', active, depth, slides: slides.length, parts }, '*'); active = 0; parts = {}; };
+  setInterval(flush, 5000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+})();`;
+
+/**
+ * The share page counts the visit for the owner of the page: no name, no cookie and no storage.
+ * It starts a view, adds up the reports of the page in the frame, and sends them every 15 seconds and when the tab hides.
+ */
+const SHARE_COUNT = String.raw`
+(() => {
+  const T = location.pathname.split('/')[2];
+  const post = (path, body) => fetch('/s/' + T + '/' + path, { method: 'POST', keepalive: true, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const empty = () => ({ active: 0, depth: q ? q.depth : 0, slides: q ? q.slides : 0, download: false, parts: {} });
+  let id = null, q = null, dirty = false;
+  q = empty();
+  function send() {
+    if (!id || !dirty) return;
+    const body = { id, ...q };
+    q = empty(); dirty = false;
+    post('ping', body).catch(() => {});
+  }
+  post('view', { referrer: document.referrer }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && d.id) { id = d.id; send(); } }).catch(() => {});
+  const frame = $('iframe');
+  addEventListener('message', (e) => {
+    if (!frame || e.source !== frame.contentWindow) return;
+    const d = e.data;
+    if (!d || d.ns !== 'ap-read' || d.type !== 'tick') return;
+    q.active += +d.active || 0;
+    q.depth = Math.max(q.depth, +d.depth || 0);
+    q.slides = Math.max(q.slides, +d.slides || 0);
+    for (const [k, v] of Object.entries(d.parts || {})) q.parts[k] = (q.parts[k] || 0) + (+v || 0);
+    dirty = true;
+  });
+  setInterval(send, 15000);
+  // The frame sends what it has when the tab hides, so wait a moment for that message.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') setTimeout(send, 250); });
+  addEventListener('pagehide', send);
+  // The frame does not see the reader use the bar, so the bar tells it, at most every 5 seconds.
+  let told = 0;
+  for (const t of ['pointermove', 'pointerdown', 'keydown']) addEventListener(t, () => {
+    const n = Date.now();
+    if (n - told < 5000 || !frame || !frame.contentWindow) return;
+    told = n;
+    frame.contentWindow.postMessage({ ns: 'ap-read', type: 'input' }, '*');
+  }, { passive: true });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-pdf], a[download]')) { q.download = true; dirty = true; send(); } });
+})();
+`;
 
 export function sharedHtml(input: { token: string; title: string; repo: string | null; kind: string; version: VersionRow }, nonce: string) {
   const raw = `/s/${esc(input.token)}/raw?k=${KIT}`;
@@ -524,7 +673,7 @@ export function sharedHtml(input: { token: string; title: string; repo: string |
 <iframe class="v-frame" title="${esc(input.title)}" ${frameAttrs(input.kind)} data-src="${raw}"></iframe>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>`;
-  return shell(input.title, nonce, body, COMMON_SCRIPT, '/s/_/explain.css');
+  return shell(input.title, nonce, body, COMMON_SCRIPT + SHARE_COUNT, '/s/_/explain.css');
 }
 
 export function messageHtml(title: string, text: string, nonce: string, cssPath?: string) {

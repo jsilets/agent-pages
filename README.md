@@ -43,6 +43,8 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 - The Worker checks the Access JWT on each request too. Access at the edge is the first check, and the Worker is the second.
 - A page whose `<main>` has the class `k-deck` is a deck, and D1 stores `kind = 'deck'` for it. At publish time, Browser Rendering opens the deck at 1920×1080, and the kit reports the slides that overflow. The publish response returns that audit, and the CLI prints it. The deck thumbnails show the first slide.
 - A second Access application bypasses Access for `/s/*`. On that path the Worker checks only the share token, which is 32 random bytes.
+- The host counts the views of each share link with no name, no cookie and no IP address. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. A view records the active time, how far the reader got, the time on each section or slide, the device class, the country, the host of the referring page, and downloads. Link previews and headless browsers do not count. The owner sees the views in the Share menu of the page.
+- The host records which version of each page a person last saw and when they last opened it. The library uses the record for the blue dot of a new version, for Recent, and for the sort by the last open.
 
 | Route | Auth | Does |
 |---|---|---|
@@ -58,11 +60,18 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `PUT`, `DELETE /api/pages/<group>/<name>/pin` | Access | Pin or unpin a page |
 | `POST /api/pages/<group>/<name>/refresh` | Access | Index the latest version and take its thumbnails again |
 | `PUT /api/pages/<group>/<name>` | Access | Store a new version. The body is the HTML. |
-| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions and its share links |
+| `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links and their views |
 | `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
-| `DELETE /api/shares/<token>` | Access | Revoke a share link |
+| `DELETE /api/shares/<token>` | Access | Revoke a share link and delete its views |
+| `GET /api/activity` | Access | The pages, the activity list and what the reader opened, for the library to poll |
+| `GET`, `POST /api/folders` | Access | List or make folders. POST body: `{ "name", "color", "parent_id" }` |
+| `PATCH`, `DELETE /api/folders/<id>` | Access | Rename, recolor or move a folder, or delete it and move its pages and folders to its parent |
+| `PUT /api/pages/<group>/<name>/folder` | Access | Move a page to a folder. Body: `{ "folder_id" }`, or null for no folder |
+| `GET /api/pages/<group>/<name>/views` | Access | The views of the share links of a page: a line for each link, the time on each part, and the newest views |
+| `PUT /api/pages/<group>/<name>/seen` | Access | Record that the reader saw a version in Activity. Body: `{ "version": n }` |
 | `GET /s/<token>` | Token | The shared page |
 | `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
+| `POST /s/<token>/view`, `POST /s/<token>/ping` | Token, same origin | The share page starts a view and reports the reading time. Other origins get 403. |
 
 ## Deploy the host
 

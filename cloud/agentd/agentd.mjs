@@ -296,7 +296,9 @@ function startRun(b) {
 
 async function startLogin() {
   if (S.run) return [409, { error: 'a run is running' }];
-  if (S.login && S.login.status === 'pending') return [409, { error: 'a sign-in is running' }];
+  // A person who starts a sign-in again (a closed dialog, "Try again") gets a new one. The one that waits ends: it
+  // has no sign-in yet, so nothing is lost.
+  if (S.login?.status === 'pending') { S.login.status = 'failed'; S.login.detail = 'A newer sign-in replaced this one.'; clearTimeout(S.login.timer); killGroup(S.login.child); }
   await stopWarm();
   const cmd = SI.SIGNIN[ENGINE];
   const id = randomBytes(18).toString('base64url');

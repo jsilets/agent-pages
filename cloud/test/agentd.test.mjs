@@ -127,7 +127,13 @@ test('control: a sign-in that ended does not block a run; a sign-in that waits d
     await call('/init', { token, key: Buffer.alloc(32, 3).toString('base64'), aad: 'u/claude', archive: null, prewarm: false });
     const login = await call('/login', {});
     assert.equal(login.status, 200);
-    const { id } = await login.json();
+    const first = (await login.json()).id;
+    // A second start replaces the sign-in that waits: the person gets a new link, and the first id reports that it ended.
+    const again = await call('/login', {});
+    assert.equal(again.status, 200);
+    const { id } = await again.json();
+    assert.notEqual(id, first);
+    assert.equal((await (await call('/login/status', { id: first })).json()).status === 'pending', false);
     const busy = await call('/run', { nonce: 'n'.repeat(20), job: {} });
     assert.equal(busy.status, 409);
     assert.equal((await busy.json()).error, 'a sign-in is running');

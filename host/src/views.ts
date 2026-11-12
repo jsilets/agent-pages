@@ -3,6 +3,7 @@
 
 import kitCss from '../../kit/explain.css?raw';
 import kitJs from '../../kit/explain.js?raw';
+import marginJs from './margin.js?raw';
 
 /**
  * A short hash of the kit. Pages and thumbnails are cached for a year, and the host builds both
@@ -153,23 +154,125 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-links .v-icon { width: 28px; height: 28px; }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
 
-/* The comments panel: a column to the right of the page. */
-.v-body { flex: 1; min-height: 0; display: flex; }
-.v-side { flex: none; display: flex; flex-direction: column; width: 340px; max-width: 100%; box-sizing: border-box; border-left: 0.5px solid var(--b); background: var(--bg); }
-.v-side[hidden] { display: none; }
-.v-side-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 14px; border-bottom: 0.5px solid var(--b); }
-.v-side-head h2 { margin: 0; font: 600 13.5px var(--sans); }
-.v-threads { flex: 1; min-height: 0; overflow: auto; padding: 4px 14px; }
-.v-threads:empty::before { content: "No open comments."; display: block; padding: 10px 0; font-size: 12.5px; color: var(--t); }
-.v-thread { padding: 12px 0; border-bottom: 0.5px solid var(--b); }
-.v-cmt { font-size: 13px; line-height: 1.45; }
-.v-cmt + .v-cmt { margin: 10px 0 0 10px; padding-left: 10px; border-left: 1.5px solid var(--b2); }
-.v-cmt-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--t); }
-.v-cmt-head b { font-weight: 600; color: var(--p); overflow-wrap: anywhere; }
-.v-cmt p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.v-cmt blockquote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--b2); color: var(--s); font-size: 12.5px; overflow-wrap: anywhere; }
-.v-side textarea, .v-side input { display: block; width: 100%; box-sizing: border-box; padding: 7px 9px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px/1.4 var(--sans); resize: vertical; }
+/* ─── Comments: cards in the margin, aligned with their text in the page ───
+   wide: a column of cards beside the page. mid: a thin column of dots, and the open card floats left of its dot.
+   narrow: dots over the right edge of the page, and the open card in a sheet at the bottom. margin.js sets --y. */
+/* clip: cards below the end of the view must not make the viewer itself scroll. */
+.v-body { position: relative; flex: 1; min-height: 0; display: flex; overflow: clip; }
 .v-btn:disabled { opacity: 0.5; cursor: default; }
+.cm-col { position: relative; z-index: 4; flex: none; display: flex; flex-direction: column; width: 328px; box-sizing: border-box; background: var(--bg); }
+.cm-col[hidden] { display: none; }
+.v-body[data-cm="mid"] .cm-col { width: 44px; border-left: 0.5px solid var(--b); }
+.v-body[data-cm="narrow"] .cm-col { position: absolute; top: 0; right: 0; bottom: 0; width: 34px; background: none; pointer-events: none; }
+.cm-pins { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0 12px; }
+.cm-pins:empty { display: none; }
+.v-body:not([data-cm="wide"]) .cm-pins { position: relative; align-items: center; gap: 4px; padding: 8px 0 0; }
+.cm-view { position: relative; flex: 1; min-height: 0; overflow: visible clip; clip-path: inset(0 0 0 -100vw); }
+.cm-rail { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
+.cm-card { box-sizing: border-box; padding: 10px 12px 10px; border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 1px 2px rgba(0, 0, 0, 0.04); color: var(--p); font-size: 13px; line-height: 1.45; cursor: pointer; outline-offset: 2px; }
+.cm-rail > .cm-card { position: absolute; top: 0; left: 12px; right: 16px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.15s; }
+.cm-rail > .cm-card.is-in { transition: box-shadow 0.15s; }
+.cm-card.is-hover:not(.is-active) { box-shadow: 0 0 0 0.5px var(--b2), 0 2px 8px rgba(0, 0, 0, 0.08); }
+.cm-card.is-active { cursor: default; box-shadow: 0 0 0 0.5px var(--b2), 0 8px 24px rgba(0, 0, 0, 0.13), 0 2px 6px rgba(0, 0, 0, 0.06); }
+.cm-rail > .cm-card.is-active { z-index: 2; transform: translate3d(-10px, var(--y, 0), 0); }
+.cm-card.has-new:not(.is-active) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--link) 60%, transparent), 0 2px 8px rgba(0, 0, 0, 0.06); }
+.cm-list { display: flex; flex-direction: column; gap: 10px; }
+.cm-c { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; }
+.cm-c.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes cm-in { from { opacity: 0; transform: translateY(6px); } }
+.cm-ava { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--bg3); color: var(--s); font: 600 11px/1 var(--sans); }
+.cm-ava.is-agent { background: var(--a); color: var(--a-on); }
+.cm-main { min-width: 0; }
+.cm-head { display: flex; align-items: baseline; gap: 6px; min-height: 24px; line-height: 24px; padding-right: 26px; }
+.cm-head b { min-width: 0; overflow: hidden; font-weight: 600; font-size: 12.5px; white-space: nowrap; text-overflow: ellipsis; }
+.cm-head time { flex: none; font-size: 11.5px; color: var(--t); }
+.cm-list > .cm-c ~ .cm-c .cm-head { padding-right: 0; }
+.cm-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-card:not(.is-active) .cm-body { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.cm-at { color: var(--link); font-weight: 600; }
+.cm-quote { display: flex; flex-direction: column; gap: 3px; padding: 1px 0 1px 8px; border-left: 2px solid rgba(229, 168, 35, 0.75); color: var(--s); font-size: 12px; line-height: 1.4; }
+.cm-quote q { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-line-clamp: 2; -webkit-box-orient: vertical; quotes: none; }
+.cm-card.is-active .cm-quote q { -webkit-line-clamp: 6; }
+/* Beside the page, the mark in the page shows the quote. A card shows it only when the text changed. */
+.v-body[data-cm="wide"] .cm-rail .cm-quote:not(.is-changed):not(.is-off) { display: none; }
+.cm-quote.is-changed { border-left-color: var(--b2); }
+.cm-quote.is-changed q { text-decoration: line-through; text-decoration-color: var(--t); }
+.cm-flag { align-self: flex-start; padding: 0 6px; border-radius: 4px; background: var(--bg2); color: var(--s); font: 600 10.5px/17px var(--sans); }
+.cm-quote.is-off q::after { content: " · not on this slide"; color: var(--t); }
+.cm-more { display: flex; flex-direction: column; gap: 1px; padding-left: 32px; font-size: 12px; }
+.cm-more.is-new { animation: cm-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cm-n { color: var(--link); font-weight: 600; }
+.cm-last { overflow: hidden; color: var(--s); white-space: nowrap; text-overflow: ellipsis; }
+.cm-list .v-react, .cm-list .v-runfail { margin-top: 6px; }
+.cm-done { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; opacity: 0; }
+.cm-card:hover .cm-done, .cm-card.is-active .cm-done, .cm-done:focus-visible { opacity: 1; }
+.cm-card:not(.cm-rail > *) { position: relative; }
+.cm-foot { position: relative; margin-top: 10px; }
+.cm-card:not(.is-active) .cm-foot { display: none; }
+.cm-foot:not(.has-text):not(:focus-within) .cm-acts { display: none; }
+.cm-card textarea { display: block; width: 100%; min-height: 32px; box-sizing: border-box; margin: 0; padding: 6px 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px/1.45 var(--sans); resize: none; overflow-y: auto; }
+.cm-card textarea::placeholder { color: var(--t); }
+.cm-card textarea:focus { outline: none; border-color: var(--link); box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 18%, transparent); }
+.cm-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.cm-acts .v-btn { height: 28px; align-self: auto; }
+.cm-acts .v-create { width: auto; height: 28px; padding: 0 12px; }
+.cm-hint { margin-right: auto; font-size: 11px; color: var(--t); }
+.cm-card.is-compose { cursor: default; }
+.cm-card.is-compose .cm-main { display: flex; flex-direction: column; gap: 8px; }
+.cm-card.is-compose .cm-head { padding-right: 0; }
+.cm-card.is-compose .cm-quote:empty { display: none; }
+/* The assistants that "@" offers. */
+.cm-pick { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); animation: v-pop 0.12s ease-out; }
+.cm-card.is-compose .cm-main { position: relative; }
+.cm-opt { display: grid; grid-template-columns: 22px auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+.cm-opt .cm-ava { grid-row: span 2; width: 22px; height: 22px; background: var(--a); color: var(--a-on); }
+.cm-opt b { font-size: 12.5px; }
+.cm-opt .cm-at { font: 500 11.5px var(--mono); color: var(--t); }
+.cm-opt .cm-state { grid-column: 2 / 4; font-size: 11px; color: var(--s); }
+.cm-opt .cm-state:empty { display: none; }
+.cm-opt .cm-state.is-off { color: var(--line, #993C1D); }
+.cm-opt.is-on, .cm-opt:hover { background: var(--bg2); }
+/* The dots: a card in short form, for the narrow layouts. */
+.cm-dot { display: none; place-items: center; position: relative; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50% 50% 50% 4px; background: #E5A823; color: #1a1a1a; font: 600 11px/1 var(--sans); cursor: pointer; pointer-events: auto; box-shadow: 0 0 0 2px var(--bg), 0 1px 3px rgba(0, 0, 0, 0.2); transition: transform 0.15s; }
+.cm-dot.is-agent { background: var(--a); color: var(--a-on); }
+.cm-dot.is-hover, .cm-dot.is-active { transform: scale(1.12); }
+.cm-dot.is-active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px #E5A823; }
+.cm-dot.has-new::after { content: ""; position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--link); box-shadow: 0 0 0 2px var(--bg); }
+.cm-dot i { position: absolute; right: -5px; bottom: -4px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--p); color: var(--bg); font: 600 9px/14px var(--sans); font-style: normal; }
+.cm-dot.is-draft { background: var(--p); color: var(--bg); font-size: 15px; }
+.v-body:not([data-cm="wide"]) .cm-dot { display: grid; }
+.v-body:not([data-cm="wide"]) .cm-rail > .cm-dot { position: absolute; top: 0; left: 9px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.v-body[data-cm="narrow"] .cm-rail > .cm-dot { left: 4px; }
+.v-body:not([data-cm="wide"]) :is(.cm-rail, .cm-pins) > .cm-card:not(.is-active) { display: none; }
+.v-body[data-cm="mid"] .cm-rail > .cm-card.is-active { left: auto; right: 52px; width: 308px; transform: translate3d(0, var(--y, 0), 0); }
+.v-body[data-cm="mid"] .cm-pins > .cm-card.is-active { position: absolute; top: 8px; right: 52px; width: 308px; }
+/* The sheet: the open card on a phone. */
+.cm-sheet { position: absolute; z-index: 6; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; max-height: 72%; border-radius: 16px 16px 0 0; background: var(--bg); box-shadow: 0 -10px 36px rgba(0, 0, 0, 0.2), 0 0 0 0.5px var(--b2); animation: cm-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cm-sheet[hidden] { display: none; }
+@keyframes cm-up { from { transform: translateY(40px); opacity: 0; } }
+.cm-sheet-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 16px; font: 600 13px var(--sans); }
+.cm-slot { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 14px; }
+.cm-slot > .cm-card { box-shadow: none; padding: 0; }
+.cm-slot > .cm-card .cm-done { top: 0; right: 0; }
+/* The button at a selection in the page. The layer lies over the frame and takes no pointer events itself. */
+.cm-over { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+.cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 9px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); animation: cm-add 0.14s ease-out; }
+.cm-add[hidden] { display: none; }
+.cm-add:hover { background: var(--press); }
+.cm-add svg { width: 15px; height: 15px; }
+.cm-add kbd { height: 17px; box-shadow: none; background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; opacity: 0.8; font-size: 10.5px; }
+@keyframes cm-add { from { opacity: 0; scale: 0.92; } }
+#cres { width: auto; gap: 5px; padding: 0 8px; font: 500 12px var(--sans); }
+#cres[hidden] { display: none; }
+#cres svg { width: 14px; height: 14px; }
+.v-respop { width: 320px; max-height: min(420px, 70vh); overflow: auto; }
+.v-resrow { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 8px; }
+.v-resrow:hover { background: var(--bg2); }
+.v-resmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; line-height: 1.4; }
+.v-resmain b { font-weight: 600; }
+.v-resmain span { overflow-wrap: anywhere; }
+.v-resmain q { color: var(--s); font-size: 12px; quotes: none; padding-left: 6px; border-left: 2px solid var(--b2); }
+.v-resrow .v-link { flex: none; margin-top: 2px; }
 
 /* Assistants: one color each, for the reaction, the chip in the bar and the cursor in the page. The kit has the same colors. */
 .a-claude { --a: #C4541C; --a-on: #fff; }
@@ -192,7 +295,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-link { padding: 0; border: 0; border-radius: 3px; background: none; color: var(--link); font: 600 12px var(--sans); cursor: pointer; }
 .v-link:hover { text-decoration: underline; }
 .v-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
-#cbtn.has-new::before { content: ""; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--link); box-shadow: 0 0 0 2px var(--bg); }
 
 /* The assistants that work on this page now, like the avatars of the people in a shared document. */
 .v-who { flex: none; display: flex; align-items: center; gap: 4px; margin-right: 8px; }
@@ -219,12 +321,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-dlg-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .v-dlg-acts .v-btn, .v-dlg-acts .v-create { width: auto; height: 32px; padding: 0 14px; align-self: auto; }
 .v-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.v-acts { display: flex; gap: 6px; margin-top: 8px; }
-.v-acts textarea { flex: 1; min-width: 0; }
 .v-btn { flex: none; align-self: flex-start; height: 30px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
 .v-btn:hover { background: var(--bg2); }
-.v-compose { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-top: 0.5px solid var(--b); }
-.v-hint { margin: 0; font-size: 11.5px; color: var(--t); }
 
 .v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
 .v-toast[hidden] { display: none; }
@@ -236,14 +334,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-share { display: inline-flex; align-items: center; }
   .v-share svg { display: block; }
   .v-sharepop { width: calc(100vw - 16px); }
-  .v-body { position: relative; }
-  .v-side { position: absolute; z-index: 2; inset: 0; width: auto; border-left: 0; }
+  #cres span { display: none; }
   .v-who { margin-right: 4px; }
   .v-whochip { padding: 0 4px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump { animation: none; }
-  .v-frame.is-in.is-on { transition: none; }
+  .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump, .cm-c.is-new, .cm-more.is-new, .cm-pick, .cm-sheet, .cm-add { animation: none; }
+  .v-frame.is-in.is-on, .cm-rail > .cm-card, .cm-rail > .cm-dot, .cm-dot { transition: none; }
 }
 
 /* ─── Library ───────────────────────────────────────────── */
@@ -598,6 +695,10 @@ export interface ViewerInput {
   latest: number;
   /** True when the URL names no version, so it follows the latest one. */
   followsLatest: boolean;
+  /** The Access identity of the reader. The new comment shows it as its author. */
+  who: string;
+  /** The mentions that the sandbox runner handles, or none with no runner. */
+  agents: string[];
 }
 
 const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox';
@@ -781,7 +882,8 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-cur" data-pop="pop-ver" aria-label="Version ${n} of ${latest}. Show all versions"><b>v${n}</b><span class="v-of">/${latest}</span>${icon('down')}</button>
     ${step('right', n + 1, 'Next version')}
   </div>
-  <button type="button" class="v-icon" id="cbtn" data-tip="Comments" aria-label="Comments" aria-expanded="false" aria-controls="side">${icon('comment')}</button>
+  <button type="button" class="v-icon" id="cres" data-pop="pop-res" aria-label="Resolved threads" hidden>${icon('check')}<span>0 resolved</span></button>
+  <button type="button" class="v-icon" id="cnew" data-tip="Comment on the page" aria-label="Comment on the page" aria-keyshortcuts="Control+Alt+M Meta+Alt+M">${icon('comment')}</button>
   <button type="button" class="v-icon" id="copy" data-tip="Copy link" aria-label="Copy link">${icon('link')}</button>
   <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" aria-label="More">${icon('more')}</button>
   ${presentButton(input.kind)}
@@ -811,19 +913,23 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
     <button type="button" class="v-create" id="create">Create link</button>
     <ul class="v-links" id="links"></ul>
   </div>
-</header>
-<div class="v-body">
-<div class="v-stage"><iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe></div>
-<aside class="v-side" id="side" aria-label="Comments" hidden>
-  <div class="v-side-head"><h2>Comments</h2><button type="button" class="v-icon" id="cclose" aria-label="Close comments">${icon('x')}</button></div>
-  <div class="v-threads" id="threads"></div>
-  <div class="v-compose">
-    <input type="text" id="cquote" maxlength="1000" placeholder="Quote from the page (optional)" aria-label="Quote from the page">
-    <textarea id="cbody" rows="3" maxlength="4000" placeholder="Add a comment" aria-label="Comment"></textarea>
-    <p class="v-hint">Write @claude or @chatgpt to ask an assistant.</p>
-    <button type="button" class="v-create" id="csend">Comment</button>
+  <div class="v-pop v-respop" id="pop-res" hidden>
+    <div class="v-label">Resolved threads</div>
+    <div id="res-list"></div>
   </div>
+</header>
+<div class="v-body" id="body" data-cm="wide">
+<div class="v-stage"><iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
+  <div class="cm-over"><button type="button" class="cm-add" id="cm-add" aria-keyshortcuts="Control+Alt+M Meta+Alt+M" hidden>${icon('comment')}Comment<kbd></kbd></button></div>
+</div>
+<aside class="cm-col" id="cm-col" aria-label="Comments" hidden>
+  <div class="cm-pins" id="cm-pins"></div>
+  <div class="cm-view" id="cm-view"><div class="cm-rail" id="cm-rail"></div></div>
 </aside>
+<section class="cm-sheet" id="cm-sheet" aria-label="Comment" hidden>
+  <div class="cm-sheet-head"><span>Comment</span><button type="button" class="v-icon" id="cm-close" aria-label="Close">${icon('x')}</button></div>
+  <div class="cm-slot" id="cm-slot"></div>
+</section>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
 <div class="v-sr" id="live" role="status" aria-live="polite"></div>
@@ -834,7 +940,7 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   <p>This build has no sign-in step in the viewer yet. Sign in on the machine that runs the sandbox runner, then choose Try again.</p>
   <div class="v-dlg-acts"><button type="button" class="v-btn" id="connect-close">Close</button><button type="button" class="v-create" id="connect-retry">Try again</button></div>
 </dialog>
-<script type="application/json" id="data">${data({ slug, version: n, latest, kit: KIT, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x, thumb: ICON.thumb } })}</script>`;
+<script type="application/json" id="data">${data({ slug, version: n, latest, kit: KIT, followsLatest: input.followsLatest, who: input.who, agents: input.agents, icons: { link: ICON.link, check: ICON.check, x: ICON.x, thumb: ICON.thumb } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -898,15 +1004,9 @@ $('#create').addEventListener('click', async (e) => {
   b.disabled = false;
 });
 
-// Comments: a panel beside the page. Every text goes in with textContent, so a comment never becomes markup.
-const side = $('#side'), cbtn = $('#cbtn'), cbody = $('#cbody');
-const keep = (k, v) => { try { sessionStorage.setItem(k + D.slug, v); } catch {} };
-const kept = (k) => { try { return sessionStorage.getItem(k + D.slug) || ''; } catch { return ''; } };
+// Comments: the helpers that margin.js and the activity code share. Every text goes in with textContent, so a comment never becomes markup.
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const when = (iso) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-// The reply drafts, by thread id. A refresh draws the list again, and the drafts go back in.
-const drafts = {};
-let shown = null, answered = null;
 // The assistants. A name from the API is text for a label and never markup.
 const AGENTS = { claude: 'Claude', chatgpt: 'ChatGPT' };
 const nameOf = (a) => AGENTS[a] || 'Assistant';
@@ -951,63 +1051,9 @@ function connect(r) {
 $('#connect-close').addEventListener('click', () => dlg.close());
 $('#connect-retry').addEventListener('click', () => { dlg.close(); if (connectFor) retry(connectFor.comment_id); });
 
-function comment(c, run) {
-  const d = el('div', 'v-cmt'), head = el('div', 'v-cmt-head');
-  head.append(el('b', '', c.author), el('span', '', when(c.created_at)));
-  if (c.mention) head.append(el('span', 'v-tag', '@' + c.mention));
-  d.append(head);
-  if (c.quote) d.append(el('blockquote', '', c.quote));
-  d.append(el('p', '', c.body), ...reaction(run));
-  return d;
-}
-function thread(t) {
-  const a = el('article', 'v-thread'), acts = el('div', 'v-acts'), runs = t.runs || {};
-  a.dataset.thread = t.id;
-  const box = el('textarea'); box.rows = 1; box.maxLength = 4000; box.placeholder = 'Reply'; box.setAttribute('aria-label', 'Reply'); box.dataset.id = t.id; box.value = drafts[t.id] || '';
-  box.oninput = () => { drafts[t.id] = box.value; };
-  const send = () => post({ body: box.value, parent_id: t.id }, () => { delete drafts[t.id]; });
-  box.onkeydown = (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); };
-  const reply = el('button', 'v-btn', 'Reply'); reply.type = 'button'; reply.onclick = send;
-  const done = el('button', 'v-btn', 'Resolve'); done.type = 'button';
-  done.onclick = async () => { try { await api('/api/comments/' + t.id + '/resolve', { method: 'PUT' }); toast('Thread resolved'); await loadComments(); } catch (err) { toast('Could not resolve: ' + err.message); } };
-  acts.append(box, reply, done);
-  a.append(comment(t, runs[t.id]), ...t.replies.map((c) => comment(c, runs[c.id])), acts);
-  return a;
-}
-async function loadComments(force) {
-  const list = await api('/api/pages/' + D.slug + '/comments?status=open');
-  const key = JSON.stringify(list);
-  if (key === shown && !force) return;
-  shown = key;
-  const at = document.activeElement && document.activeElement.dataset.id;
-  $('#threads').replaceChildren(...list.map(thread));
-  if (at) $$('#threads textarea').find((b) => b.dataset.id === at)?.focus();
-  // The thread that an assistant answered a moment ago comes into view.
-  if (answered) { $$('#threads .v-thread').find((a) => a.dataset.thread === answered)?.scrollIntoView({ block: 'nearest' }); answered = null; }
-}
-async function post(c, sent) {
-  if (!c.body.trim()) return;
-  try { await api('/api/pages/' + D.slug + '/comments', { method: 'POST', body: JSON.stringify(c) }); sent(); boost(); await loadComments(true); }
-  catch (err) { toast('Could not send the comment: ' + err.message); }
-}
-function showSide(on) {
-  side.hidden = !on;
-  cbtn.setAttribute('aria-expanded', String(on));
-  keep('comments:', on ? '1' : '');
-  if (on) cbtn.classList.remove('has-new');
-  if (on) loadComments().catch((err) => toast('Could not load the comments: ' + err.message));
-}
-cbtn.addEventListener('click', () => showSide(side.hidden));
-$('#cclose').addEventListener('click', () => showSide(false));
-const sendNew = () => post({ body: cbody.value, quote: $('#cquote').value }, () => { cbody.value = ''; $('#cquote').value = ''; keep('draft:', ''); });
-$('#csend').addEventListener('click', sendNew);
-cbody.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) sendNew(); });
-cbody.addEventListener('input', () => keep('draft:', cbody.value));
-// The panel and the comment draft come back from sessionStorage after a reload.
-cbody.value = kept('draft:');
-if (kept('comments:')) showSide(true);
-// Other people write comments too, so the open panel loads its threads every 5 seconds.
-setInterval(() => { if (!document.hidden && !side.hidden) loadComments().catch(() => {}); }, 5000);
+` +
+    marginJs +
+    `
 
 // ─── Activity: what the assistants do on this page ───
 // The viewer asks the host for the activity of the page: every 500 ms while a run goes on, and every 5 seconds at other times.
@@ -1025,7 +1071,8 @@ const toFrame = (msg, f = frame) => { if (f.contentWindow) f.contentWindow.postM
 function sendPresence() {
   // An old version does not have the text that the assistant edits, so it shows no cursor.
   const show = D.followsLatest || D.version >= latest;
-  const list = show ? [...runs.values()].map((r) => ({ id: r.id, agent: r.agent, name: nameOf(r.agent), phase: r.phase, quote: r.quote || '', text: r.text || '', final: r.final === true, before: r.before || '', anchor: r.anchor || (r.hint && r.hint.anchor) || '', hint: (r.hint && r.hint.quote) || '' })) : [];
+  // Before the first event with a place, the cursor starts at the text of the comment: its quote and the text before it.
+  const list = show ? [...runs.values()].map((r) => { const h = r.hint || {}; return { id: r.id, agent: r.agent, name: nameOf(r.agent), phase: r.phase, quote: r.quote || h.quote || '', text: r.quote ? r.text || '' : '', final: r.final === true, before: (r.quote ? r.before : h.before) || '', anchor: r.anchor || h.anchor || '', hint: h.quote || '' }; }) : [];
   if (!list.length && !sent) return;
   sent = list.length > 0;
   toFrame({ type: 'state', runs: list });
@@ -1081,6 +1128,7 @@ async function pollActivity() {
   if (a.runs) {
     cursor = a.cursor;
     let refresh = false;
+    const ended = new Set();
     for (const r of a.runs) {
       const was = runs.get(r.id), who = nameOf(r.agent);
       if (r.final && r.text && r.version) landed.set(r.id, { id: r.id, agent: r.agent, name: who, version: r.version, quote: r.text, before: r.before || '', anchor: r.anchor || '' });
@@ -1092,12 +1140,13 @@ async function pollActivity() {
         runs.delete(r.id);
         refresh = true;
         if (was) say(r.status === 'done' ? who + ' answered the comment.' : (r.detail || '').startsWith('not_signed_in') ? who + ' is not connected.' : who + ' did not finish.');
-        if (side.hidden && r.status === 'done') cbtn.classList.add('has-new');
-        answered = r.thread;
+        if (r.thread) ended.add(r.thread);
       }
     }
     changed = true;
-    if (refresh && !side.hidden) loadComments().catch(() => {});
+    // The cards show the reaction of a new run, and the reply of a run that ended.
+    ended.forEach((t) => Margin.answered(t));
+    if (refresh && !ended.size) Margin.refresh();
   }
   // A run with no result after 5 minutes is not running. The comments API shows it as failed.
   runs.forEach((r, id) => { if (Date.now() - Date.parse(r.started_at) > 300000) { runs.delete(id); changed = true; } });
@@ -1139,6 +1188,7 @@ async function swapTo(v) {
     const focused = document.activeElement === frame, old = frame;
     frame = next; wire(next);
     old.remove();
+    Margin.frame();
     next.classList.remove('is-in', 'is-on'); next.removeAttribute('aria-hidden'); next.removeAttribute('tabindex');
     if (focused) next.focus();
     landed.forEach((f, id) => { if (f.version <= v) landed.delete(id); });

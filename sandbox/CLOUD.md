@@ -2,7 +2,7 @@
 
 This file is research. Nothing in it is deployed. A person must decide before a cloud deployment.
 
-Date of the research: 2026-11-11. The measured numbers come from one Mac (Apple silicon, Docker 29.4.0).
+Date of the research: 2026-11-11, updated 2026-11-12 for the images, the instance type and the price. The measured numbers come from one Mac (Apple silicon, Docker 29.4.0). `COST.md` has the price of each warm policy.
 
 ## What the local test measured
 
@@ -21,18 +21,18 @@ Host mode, Claude Code 2.1.322, model `claude-opus-5-5` (the default of the sign
 
 These three runs are from the first version of the runner. `PERF.md` has the measurements of the runner as it is now: with the model `sonnet`, a container that waits and a program that waits, the first tool call comes 0.7 to 0.9 s after the comment, and the reply is stored after 4.2 to 5.2 s.
 
-Docker, image `agent-pages-sandbox` (Alpine 3.22, Claude Code 2.1.311 from the apk repository, Codex 0.167.2 from npm):
+Docker, one image for each engine since 2026-11-12 (Alpine 3.22, Claude Code 2.1.311 from the apk repository, Codex 0.167.2 from npm):
 
 | Measure | Value |
 |---|---|
-| Image size | 713 MB. The Claude Code binary is 273 MB of it, and the Codex folder is 392 MB. The image had 366 MB with Node and with no Codex. |
-| Start of the container of a user (`docker run -d`) | 340 to 910 ms |
+| Image size | `agent-pages-sandbox-claude` 301 MB (135 MB compressed), `agent-pages-sandbox-codex` 360 MB (146 MB compressed). The one image for both was 713 MB (296 MB compressed). |
+| Start of the container of a user (`docker run -d`) | 180 to 360 ms on 2026-11-12, 340 to 910 ms on 2026-11-11 |
 | Start of a program in a container that runs (`docker exec`) | about 100 ms |
-| Memory of the container at its peak | 152 to 315 MB with one Claude Code program, 508 MB with a second program that waits |
+| Memory of the container at its peak | Claude: 134 MB with one program that waits, 175 to 392 MB in a run (152 to 508 MB on 2026-11-11). Codex with a stand-in model: 26 to 260 MB. |
 | First start to the output of `claude --version` | 519 ms |
 | Later starts to the output of `claude --version` | 320 to 410 ms |
 | Start of an empty command in the container | about 310 ms |
-| A run with no sign-in, from the job to the stored failure | 0.6 to 2.4 s for Claude Code, 1.5 s for Codex |
+| A run with no sign-in, from the job to the stored failure | About 50 ms with no sign-in volume, and no container. With a volume that has no sign-in: 0.6 to 2.4 s for Claude Code, 1.5 s for Codex. |
 
 The image was on the local disk for each start. No measurement includes a pull from a registry.
 
@@ -136,7 +136,9 @@ The Sandbox SDK (`@cloudflare/sandbox`) is a layer on Containers with command an
 - One Durable Object for each person, named by the Access identity. It owns one container. That gives one sandbox for each person and one run at a time.
 - The Worker calls the Durable Object in place of `SANDBOX_RUNNER_URL`. The Durable Object starts the container, sends the job to `run-comment.mjs`, and writes the result to `agent_runs`. A Durable Object has no 30-second limit, so the callback route is not necessary there.
 - `run-comment.mjs` now runs in the runner and not in the container, and the sandbox image has no Node. The runner reads the output of the program, sends the progress and the result, and holds the connector token. On Cloudflare the Durable Object cannot start a program in the container by itself. So this shape needs a small supervisor in the container that does the work of the runner (the image then needs Node again), or the `exec` API of the Sandbox SDK.
-- The local runner keeps the container of a person for 10 minutes and starts the next Claude Code program before the next job. Both are worth the same on a cloud host: they remove 1.2 to 1.7 s from a run.
+- One container for each person and engine, from two images. A Claude run never pulls the Codex image. The Durable Object knows whether it has a saved sign-in folder for an engine. With none, it answers `not_signed_in` and starts no container. This is the local check of the sign-in volume.
+- The warm policy on Cloudflare: `sleepAfter` of 60 to 90 s on the container class does the linger after a run. The viewer calls `POST /api/assistants/warm` when a person opens a comment box, and the Durable Object starts the container and the program then. `COST.md` shows that a 10-minute `sleepAfter` costs 2.7 to 5.9 times more than 90 s.
+- A program that waits must connect to the connector before its run has a token. The host answers `POST /s/_mcp/discover` with the runner secret: `initialize`, `server/discover` and `tools/list`, and no tool call. On Cloudflare the Durable Object can call that route, or call the same handler in the Worker with no HTTP.
 - The container needs outbound access to Anthropic and to the MCP connector. Cloudflare can route outbound traffic of a container through a Worker ("Handle outbound traffic"). Use that to permit only those hosts.
 - `egress-proxy.mjs` shows the rule that the outbound Worker must apply: tunnels to the model hosts only, and the connector through the proxy, so the container never has the token.
 
@@ -148,7 +150,9 @@ The Sandbox SDK (`@cloudflare/sandbox`) is a layer on Containers with command an
 | basic | 1/4 | 1 GiB | 4 GB |
 | standard-1 | 1/2 | 4 GiB | 8 GB |
 
-Claude Code states "4 GB+ RAM" as its requirement (https://code.claude.com/docs/en/setup.md). `standard-1` meets it. One program used 152 to 315 MB, and two programs used 508 MB, so `basic` can work, but it is below the stated requirement. `lite` is too small.
+Claude Code states "4 GB+ RAM" as its requirement (https://code.claude.com/docs/en/setup.md). `standard-1` meets it.
+
+Measured on 2026-11-12: the memory fits `basic` (peak 392 MB). The CPU does not. With a limit of 1/4 vCPU the reply came after 9.2 s, and the program that waited was not ready after 10 s. With 1/2 vCPU the reply came after 3.55 s, the same as with no limit. **Use `standard-1` for the Claude image.** A Codex container uses less, and Codex waits for long model turns, so test `basic` for the Codex image. `lite` is too small for both.
 
 ### Disk and the sign-in
 
@@ -164,24 +168,22 @@ Each way must save the folder after each run, because Claude Code refreshes the 
 
 ### Cold start
 
-Cloudflare states: "Container cold starts can often be in the 1-3 second range" (https://developers.cloudflare.com/containers/faq/). The 713 MB image and a restore of the config folder add to that. Nobody measured it. With the measured 5 to 6 seconds for a first run with `sonnet`, expect 7 to 10 seconds from the comment to the reply on a cold container, and 3 to 5 seconds on a container that waits.
+Cloudflare states: "Container cold starts can often be in the 1-3 second range" (https://developers.cloudflare.com/containers/faq/). The image (135 MB compressed for Claude) and a restore of the config folder add to that. Nobody measured it. With the measured 5 to 6 seconds for a first run with `sonnet`, expect 7 to 10 seconds from the comment to the reply on a cold container, and 3 to 5 seconds on a container that waits.
 
-### Price for one run
+### Price
 
-Rates (https://developers.cloudflare.com/containers/pricing/): memory $0.0000025 for each GiB-second, CPU $0.000020 for each vCPU-second, disk $0.00000007 for each GB-second. Memory and disk count for the whole instance type while the container runs. "CPU usage is based on active usage only." Charges "start when a request is sent to the container" and "stop after the container instance goes to sleep".
+`COST.md` has the rates, the formula, the measured inputs and the table. `node sandbox/cost.mjs` computes it. For 1,000 users with 20 runs each on `standard-1`:
 
-| | standard-1 | basic |
+| Policy | Runs that are alone | Runs in bursts of 4 |
 |---|---|---|
-| Each second, with the CPU fully active | $0.0000206 | $0.0000078 |
-| Each idle second (memory and disk) | $0.0000106 | $0.0000028 |
-| One run: 3 s start + 18 s work (the first measurements) | $0.00043 | $0.00016 |
-| One run: 3 s start + 6 s work (`sonnet`, as measured in `PERF.md`) | $0.00019 | $0.00007 |
-| The same 9 s run, plus 10 minutes idle before sleep | $0.0065 | $0.0018 |
-| The same run, plus 30 s idle before sleep | $0.00075 | $0.00025 |
+| No linger | $3.32 a month | $3.32 |
+| 90 s linger | $27.22 | $19.16 |
+| 10 min linger | $161.07 | $52.62 |
+| Warm on intent + 90 s linger | $40.47 | $22.57 |
 
-These are upper limits, because Claude Code waits for the network most of the time. The Workers Paid plan includes 25 GiB-hours of memory, 375 vCPU-minutes and 200 GB-hours of disk each month. On `standard-1` that covers about 1,000 runs of 21 seconds. Worker requests, Durable Object time, R2 storage and logs cost extra, and each is small for this load.
+Add $5 for the Workers Paid plan. Memory of the instance type is most of each number, because Cloudflare bills it for each second that the container runs, with a job or with none. CPU is billed by use, and it is 8 to 20 percent.
 
-So the sandbox costs less than $0.001 for a run. The sleep timeout decides most of it: a short timeout costs less, and a long timeout makes the next comment faster.
+The research of 2026-11-11 said "less than $0.001 for a run". That holds for a run with no linger ($0.00017) and with a 30 s linger ($0.00057). It does not hold with a linger of 90 s ($0.00136 for a run that is alone) or 10 minutes ($0.008).
 
 ## Other hosts
 
@@ -193,7 +195,8 @@ A real volume (Fly) or a paused sandbox (E2B) fits a credential file that change
 
 ## Not verified
 
-- No signed-in Codex run in docker mode. Claude Code has 15 signed-in runs in docker mode (`PERF.md`).
+- No signed-in Codex run in docker mode. Claude Code has 27 signed-in runs in docker mode (`PERF.md`). The Codex image ran `codex exec` with a stand-in model only (`codex-standin.mjs`).
+- The billable seconds, CPU and memory on Cloudflare. `COST.md` uses local measurements and lists what it assumes.
 - The egress controls on a cloud host. `verify-controls.mjs` proves them on OrbStack only.
 - No cloud deployment, no cold start from a registry, and no save or restore of the config folder.
 - The life of a `/login` sign-in. On the test machine `claude auth status` showed an expiry date 16 days after the test, and the date of the sign-in is not known.

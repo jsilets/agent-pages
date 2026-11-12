@@ -5,8 +5,10 @@ import type { Comment, Env, Refusal, Thread } from './types';
 export const MAX_COMMENT = 4000;
 const MAX_QUOTE = 1000;
 const MAX_ANCHOR = 200;
+/** The text before and after the quote that the viewer stores with a comment. A longer text loses its far end. */
+export const MAX_CONTEXT = 64;
 
-const COLUMNS = 'id, slug, version, anchor, quote, body, author, mention, parent_id, status, created_at';
+const COLUMNS = 'id, slug, version, anchor, quote, prefix, suffix, slide, body, author, mention, parent_id, status, created_at';
 
 export interface CommentInput {
   /** The page. A reply may leave it out: it goes to the page of its thread. */
@@ -15,6 +17,11 @@ export interface CommentInput {
   author: string;
   anchor?: unknown;
   quote?: unknown;
+  /** The page text just before the quote and just after it. The viewer finds the quote again with them after an edit. */
+  prefix?: unknown;
+  suffix?: unknown;
+  /** The id of the slide that has the quote, for a deck. */
+  slide?: unknown;
   parent_id?: unknown;
 }
 
@@ -34,6 +41,11 @@ export async function addComment(env: Env, input: CommentInput): Promise<Comment
   const quote = optional(input.quote);
   if (anchor && anchor.length > MAX_ANCHOR) return refuse(413, `the anchor is over ${MAX_ANCHOR} characters`);
   if (quote && quote.length > MAX_QUOTE) return refuse(413, `the quote is over ${MAX_QUOTE} characters`);
+  const slide = optional(input.slide);
+  if (slide && slide.length > MAX_ANCHOR) return refuse(413, `the slide id is over ${MAX_ANCHOR} characters`);
+  // The context counts only with a quote. The prefix keeps its end and the suffix keeps its start: the parts next to the quote.
+  const prefix = quote ? (optional(input.prefix)?.slice(-MAX_CONTEXT) ?? null) : null;
+  const suffix = quote ? (optional(input.suffix)?.slice(0, MAX_CONTEXT) ?? null) : null;
   let slug = input.slug;
   let parent_id: string | null = null;
   if (input.parent_id != null) {
@@ -44,9 +56,9 @@ export async function addComment(env: Env, input: CommentInput): Promise<Comment
   }
   const page = slug ? await env.DB.prepare('SELECT latest FROM pages WHERE slug = ?').bind(slug).first<{ latest: number }>() : null;
   if (!slug || !page) return refuse(404, 'no such page');
-  const c: Comment = { id: newId(), slug, version: page.latest, anchor, quote, body, author: input.author, mention: parseMention(body), parent_id, status: 'open', created_at: new Date().toISOString() };
-  await env.DB.prepare(`INSERT INTO comments (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(c.id, c.slug, c.version, c.anchor, c.quote, c.body, c.author, c.mention, c.parent_id, c.status, c.created_at)
+  const c: Comment = { id: newId(), slug, version: page.latest, anchor, quote, prefix, suffix, slide, body, author: input.author, mention: parseMention(body), parent_id, status: 'open', created_at: new Date().toISOString() };
+  await env.DB.prepare(`INSERT INTO comments (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(c.id, c.slug, c.version, c.anchor, c.quote, c.prefix, c.suffix, c.slide, c.body, c.author, c.mention, c.parent_id, c.status, c.created_at)
     .run();
   return c;
 }
@@ -75,5 +87,11 @@ export async function listThreads(env: Env, f: ThreadFilter = {}): Promise<Threa
 /** Resolves a thread by the id of its first comment. Returns false when no thread has that id. */
 export async function resolveThread(env: Env, id: string): Promise<boolean> {
   const res = await env.DB.prepare("UPDATE comments SET status = 'resolved' WHERE id = ? AND parent_id IS NULL").bind(id).run();
+  return res.meta.changes > 0;
+}
+
+/** Opens a resolved thread again by the id of its first comment. Returns false when no thread has that id. */
+export async function reopenThread(env: Env, id: string): Promise<boolean> {
+  const res = await env.DB.prepare("UPDATE comments SET status = 'open' WHERE id = ? AND parent_id IS NULL").bind(id).run();
   return res.meta.changes > 0;
 }

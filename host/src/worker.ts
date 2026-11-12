@@ -8,10 +8,10 @@ import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { verifyAccessJwt, type Identity } from './auth';
 import { handleRunProgress, pageActivity } from './activity';
 import { onCommentCreated } from './agents';
-import { addComment, getComment, listThreads, resolveThread } from './comments';
+import { addComment, getComment, listThreads, reopenThread, resolveThread } from './comments';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, newToken, newTokenId, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, readJson, route, thumbKey, withKit, withTheme, type Theme } from './lib';
 import { handleMcp } from './mcp';
-import { handleRunResult, rerunComment, withRuns } from './sandbox';
+import { handleRunResult, rerunComment, sandboxAgents, warmRunner, withRuns } from './sandbox';
 import type { Env, Refusal, Stored } from './types';
 import { KIT, libraryHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
 
@@ -373,7 +373,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       const { results: versions } = await env.DB.prepare('SELECT version, sha, created_at FROM versions WHERE slug = ? ORDER BY version DESC').bind(r.slug).all<VersionRow>();
       const version = versions.find((v) => v.version === (r.version ?? p.latest));
       if (!version) return page(messageHtml('Version not found', `${r.slug} has no version ${r.version}.`, nonce), nonce, 404);
-      return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null }, nonce), nonce);
+      return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null, who: who.who, agents: env.SANDBOX_RUNNER_URL ? sandboxAgents(env) : [] }, nonce), nonce);
     }
     case 'raw': {
       const obj = await env.PAGES.get(blobKey(r.slug, r.version));
@@ -428,17 +428,18 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
         return json(await withRuns(env, r.slug, await listThreads(env, { slug: r.slug, status: status === 'open' || status === 'resolved' ? status : undefined })));
       }
       if (method !== 'POST') return fail(405, 'method not allowed');
-      const body = (await readJson(req, MAX_JSON_BYTES)) as { body?: unknown; anchor?: unknown; quote?: unknown; parent_id?: unknown } | null | undefined;
+      const body = (await readJson(req, MAX_JSON_BYTES)) as { body?: unknown; anchor?: unknown; quote?: unknown; prefix?: unknown; suffix?: unknown; slide?: unknown; parent_id?: unknown } | null | undefined;
       if (!body || typeof body !== 'object') return fail(400, 'send the comment as JSON of at most 64 KB');
-      const c = await addComment(env, { slug: r.slug, body: body.body, anchor: body.anchor, quote: body.quote, parent_id: body.parent_id, author: who.who });
+      const c = await addComment(env, { slug: r.slug, body: body.body, anchor: body.anchor, quote: body.quote, prefix: body.prefix, suffix: body.suffix, slide: body.slide, parent_id: body.parent_id, author: who.who });
       if ('error' in c) return fail(c.status, c.error);
       // The agent triggers run after the response, so a slow assistant never holds the comment back.
       ctx.waitUntil(onCommentCreated(env, ctx, c, url.origin).catch((e) => console.error('comment hook', c.id, e)));
       return json(c, 201);
     }
     case 'api-comment-resolve':
-      if (method !== 'PUT') return fail(405, 'method not allowed');
-      return (await resolveThread(env, r.id)) ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such thread');
+      // PUT resolves the thread and DELETE opens it again, like the pin route.
+      if (method !== 'PUT' && method !== 'DELETE') return fail(405, 'method not allowed');
+      return (await (method === 'PUT' ? resolveThread : reopenThread)(env, r.id)) ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such thread');
     case 'api-comment-run': {
       if (method !== 'POST') return fail(405, 'method not allowed');
       const c = await getComment(env, r.id);
@@ -447,6 +448,13 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (typeof start !== 'function') return fail(start.status, start.error);
       ctx.waitUntil(start().catch((e) => console.error('rerun', c.id, e)));
       return json({ started: true }, 202);
+    }
+    case 'api-warm': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      // The runner gets the call after the response, so the viewer never waits for it.
+      const warm = await warmRunner(env, who.who);
+      if (warm) ctx.waitUntil(warm().catch((e) => console.error('warm', e)));
+      return json({ sent: !!warm }, 202);
     }
     case 'api-activity': {
       if (method !== 'GET') return fail(405, 'method not allowed');

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { listThreads } from './comments';
 import { handleMcp, methods, PROTOCOLS, rpc, TOOLS } from './mcp';
+import { testDb } from './testdb';
 import { RpcError, type Env, type Handler, type StoreVersion } from './types';
 
 const TOKEN = 'A'.repeat(43);
@@ -67,6 +69,9 @@ describe('rpc', () => {
       expect(t.inputSchema.type).toBe('object');
     }
     expect(out.result.tools[3].inputSchema.required).toEqual(['slug', 'edits']);
+    // The reply of edit_page is optional. The model writes the edits before it, so the viewer shows the edit first.
+    expect(Object.keys(out.result.tools[3].inputSchema.properties)).toEqual(['slug', 'edits', 'comment_id', 'reply']);
+    expect((out.result.tools[3].inputSchema.properties as { reply: { required: string[] } }).reply.required).toEqual(['body']);
   });
   it('marks the three read tools as read-only, and the two write tools as writes that destroy nothing and stay on this host', async () => {
     const out = (await call({ jsonrpc: '2.0', id: 1, method: 'tools/list' })) as { result: { tools: typeof TOOLS } };
@@ -150,6 +155,135 @@ describe('get_page', () => {
   });
 });
 
+describe('edit_page with a reply', () => {
+  const HTML = '<html><body><h1>How heat pmups work</h1><p>One.</p><p>Two.</p></body></html>';
+  const RUN = 'R'.repeat(43);
+  const at = '2026-11-12T00:00:00.000Z';
+  /** A real database with one page, one thread and one running run, R2 as a map, and a store that makes the next version. */
+  async function world() {
+    const DB = testDb();
+    const blobs = new Map<string, string>([['pages/g/n/1.html', HTML], ['pages/g/other/1.html', HTML]]);
+    for (const slug of ['g/n', 'g/other']) await DB.prepare('INSERT INTO pages (slug, title, latest, created_at, updated_at) VALUES (?, ?, 1, ?, ?)').bind(slug, 'T', at, at).run();
+    await DB.prepare("INSERT INTO comments (id, slug, version, body, author, mention, status, created_at) VALUES ('c1', 'g/n', 1, '@claude fix the typo', 'ann', 'claude', 'open', ?)").bind(at).run();
+    await DB.prepare("INSERT INTO comments (id, slug, version, body, author, status, created_at) VALUES ('c9', 'g/other', 1, 'on another page', 'ann', 'open', ?)").bind(at).run();
+    await DB.prepare("INSERT INTO agent_runs (id, comment_id, agent, status, started_at, token_id) VALUES (?, 'c1', 'claude', 'running', ?, 'tok1')").bind(RUN, at).run();
+    const env = { DB, PAGES: { get: async (key: string) => (blobs.has(key) ? { text: async () => blobs.get(key)! } : null) } } as unknown as Env;
+    const stored: string[] = [];
+    const store: StoreVersion = async (e, _x, slug, html, origin) => {
+      const latest = (await e.DB.prepare('SELECT latest FROM pages WHERE slug = ?').bind(slug).first<{ latest: number }>())!.latest + 1;
+      blobs.set(`pages/${slug}/${latest}.html`, html);
+      await e.DB.prepare('UPDATE pages SET latest = ? WHERE slug = ?').bind(latest, slug).run();
+      stored.push(html);
+      return { slug, version: latest, kind: 'page', title: 'T', url: `${origin}/p/${slug}`, versionUrl: `${origin}/p/${slug}/v/${latest}` };
+    };
+    type Out = { result: { isError?: boolean; content: { text: string }[]; structuredContent?: Record<string, any> } };
+    const edit = async (args: Record<string, unknown>, c: Record<string, unknown> = {}) =>
+      (await rpc(methods(x, store), env, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'edit_page', arguments: { slug: 'g/n', ...args } } }, { ...ctx, label: 'claude', slug: 'g/n', run: RUN, ...c })) as Out;
+    const events = async () => (await DB.prepare('SELECT kind, data FROM run_events ORDER BY id').all<{ kind: string; data: string }>()).results.map((e) => [e.kind, JSON.parse(e.data)]);
+    const latest = async () => (await DB.prepare("SELECT latest FROM pages WHERE slug = 'g/n'").first<{ latest: number }>())!.latest;
+    return { env, stored, edit, events, latest, thread: async () => (await listThreads(env, { slug: 'g/n' }))[0] };
+  }
+  const fix = [{ old_text: 'pmups', new_text: 'pumps' }];
+
+  it('stores the version and the reply in one call, resolves the thread, and returns the id of the reply', async () => {
+    const w = await world();
+    const out = await w.edit({ edits: fix, comment_id: 'c1', reply: { body: ' Fixed the typo in the heading. ', resolve: true } });
+    expect(out.result.isError).toBeUndefined();
+    const t = await w.thread();
+    expect(t.status).toBe('resolved');
+    expect(t.replies.map((r) => [r.body, r.author, r.parent_id])).toEqual([['Fixed the typo in the heading.', 'claude', 'c1']]);
+    expect(out.result.structuredContent).toEqual({
+      slug: 'g/n',
+      version: 2,
+      previous_version: 1,
+      url: `${ORIGIN}/p/g/n`,
+      version_url: `${ORIGIN}/p/g/n/v/2`,
+      comment_id: 'c1',
+      reply: { id: t.replies[0].id, thread_id: 'c1', body: 'Fixed the typo in the heading.', author: 'claude', resolved: true },
+    });
+    expect(JSON.parse(out.result.content[0].text)).toEqual(out.result.structuredContent);
+    expect(w.stored).toEqual([HTML.replace('pmups', 'pumps')]);
+  });
+  it('gives the viewer the events of an edit_page call and then of a reply_to_comment call, in that order', async () => {
+    const w = await world();
+    await w.edit({ edits: fix, comment_id: 'c1', reply: { body: 'Fixed.', resolve: true } });
+    expect(await w.events()).toEqual([
+      ['tool', { tool: 'edit_page' }],
+      ['edit', { quote: 'pmups', text: 'pumps', before: 'How heat', anchor: null }],
+      ['version', { version: 2 }],
+      ['tool', { tool: 'reply_to_comment' }],
+    ]);
+    // The same call with no reply ends with the version, as before.
+    const plain = await world();
+    await plain.edit({ edits: fix, comment_id: 'c1' });
+    expect((await plain.events()).map(([k]) => k)).toEqual(['tool', 'edit', 'version']);
+    expect((await plain.thread()).replies).toEqual([]);
+  });
+  it('leaves the thread open with resolve false, and with no resolve', async () => {
+    for (const reply of [{ body: 'Done.', resolve: false }, { body: 'Done.' }]) {
+      const w = await world();
+      const out = await w.edit({ edits: fix, comment_id: 'c1', reply });
+      expect(out.result.structuredContent!.reply.resolved).toBe(false);
+      expect((await w.thread()).status).toBe('open');
+    }
+  });
+  it('stores no version and no reply when an edit fails, and tells the assistant why', async () => {
+    const w = await world();
+    const out = await w.edit({ edits: [{ old_text: 'no such text', new_text: 'x' }], comment_id: 'c1', reply: { body: 'Fixed.', resolve: true } });
+    expect(out.result).toEqual({ content: [{ type: 'text', text: 'Edit 1 of 1 failed: its old_text has 0 matches in the HTML, and it must have exactly 1. The tool stored nothing.' }], isError: true });
+    expect([await w.latest(), w.stored, (await w.thread()).replies, (await w.thread()).status]).toEqual([1, [], [], 'open']);
+    // The viewer gets no reply step for a call that stored nothing.
+    expect((await w.events()).map(([k, d]) => [k, d.tool])).toEqual([['tool', 'edit_page']]);
+    // The second call of the assistant, with a good edit, stores both.
+    const again = await w.edit({ edits: fix, comment_id: 'c1', reply: { body: 'Fixed.', resolve: true } });
+    expect(again.result.structuredContent!.reply.thread_id).toBe('c1');
+    expect([await w.latest(), (await w.thread()).replies.length]).toEqual([2, 1]);
+  });
+  it('refuses a reply with no comment_id, with no text, or with too much text, and stores nothing', async () => {
+    const cases: [Record<string, unknown>, RegExp][] = [
+      [{ reply: { body: 'Fixed.' } }, /^reply needs comment_id/],
+      [{ comment_id: 'c1', reply: { body: '  ' } }, /^reply\.body must be a string with text/],
+      [{ comment_id: 'c1', reply: { resolve: true } }, /^reply\.body must be a string with text/],
+      [{ comment_id: 'c1', reply: { body: 'x'.repeat(4001) } }, /^reply\.body is over 4000 characters/],
+      [{ comment_id: 'c1', reply: { body: 'Fixed.', resolve: 'yes' } }, /^reply\.resolve must be true or false/],
+      [{ comment_id: 'c1', reply: 'Fixed.' }, /^reply must be an object with body/],
+    ];
+    for (const [args, error] of cases) {
+      const w = await world();
+      const out = await w.edit({ edits: fix, ...args });
+      expect(out.result.isError).toBe(true);
+      expect(out.result.content[0].text).toMatch(error);
+      expect([await w.latest(), w.stored.length, (await w.thread()).replies.length]).toEqual([1, 0, 0]);
+    }
+  });
+  it('refuses a reply to a comment of another page, also for a token that reaches every page', async () => {
+    for (const c of [{}, { slug: undefined }]) {
+      const w = await world();
+      const out = await w.edit({ edits: fix, comment_id: 'c9', reply: { body: 'Fixed.' } }, c);
+      expect(out.result).toEqual({ content: [{ type: 'text', text: 'no comment on g/n has the id c9' }], isError: true });
+      expect([await w.latest(), (await listThreads(w.env, { slug: 'g/other' }))[0].replies.length]).toEqual([1, 0]);
+    }
+    // A token with a scope does not reach the other page at all.
+    const w = await world();
+    const out = await w.edit({ slug: 'g/other', edits: fix, comment_id: 'c9', reply: { body: 'Fixed.' } });
+    expect(out.result.content[0].text).toBe('this connector token reaches only the page g/n, not g/other');
+    expect(w.stored).toEqual([]);
+  });
+  it('reports a reply that the database did not store, with the version that it did store', async () => {
+    const w = await world();
+    const prepare = w.env.DB.prepare.bind(w.env.DB);
+    w.env.DB.prepare = ((q: string) => {
+      if (q.startsWith('INSERT INTO comments')) throw new Error('the database is down');
+      return prepare(q);
+    }) as typeof w.env.DB.prepare;
+    const out = await w.edit({ edits: fix, comment_id: 'c1', reply: { body: 'Fixed.', resolve: true } });
+    expect(out.result.isError).toBeUndefined();
+    expect(out.result.structuredContent).toMatchObject({ version: 2, reply_error: 'The edit is stored as version 2. The reply is not stored: internal error. Call reply_to_comment with comment_id c1.' });
+    expect(out.result.structuredContent!.reply).toBeUndefined();
+    expect([await w.latest(), (await w.thread()).status]).toEqual([2, 'open']);
+  });
+});
+
 describe('handleMcp', () => {
   const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } };
   it('answers 404 for a token of the wrong shape, with no database read', async () => {
@@ -190,6 +324,37 @@ describe('handleMcp', () => {
     const old = await post(TOKEN, init, env, { 'mcp-protocol-version': '1999-01-01' });
     expect(old.status).toBe(400);
     expect(await old.json()).toEqual({ jsonrpc: '2.0', id: 1, error: { code: -32022, message: 'Unsupported protocol version', data: { supported: ['2025-06-18', '2025-03-26', '2026-07-28'], requested: '1999-01-01' } } });
+  });
+});
+
+describe('the answers for the sandbox runner at /s/_mcp/discover', () => {
+  const SECRET = 'the-secret-of-the-runner';
+  const env = () => ({ ...fakeEnv({ [TOKEN]: 'test' }).env, SANDBOX_RUNNER_SECRET: SECRET }) as Env;
+  const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+  it('answers initialize, server/discover and tools/list for the secret of the runner, with no connector token', async () => {
+    const e = { ...fakeEnv().env, SANDBOX_RUNNER_SECRET: SECRET } as Env;
+    const res = await post('discover', list, e, { 'x-runner-secret': SECRET });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).result.tools.map((t: { name: string }) => t.name)).toEqual(TOOLS.map((t) => t.name));
+    const init = await post('discover', { jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, e, { 'x-runner-secret': SECRET });
+    expect(await init.json()).toMatchObject({ id: 2, result: { protocolVersion: '2025-06-18', serverInfo: { name: 'agent-pages' } } });
+    expect((await post('discover', { jsonrpc: '2.0', method: 'notifications/initialized' }, e, { 'x-runner-secret': SECRET })).status).toBe(202);
+    const V = '2026-07-28';
+    const modern = await post('discover', { jsonrpc: '2.0', id: 3, method: 'server/discover', params: { _meta: { 'io.modelcontextprotocol/protocolVersion': V, 'io.modelcontextprotocol/clientCapabilities': {} } } }, e, { 'x-runner-secret': SECRET, 'mcp-protocol-version': V, 'mcp-method': 'server/discover' });
+    expect(await modern.json()).toMatchObject({ id: 3, result: { resultType: 'complete', supportedVersions: PROTOCOLS } });
+  });
+  it('runs no tool there', async () => {
+    const res = await post('discover', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'list_pages', arguments: {} } }, env(), { 'x-runner-secret': SECRET });
+    expect(await res.json()).toEqual({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'no such method: tools/call' } });
+  });
+  it('answers the 404 of an unknown token with no secret, with a wrong secret, and on a host that has no secret', async () => {
+    for (const [e, headers] of [[env(), {}], [env(), { 'x-runner-secret': 'the-secret-of-the-runneR' }], [env(), { 'x-runner-secret': '' }], [fakeEnv().env, { 'x-runner-secret': SECRET }], [fakeEnv().env, {}]] as [Env, Record<string, string>][]) {
+      const res = await post('discover', list, e, headers);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: 'no such connector' });
+    }
+    // The secret of the runner opens no connector token, and it does not replace one.
+    expect((await post('B'.repeat(43), list, env(), { 'x-runner-secret': SECRET })).status).toBe(404);
   });
 });
 

@@ -526,6 +526,31 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 /* The old text that the preview replaces. GrayText is for a browser that gives a highlight no custom properties. */
 ::highlight(k-pr-old) { color: GrayText; color: var(--t, GrayText); text-decoration: line-through; }
 
+/* ─── Comments: the text that a comment is about ───────────────────
+   The host viewer draws the comments outside the page. The page marks only the text: with the CSS Custom Highlight API,
+   or with boxes in .k-cm in a browser that does not have it. The amber is not a color of an assistant.
+   -on is the mark of the comment that is open, under the pointer, or not sent yet. */
+::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.3); }
+::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.66); }
+.k-cm { position: absolute; z-index: 5; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+.k-cm-hl { position: absolute; border-radius: 2px; background: rgba(246, 190, 52, 0.3); mix-blend-mode: multiply; }
+.k-cm-hl.on { background: rgba(246, 190, 52, 0.66); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) ::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.22); }
+  :root:not([data-theme="light"]) ::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.46); }
+  :root:not([data-theme="light"]) .k-cm-hl { background: rgba(246, 190, 52, 0.22); mix-blend-mode: normal; }
+  :root:not([data-theme="light"]) .k-cm-hl.on { background: rgba(246, 190, 52, 0.46); }
+}
+:root[data-theme="dark"] ::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.22); }
+:root[data-theme="dark"] ::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.46); }
+:root[data-theme="dark"] .k-cm-hl { background: rgba(246, 190, 52, 0.22); mix-blend-mode: normal; }
+:root[data-theme="dark"] .k-cm-hl.on { background: rgba(246, 190, 52, 0.46); }
+:root.k-cm-over { cursor: pointer; }
+/* A deck: the number of comments on the thumbnail of each slide, and a dot over its tick. */
+.k-cmn { position: absolute; display: grid; place-items: center; box-sizing: border-box; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #E5A823; color: #1a1a1a; font: 600 10px/1 var(--sans); font-variant-numeric: tabular-nums; pointer-events: none; }
+.k-thumb > .k-cmn { top: 20px; left: 3px; }
+.k-tick > .k-cmn { top: 0; left: 50%; translate: -50% 0; min-width: 0; width: 5px; height: 5px; padding: 0; overflow: hidden; color: transparent; }
+
 @media print {
   html, body { background: none; }
   :root { --k-s: 1 !important; overflow: visible !important; }
@@ -536,6 +561,6 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
   .k-slide { transform: none !important; border-radius: 0 !important; box-shadow: none !important; outline: none !important; content-visibility: visible !important; }
   .k-slide::after { display: none !important; }
   .k-build { opacity: 1 !important; }
-  .k-deck-bar, .k-rail, .k-pr, .k-pr-dock, .k-pr-new { display: none !important; }
+  .k-deck-bar, .k-rail, .k-pr, .k-pr-dock, .k-pr-new, .k-cm { display: none !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

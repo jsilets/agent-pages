@@ -7,8 +7,8 @@ import { readFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
-import { codexVolumeOf, forDocker, hostEnv, originAllowed, sameSecret, sandboxArgs, userQueue, volumeOf } from '../sandbox/local-runner.mjs';
-import { childEnv, claudeArgs, claudeInput, claudeLine, codexArgs, codexLine, defaults, editProgress, ENGINE_ENV, jobError, mcpConfig, partialEdits, progressSender, prompt, runJob, saysNotSignedIn } from '../sandbox/run-comment.mjs';
+import { codexVolumeOf, DISCOVER_REQUESTS, discover, forDocker, hostEnv, IMAGES, originAllowed, sameSecret, sandboxArgs, userQueue, volumeOf } from '../sandbox/local-runner.mjs';
+import { childEnv, claudeArgs, claudeInput, claudeLine, codexArgs, codexLine, defaults, editProgress, ENGINE_ENV, jobError, mcpConfig, partialEdits, progressSender, prompt, replyStored, runJob, saysNotSignedIn } from '../sandbox/run-comment.mjs';
 import { connectTarget, DEFAULT_ALLOW, hostAllowed, startProxy } from '../sandbox/egress-proxy.mjs';
 import { fakeSequence } from '../sandbox/fake-progress.mjs';
 
@@ -48,6 +48,10 @@ test('the prompt has the ids of the job and no other text of the job', () => {
   assert.ok(!p.includes('SECRET COMMENT TEXT'));
   assert.ok(!p.includes(job.mcp_url));
   for (const t of ['list_comments', 'get_page', 'edit_page', 'reply_to_comment']) assert.ok(p.includes(t));
+  // An edit carries its reply, so a run with an edit has no turn for reply_to_comment. A question still uses reply_to_comment.
+  assert.match(p, /one edit_page call that has slug "g\/n", comment_id "ab12ab12ab12ab12ab12ab12", the edits, and reply/);
+  assert.match(p, /Do not call reply_to_comment after an edit_page call that stored its reply/);
+  assert.match(p, /do not call edit_page\. Call reply_to_comment with comment_id "ab12ab12ab12ab12ab12ab12" and resolve false/);
 });
 
 test('the arguments give Claude Code the four connector tools and no built-in tool, and they hold no prompt and no token', () => {
@@ -334,6 +338,76 @@ test('a run with no sign-in reports not_signed_in, and a run that ends with no r
   assert.equal(out.error, 'Claude Code ended with no reply to the comment');
 });
 
+test('replyStored takes a reply_to_comment result, and an edit_page result with a reply id only', () => {
+  const ok = { slug: 'g/n', version: 2, comment_id: 'c1', reply: { id: 'r1', thread_id: 'c1', body: 'Fixed.', author: 'claude', resolved: true } };
+  const text = JSON.stringify(ok);
+  // Claude Code gives the text of the result, as a string or as a list of text blocks. Codex gives { content, structured_content }.
+  for (const content of [text, [{ type: 'text', text }], { content: [{ type: 'text', text }], structured_content: null }, { content: [], structured_content: ok }]) assert.equal(replyStored('edit_page', true, content), true, JSON.stringify(content));
+  assert.equal(replyStored('reply_to_comment', true, '(cut)'), true);
+  const { reply: _r, ...plain } = ok;
+  for (const [tool, isOk, content] of [
+    ['edit_page', true, JSON.stringify(plain)],
+    ['edit_page', true, JSON.stringify({ ...plain, reply_error: 'The edit is stored as version 2. The reply is not stored: internal error.' })],
+    ['edit_page', false, text],
+    ['edit_page', true, 'Edit 1 of 1 failed: its old_text has 0 matches'],
+    ['edit_page', true, undefined],
+    ['reply_to_comment', false, text],
+    ['get_page', true, text],
+  ]) assert.equal(replyStored(tool, isOk, content), false, `${tool} ${isOk} ${content}`);
+});
+
+test('a run with an edit and its reply in one edit_page call is done at the result of that call', async () => {
+  // A real run of Claude Code 2.1.311 with the prompt of this version: three tool calls, and the reply in the result of edit_page.
+  const events = sample('claude-edit-reply.jsonl');
+  const got = collect(claudeLine, events);
+  assert.deepEqual(got.tools, ['list_comments', 'get_page', 'edit_page']);
+  assert.deepEqual(got.results, [['list_comments', true], ['get_page', true], ['edit_page', true]]);
+  const input = events.flatMap((e) => (e.type === 'assistant' ? e.message.content : [])).find((b) => b.name === 'mcp__pages__edit_page').input;
+  assert.deepEqual(Object.keys(input), ['slug', 'comment_id', 'edits', 'reply']);
+  assert.deepEqual(input.reply, { body: 'Fixed the typo in the title heading: "pmups" is now "pumps".', resolve: true });
+  assert.equal(got.st.out.num_turns, 4);
+  const posts = [];
+  let ended = false;
+  const out = await runJob({ ...job, callback_url: 'http://host/s/_run/RUNID' }, { exec: standIn('claude-edit-reply.jsonl'), mcpUrl: 'http://egress:3128/mcp', post: async (_u, body) => { posts.push([body, ended]); return 200; }, postProgress: () => {} });
+  ended = true;
+  assert.equal(out.status, 'done');
+  assert.deepEqual(out.tool_calls.map((t) => t.name), ['list_comments', 'get_page', 'edit_page']);
+  assert.deepEqual(posts.map(([b, e]) => [b.status, e]), [['done', false]]);
+  assert.ok(out.ms_reply != null && out.ms_reply <= out.ms_engine);
+  // The same run with reply_error in place of the reply stored no reply, so it is not done.
+  const raw = readFileSync(path('../sandbox/samples/claude-edit-reply.jsonl'), 'utf8');
+  const noReply = raw.replace(/\\"reply\\":\{[^}]*\}/, '\\"reply_error\\":\\"The reply is not stored.\\"');
+  assert.notEqual(noReply, raw);
+  const failed = await runJob(job, { exec: standIn(null, { text: noReply }), mcpUrl: 'http://egress:3128/mcp' });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error, 'Claude Code ended with no reply to the comment');
+});
+
+test('discover gets the answers that are the same for each token from the host, and gives them to the proxy, not the secret', async () => {
+  const calls = [], puts = [];
+  const fetchFn = async (url, init) => { calls.push([url, init.headers, JSON.parse(init.body)]); const m = JSON.parse(init.body).method; return { status: m.startsWith('notifications/') ? 202 : 200, text: async () => (m.startsWith('notifications/') ? '' : JSON.stringify({ jsonrpc: '2.0', id: 1, result: { method: m } })) }; };
+  const net = { control: async (method, path, body) => { puts.push([method, path, body]); return { ok: true }; } };
+  assert.equal(await discover(net, 'http://localhost:8804', 'the-secret', fetchFn), true);
+  assert.deepEqual(calls.map(([u, h, b]) => [u, h['x-runner-secret'], h['mcp-method'] ?? null, b.method]), [
+    ['http://localhost:8804/s/_mcp/discover', 'the-secret', 'server/discover', 'server/discover'],
+    ['http://localhost:8804/s/_mcp/discover', 'the-secret', 'tools/list', 'tools/list'],
+    ['http://localhost:8804/s/_mcp/discover', 'the-secret', null, 'initialize'],
+    ['http://localhost:8804/s/_mcp/discover', 'the-secret', null, 'notifications/initialized'],
+  ]);
+  assert.deepEqual(DISCOVER_REQUESTS.map(([m]) => m), ['server/discover', 'tools/list', 'initialize', 'notifications/initialized']);
+  assert.equal(puts.length, 1);
+  assert.deepEqual(puts[0].slice(0, 2), ['PUT', '/cache']);
+  assert.deepEqual(Object.entries(puts[0][2].answers).map(([k, a]) => [k, a.status]), [['server/discover', 200], ['tools/list', 200], ['initialize', 200], ['notifications/initialized', 202]]);
+  assert.ok(!JSON.stringify(puts).includes('the-secret'));
+  // With no secret or no origin, nothing is sent. An error of the host puts nothing in the proxy.
+  calls.length = 0;
+  assert.equal(await discover(net, 'http://localhost:8804', '', fetchFn), false);
+  assert.equal(await discover(net, null, 'the-secret', fetchFn), false);
+  assert.equal(calls.length, 0);
+  assert.equal(await discover(net, 'http://localhost:8804', 'wrong', async () => ({ status: 404, text: async () => '{"error":"no such connector"}' })), false);
+  assert.equal(puts.length, 1);
+});
+
 test('the time limit stops a program that does not end, and the run reports timeout', async () => {
   let killed = 0, child;
   const exec = standIn(null, { text: '0\t{"type":"system","subtype":"init"}', hang: true });
@@ -403,6 +477,22 @@ test('the runner refuses a job with no secret or a wrong secret, and it refuses 
   }
 });
 
+test('each engine has its own image, and its container mounts the sign-in volume of that engine only', () => {
+  assert.deepEqual(IMAGES, { claude: 'agent-pages-sandbox-claude', codex: 'agent-pages-sandbox-codex' });
+  const base = { name: 'box', user: 'ann@example.com', network: 'net', proxy: 'egress', limits: { memory: '1g', cpus: '2', pids: '256' }, label: 'l=1' };
+  const mounts = (a) => a.flatMap((v, i) => (a[i - 1] === '-v' ? [v] : []));
+  const claude = sandboxArgs({ ...base, engine: 'claude' }), codex = sandboxArgs({ ...base, engine: 'codex' });
+  assert.equal(claude.at(-1), 'agent-pages-sandbox-claude');
+  assert.equal(codex.at(-1), 'agent-pages-sandbox-codex');
+  assert.deepEqual(mounts(claude), [`${volumeOf('ann@example.com')}:/claude-config`]);
+  assert.deepEqual(mounts(codex), [`${codexVolumeOf('ann@example.com')}:/codex-home`]);
+  // The variables of Claude Code go to its container only. Apart from them, the two lists are the same.
+  const env = (a) => a.flatMap((v, i) => (a[i - 1] === '-e' ? [v] : []));
+  assert.deepEqual(env(claude).slice(3), Object.entries(ENGINE_ENV).map(([k, v]) => `${k}=${v}`));
+  assert.deepEqual(env(codex), env(claude).slice(0, 3));
+  assert.deepEqual(sandboxArgs(base), claude);
+});
+
 test('the container of a user has each control in its arguments, and no secret', () => {
   const a = sandboxArgs({ name: 'box', user: 'ann@example.com', network: 'net', proxy: 'egress', image: 'img', limits: { memory: '1g', cpus: '2', pids: '256' }, label: 'l=1' });
   const after = (flag) => a[a.indexOf(flag) + 1];
@@ -416,8 +506,8 @@ test('the container of a user has each control in its arguments, and no secret',
   assert.equal(after('--network'), 'net');
   assert.equal(after('--user'), '10001:10001');
   assert.match(after('--tmpfs'), /^\/tmp:rw,noexec,nosuid,nodev,size=64m/);
-  // The two sign-in volumes of this user are the only mounts. No port, no host folder, no Docker socket, no more rights.
-  assert.deepEqual(a.flatMap((v, i) => (a[i - 1] === '-v' ? [v] : [])), [`${volumeOf('ann@example.com')}:/claude-config`, `${codexVolumeOf('ann@example.com')}:/codex-home`]);
+  // The sign-in volume of this user is the only mount. No port, no host folder, no Docker socket, no more rights.
+  assert.deepEqual(a.flatMap((v, i) => (a[i - 1] === '-v' ? [v] : [])), [`${volumeOf('ann@example.com')}:/claude-config`]);
   for (const flag of ['-p', '--publish', '--privileged', '--cap-add', '--add-host', '--mount', '--pid', '--device']) assert.ok(!a.includes(flag), flag);
   assert.ok(!a.join(' ').includes('docker.sock') && !a.join(' ').includes('ann@example.com'));
   const env = a.flatMap((v, i) => (a[i - 1] === '-e' ? [v] : []));
@@ -472,6 +562,17 @@ test('the proxy refuses other hosts, keeps the connector token away from the con
     assert.equal((await rpc(4, 'tools/call'))[0], 503);
     assert.deepEqual(await rpc(5, 'tools/list'), [200, { jsonrpc: '2.0', id: 5, result: { from: 'connector', method: 'tools/list' } }]);
     assert.equal(seen.length, 2);
+    // The runner can give the stored answers before any run. The proxy takes only the methods that are the same for each token.
+    const cache = (headers, body) => http({ port: controlPort, path: '/cache', method: 'PUT', headers }, JSON.stringify(body)).then(([s]) => s);
+    const discover = { jsonrpc: '2.0', id: 1, result: { from: 'runner', method: 'server/discover' } };
+    assert.equal(await cache({}, { answers: { 'server/discover': { status: 200, body: JSON.stringify(discover) } } }), 401);
+    assert.equal(await cache(secret, { answers: { 'tools/call': { status: 200, body: '{}' } } }), 400);
+    assert.equal(await cache(secret, { answers: { 'server/discover': { status: 500, body: '{}' } } }), 400);
+    assert.equal(await cache(secret, { answers: {} }), 400);
+    assert.equal(await cache(secret, { answers: { 'server/discover': { status: 200, body: JSON.stringify(discover) } } }), 200);
+    assert.deepEqual(await rpc(6, 'server/discover'), [200, { ...discover, id: 6 }]);
+    assert.equal((await rpc(7, 'tools/call'))[0], 503);
+    assert.equal(seen.length, 2);
     // The log has the method and the tool of each request, and never the token.
     assert.ok(logs.some((l) => l.ev === 'deny' && l.target === 'example.com:443'));
     assert.ok(logs.some((l) => l.ev === 'mcp' && l.method === 'tools/list' && l.cached));
@@ -486,5 +587,31 @@ test('each control holds in a real container (SANDBOX_DOCKER_TESTS=1)', { skip: 
   const r = spawnSync(process.execPath, [path('../sandbox/verify-controls.mjs')], { encoding: 'utf8', timeout: 300_000 });
   assert.equal(r.status, 0, r.stdout);
   assert.ok(!/^FAIL/m.test(r.stdout), r.stdout);
-  assert.ok((r.stdout.match(/^PASS/gm) ?? []).length >= 18);
+  assert.equal((r.stdout.match(/^PASS/gm) ?? []).length, 38);
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The cost model
+
+test('cost.mjs gives the billable seconds and the price that the formula of COST.md gives by hand', async () => {
+  const { episode, price, table } = await import('../sandbox/cost.mjs');
+  const inp = JSON.parse(readFileSync(path('../sandbox/cost-inputs.json'), 'utf8'));
+  inp.cloud = { ...inp.cloud, start_s: 2, restore_s: 0.5, save_s: 0.5, typing_s: 20, unused_warms_per_episode: 0 };
+  inp.engine = { ...inp.engine, cold_busy_s: 6.7, warm_busy_s: 5.1, cpu_program_start_s: 1, cpu_run_s: 0.7, cpu_idle_per_s: 0 };
+  const policy = (name) => inp.policies.find((p) => p.name === name);
+  // No linger: start + restore + the cold run + the save. 2 + 0.5 + 6.7 + 0.5 = 9.7 s, and one program.
+  assert.deepEqual([episode(inp, policy('No linger'), 1).life_s, episode(inp, policy('No linger'), 1).cpu_s], [9.7, 1.7]);
+  // 90 s: the save is in the linger. A burst of 4 runs 60 s apart keeps one container: 2.5 + 3 x 60 + 5.1 + 90 = 277.6 s.
+  assert.equal(episode(inp, policy('90 s linger'), 1).life_s, 99.2);
+  assert.ok(Math.abs(episode(inp, policy('90 s linger'), 4).life_s - 277.6) < 1e-9);
+  // Warm on intent: the container waits while the person types, and the run gets a program that waits.
+  assert.ok(Math.abs(episode(inp, policy('Warm on intent + 90 s linger'), 1).life_s - (2.5 + 20 + 5.1 + 90)) < 1e-9);
+  // standard-1: 9.7 s x 4 GiB x $0.0000025 for memory.
+  const p = price(inp, episode(inp, policy('No linger'), 1));
+  assert.ok(Math.abs(p.memory - 9.7 * 4 * 0.0000025) < 1e-12);
+  // The included usage of the plan only lowers a price.
+  for (const r of table(inp)) assert.ok(r.usd_month_after_included <= r.usd_month && r.usd_month_after_included >= 0, r.policy);
+  // A 30 s linger is shorter than the gap of a burst, so a burst costs the same as runs that are alone.
+  const rows = table(inp).filter((r) => r.policy === '30 s linger');
+  assert.equal(rows[0].usd_month, rows[1].usd_month);
 });

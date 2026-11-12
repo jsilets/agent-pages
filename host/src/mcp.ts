@@ -1,8 +1,8 @@
 // The MCP connector at POST /s/_mcp/<token>: MCP Streamable HTTP with no session and no SSE.
 // Each POST carries one JSON-RPC 2.0 message, and the answer is one JSON body.
-// The connector token is the only check. The tools reach pages and comments, and nothing else.
+// The connector token is the only check for a tool. The tools reach pages and comments, and nothing else.
 import { editEvents, noteActivity, recordActivity } from './activity';
-import { addComment, getComment, listThreads, resolveThread } from './comments';
+import { addComment, getComment, listThreads, MAX_COMMENT, resolveThread } from './comments';
 import { applyEdits, blobKey, isSlug, isToken, readJson, withoutKit, type Edit } from './lib';
 import { RpcError, type Comment, type Env, type Handler, type McpContext, type StoreVersion, type Thread } from './types';
 
@@ -14,12 +14,21 @@ export const MODERN = '2026-07-28';
 export const PROTOCOLS = [...LEGACY, MODERN];
 
 const SERVER_INFO = { name: 'agent-pages', title: 'Agent Pages', version: '0.1.0' };
-const INSTRUCTIONS = 'Pages are HTML documents with versions. People write comments on them. Read a page with get_page, change it with edit_page, and answer the comment with reply_to_comment.';
+const INSTRUCTIONS =
+  'Pages are HTML documents with versions. People write comments on them. Read a page with get_page. To change it for a comment, call edit_page with comment_id and reply: one call stores the edit and the answer. Use reply_to_comment for a question, and for a comment that needs no edit.';
 /** How long a client may keep the tool list and the answer of server/discover. Both change only with a deploy. */
 const CACHE = { ttlMs: 5 * 60_000, cacheScope: 'public' };
 const META = 'io.modelcontextprotocol/';
 const HEADER_MISMATCH = -32020;
 const UNSUPPORTED_VERSION = -32022;
+
+/**
+ * The path /s/_mcp/discover is not a connector token. The sandbox runner sends its shared secret there and gets the
+ * answers that are the same for each token: initialize, server/discover and tools/list. So a program in the sandbox can
+ * connect before its run has a token. No tool runs there.
+ */
+export const DISCOVER = 'discover';
+const DISCOVER_METHODS = ['initialize', 'ping', 'server/discover', 'tools/list'];
 
 /** An edit_page call carries new page text, so the limit is well over a comment and under a whole page. */
 const MAX_RPC_BYTES = 1024 * 1024;
@@ -78,7 +87,7 @@ export const TOOLS = [
     title: 'Edit page',
     annotations: { title: 'Edit page', ...WRITES },
     description:
-      'Edit the latest version of a page by exact text replacement in its stored HTML, and store the result as a new version. Each old_text must occur exactly once. When an edit fails, the tool stores nothing.',
+      'Edit the latest version of a page by exact text replacement in its stored HTML, and store the result as a new version. Each old_text must occur exactly once. When an edit fails, the tool stores nothing: no version and no reply. To answer the comment that asked for the edit, give comment_id and reply in this call, and do not call reply_to_comment after it.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -90,6 +99,13 @@ export const TOOLS = [
           items: { type: 'object', properties: { old_text: { ...text, description: 'Text that occurs exactly once in the HTML.' }, new_text: { ...text, description: 'The text that replaces it.' } }, required: ['old_text', 'new_text'], additionalProperties: false },
         },
         comment_id: { ...text, description: 'The comment that asked for the edit, if one did.' },
+        reply: {
+          type: 'object',
+          description: 'The answer to the thread of comment_id. The tool stores it after the new version, and only when each edit succeeds. It needs comment_id.',
+          properties: { body: { ...text, description: 'The reply text: what the edit changed.' }, resolve: { type: 'boolean', description: 'True resolves the thread too. Default: false.' } },
+          required: ['body'],
+          additionalProperties: false,
+        },
       },
       required: ['slug', 'edits'],
       additionalProperties: false,
@@ -99,7 +115,7 @@ export const TOOLS = [
     name: 'reply_to_comment',
     title: 'Reply to comment',
     annotations: { title: 'Reply to comment', ...WRITES },
-    description: 'Add a reply to a comment thread. Set resolve to true to resolve the thread too.',
+    description: 'Add a reply to a comment thread: a question, or the answer to a comment that needs no edit. Set resolve to true to resolve the thread too. With an edit, use the reply of edit_page in place of this tool.',
     inputSchema: {
       type: 'object',
       properties: { comment_id: { ...text, description: 'The id of a comment in the thread.' }, body: { ...text, description: 'The reply text.' }, resolve: { type: 'boolean', description: 'Default: false.' } },
@@ -183,6 +199,18 @@ const tools: Record<string, Tool> = {
       comment = await getComment(env, str(args.comment_id, 'comment_id'));
       if (!comment || comment.slug !== p.slug) throw new ToolError(`no comment on ${p.slug} has the id ${args.comment_id}`);
     }
+    // The reply is checked before the edit, so a bad reply stores nothing, and a good edit never loses its reply to a check.
+    let reply: { body: string; resolve: boolean } | null = null;
+    if (args.reply != null) {
+      const r = args.reply as { body?: unknown; resolve?: unknown };
+      if (typeof r !== 'object' || Array.isArray(r)) throw new ToolError('reply must be an object with body');
+      if (!comment) throw new ToolError('reply needs comment_id: the comment that the reply answers. The tool stored nothing.');
+      const body = typeof r.body === 'string' ? r.body.trim() : '';
+      if (!body) throw new ToolError('reply.body must be a string with text. The tool stored nothing.');
+      if (body.length > MAX_COMMENT) throw new ToolError(`reply.body is over ${MAX_COMMENT} characters. The tool stored nothing.`);
+      if (r.resolve != null && typeof r.resolve !== 'boolean') throw new ToolError('reply.resolve must be true or false. The tool stored nothing.');
+      reply = { body, resolve: r.resolve === true };
+    }
     const before = await pageHtml(env, p);
     const out = applyEdits(before, edits);
     if ('failed' in out) throw new ToolError(`Edit ${out.failed} of ${edits.length} failed: its old_text has ${out.matches} ${out.matches === 1 ? 'match' : 'matches'} in the HTML, and it must have exactly 1. The tool stored nothing.`);
@@ -191,7 +219,20 @@ const tools: Record<string, Tool> = {
     const stored = await store(env, x, p.slug, out.html, ctx.origin);
     if ('error' in stored) throw new ToolError(`The tool stored nothing: ${stored.error}`);
     await noteActivity(env, ctx.run, 'version', { version: stored.version });
-    return { slug: stored.slug, version: stored.version, previous_version: p.latest, url: stored.url, version_url: stored.versionUrl, ...(comment ? { comment_id: comment.id } : {}), ...(stored.audit ? { audit: stored.audit } : {}) };
+    const result: Record<string, unknown> = { slug: stored.slug, version: stored.version, previous_version: p.latest, url: stored.url, version_url: stored.versionUrl, ...(comment ? { comment_id: comment.id } : {}), ...(stored.audit ? { audit: stored.audit } : {}) };
+    if (!reply || !comment) return result;
+    // The viewer gets the same events as from two calls: tool edit_page, edit, version, and then tool reply_to_comment.
+    await noteActivity(env, ctx.run, 'tool', { tool: 'reply_to_comment' });
+    try {
+      const c = await addComment(env, { parent_id: comment.id, body: reply.body, author: ctx.label });
+      if ('error' in c) throw new ToolError(c.error);
+      const resolved = reply.resolve && (await resolveThread(env, c.parent_id!));
+      return { ...result, reply: { id: c.id, thread_id: c.parent_id, body: c.body, author: c.author, resolved } };
+    } catch (e) {
+      // The version is stored, so this call is not an error. The assistant must know that the thread has no answer yet.
+      if (!(e instanceof ToolError)) console.error('edit_page reply', e);
+      return { ...result, reply_error: `The edit is stored as version ${stored.version}. The reply is not stored: ${e instanceof ToolError ? e.message : 'internal error'}. Call reply_to_comment with comment_id ${comment.id}.` };
+    }
   },
   async reply_to_comment(env, args, ctx) {
     const parent = ctx.slug ? await getComment(env, str(args.comment_id, 'comment_id')) : null;
@@ -262,6 +303,19 @@ export async function rpc(handlers: Record<string, Handler>, env: Env, msg: unkn
   }
 }
 
+/**
+ * True when the header has the shared secret of the runner. The function compares the SHA-256 of both values, in a time
+ * that does not depend on where they differ. A host with no secret accepts nothing.
+ */
+async function sameSecret(got: string | null, want: string | undefined): Promise<boolean> {
+  if (!got || !want) return false;
+  const hash = async (v: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(v)));
+  const [a, b] = await Promise.all([hash(got), hash(want)]);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
 /** The value of an Mcp-Name header. A client writes a value that is not plain ASCII as =?base64?<base64>?=. */
 function headerValue(v: string | null): string | null {
   const m = v?.match(/^=\?base64\?(.*)\?=$/);
@@ -304,7 +358,13 @@ function modernError(req: Request, m: Request2026): object | null {
 export async function handleMcp(req: Request, env: Env, x: ExecutionContext, token: string, origin: string, store: StoreVersion): Promise<Response> {
   if (req.method !== 'POST') return reply({ error: 'the connector takes POST only' }, 405, { allow: 'POST' });
   // The token is the primary key, so the database does the comparison. No code path compares it character by character.
-  const row = isToken(token) ? await env.DB.prepare('SELECT id, label, slug, expires_at FROM connector_tokens WHERE token = ?').bind(token).first<{ id?: string | null; label: string; slug?: string | null; expires_at?: string | null }>() : null;
+  // The runner gets the answers that are the same for each token. Every other caller of that path gets the 404 of an unknown token.
+  const discover = token === DISCOVER && (await sameSecret(req.headers.get('x-runner-secret'), env.SANDBOX_RUNNER_SECRET));
+  const row = discover
+    ? { label: 'runner' }
+    : isToken(token)
+      ? await env.DB.prepare('SELECT id, label, slug, expires_at FROM connector_tokens WHERE token = ?').bind(token).first<{ id?: string | null; label: string; slug?: string | null; expires_at?: string | null }>()
+      : null;
   if (!row || (row.expires_at && row.expires_at <= new Date().toISOString())) return reply({ error: 'no such connector' }, 404);
   const version = req.headers.get('mcp-protocol-version');
   const msg = await readJson(req, MAX_RPC_BYTES);
@@ -316,13 +376,15 @@ export async function handleMcp(req: Request, env: Env, x: ExecutionContext, tok
   const ctx: McpContext = { token, label: row.label, origin, ...(row.slug ? { slug: row.slug } : {}), ...(run ? { run: run.id } : {}) };
   // The rules of 2026-07-28 apply to a request. That version defines no notification from a client over HTTP.
   const modern = !!m && typeof m === 'object' && typeof m.method === 'string' && m.id != null && m.method !== 'initialize' && (version === MODERN || m.params?._meta?.[`${META}protocolVersion`] === MODERN);
+  const every = methods(x, store);
+  const all = discover ? Object.fromEntries(DISCOVER_METHODS.map((k) => [k, every[k]])) : every;
   if (!modern) {
-    const out = await rpc(methods(x, store), env, msg, ctx);
+    const out = await rpc(all, env, msg, ctx);
     return out ? reply(out) : reply(null, 202);
   }
   const bad = modernError(req, m);
   if (bad) return reply(bad, 400);
-  const { initialize: _i, ping: _p, ...handlers } = methods(x, store);
+  const { initialize: _i, ping: _p, ...handlers } = all;
   const out = (await rpc(handlers, env, msg, ctx)) as { result?: Record<string, unknown>; error?: { code: number } };
   if (out.result) out.result = { resultType: 'complete', ...out.result, _meta: { ...(out.result._meta as object), [`${META}serverInfo`]: SERVER_INFO } };
   return reply(out, out.error?.code === -32601 ? 404 : 200);

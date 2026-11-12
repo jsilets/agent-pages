@@ -11,7 +11,7 @@
 // The new text is the text after the first colon of the comment ("@claude reword this: The new text."), or a
 // shorter form of the old text.
 // A comment with [fail] ends as failed. A comment with [signin] ends as not_signed_in. A comment with [slow] waits longer
-// before the edit. --no-progress sends no progress events, so the viewer has only the events that the host makes itself.
+// before the edit. POST /warm answers 202 and logs the user. --no-progress sends no progress events, so the viewer has only the events that the host makes itself.
 // With SANDBOX_RUNNER_SECRET set, the runner refuses a job without that value in the x-runner-secret header.
 import { createServer } from 'node:http';
 
@@ -102,6 +102,8 @@ createServer((req, res) => {
     const answer = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (req.method !== 'POST') return answer(405, { error: 'POST a job' });
     if (SECRET && req.headers['x-runner-secret'] !== SECRET) { log('refused: wrong or missing x-runner-secret'); return answer(401, { error: 'wrong x-runner-secret' }); }
+    // The host asks for a warm-up when a person opens a comment box. This runner has nothing to warm, so it only logs the call.
+    if (req.url === '/warm') { let user = ''; try { user = JSON.parse(raw).user || ''; } catch {} log('warm', user); return answer(202, { warm: true }); }
     let job;
     try { job = JSON.parse(raw); } catch { return answer(400, { error: 'the body is not JSON' }); }
     if (!job.mcp_url || !job.callback_url || !job.comment_id || !job.slug) return answer(400, { error: 'the job needs mcp_url, callback_url, comment_id and slug' });

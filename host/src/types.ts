@@ -26,6 +26,11 @@ export interface Comment {
   anchor: string | null;
   /** The text the comment is about, or null. */
   quote: string | null;
+  /** The page text just before the quote and just after it, or null. The viewer finds the quote again with them. */
+  prefix: string | null;
+  suffix: string | null;
+  /** The id of the slide that has the quote, for a deck, or null. */
+  slide: string | null;
   body: string;
   /** The Access identity of a person, or the label of a connector token. */
   author: string;

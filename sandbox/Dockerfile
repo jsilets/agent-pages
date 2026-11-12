@@ -1,16 +1,25 @@
-# Two images come from this file.
-#   docker build -t agent-pages-sandbox sandbox                      the sandbox: Claude Code and Codex, and no other program of ours
-#   docker build --target egress -t agent-pages-egress sandbox       the egress proxy: Node and egress-proxy.mjs
-# local-runner.mjs builds both when one is missing.
+# Three images come from this file. Each sandbox image has one program, so a run of one engine never pulls the other.
+#   docker build --target claude -t agent-pages-sandbox-claude sandbox     Claude Code, and no other program of ours
+#   docker build --target codex  -t agent-pages-sandbox-codex  sandbox     Codex, and no other program of ours
+#   docker build --target egress -t agent-pages-egress sandbox             the egress proxy: Node and egress-proxy.mjs
+# local-runner.mjs builds an image when it is missing.
 
 # Codex as OpenAI publishes it on npm (https://developers.openai.com/codex/cli: `npm install -g @openai/codex`).
-# The npm package holds a Node launcher and the native program. The sandbox takes the folder of the native program
-# as npm installed it, so the sandbox image needs no Node.
-FROM alpine:3.22 AS codex
+# The npm package holds a Node launcher and one folder for each platform. The image takes the files of this platform
+# that `codex exec` uses, as npm installed them. No file changes.
+#   bin/codex                 the program
+#   bin/codex-code-mode-host  the host of the JavaScript tool `exec`. Codex starts it with each session.
+#   codex-package.json        the description of the folder
+# The image leaves out what a run with the connector as its only tool never starts: the voice host and its libraries
+# (53 MB), `rg` (the file search of the shell tool) and `bwrap` (the sandbox of the shell tool). PERF.md has the test.
+FROM alpine:3.22 AS codex-package
 ARG CODEX_VERSION=0.167.2
 RUN apk add --no-cache nodejs npm \
  && npm install -g --no-audit --no-fund @openai/codex@${CODEX_VERSION} \
- && mv /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-*/vendor/*-unknown-linux-musl /codex \
+ && cd /usr/local/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-*/vendor/*-unknown-linux-musl \
+ && mkdir -p /codex/bin \
+ && cp -p bin/codex bin/codex-code-mode-host /codex/bin/ \
+ && cp -p codex-package.json /codex/ \
  && /codex/bin/codex --version
 
 # The egress proxy. It is the only way out of the network of the sandbox containers.
@@ -20,7 +29,27 @@ COPY egress-proxy.mjs /app/egress-proxy.mjs
 USER proxy
 ENTRYPOINT ["node", "/app/egress-proxy.mjs"]
 
-FROM alpine:3.22 AS sandbox
+# What the two sandbox images share: the user, the empty working folder, and a container that does nothing by itself.
+# Docker sets no USER variable, and Claude Code needs one. The root file system is read-only in a run, so HOME is the
+# tmpfs at /tmp. The runner starts each program with `docker exec`.
+FROM alpine:3.22 AS base
+RUN adduser -D -u 10001 runner && mkdir /work
+ENV HOME=/tmp \
+    USER=runner
+WORKDIR /work
+CMD ["sleep", "infinity"]
+
+FROM base AS codex
+RUN mkdir /codex-home && chown runner:runner /codex-home
+COPY --from=codex-package /codex /opt/codex
+RUN ln -s /opt/codex/bin/codex /usr/local/bin/codex
+# Codex keeps the sign-in of one user in CODEX_HOME. The runner mounts the volume of the user on it.
+# A new named volume takes the owner of the folder, so the user `runner` can write to it.
+ENV CODEX_HOME=/codex-home
+VOLUME ["/codex-home"]
+USER runner
+
+FROM base AS claude
 # Claude Code comes from the signed apk repository of Anthropic (https://code.claude.com/docs/en/setup.md,
 # "Install with Linux package managers"). The checksum of the repository key is the one that page gives.
 # A package install does not update itself, so one image always runs one version.
@@ -30,23 +59,10 @@ RUN apk add --no-cache libgcc libstdc++ ripgrep \
  && echo "395759c1f7449ef4cdef305a42e820f3c766d6090d142634ebdb049f113168b6  /etc/apk/keys/claude-code.rsa.pub" | sha256sum -c - \
  && echo "https://downloads.claude.ai/claude-code/apk/stable" >> /etc/apk/repositories \
  && apk add --no-cache claude-code \
- && adduser -D -u 10001 runner \
- && mkdir /claude-config /codex-home /work \
- && chown runner:runner /claude-config /codex-home
-COPY --from=codex /codex /opt/codex
-RUN ln -s /opt/codex/bin/codex /usr/local/bin/codex
-
-# Claude Code keeps the sign-in of one user in CLAUDE_CONFIG_DIR, and Codex keeps it in CODEX_HOME.
-# The runner mounts one volume for each user on each folder. A new named volume takes the owner of the folder,
-# so the user `runner` can write to it. Docker sets no USER, and Claude Code needs one.
-# The root file system is read-only in a run, so HOME is the tmpfs at /tmp.
+ && mkdir /claude-config \
+ && chown runner:runner /claude-config
+# Claude Code keeps the sign-in of one user in CLAUDE_CONFIG_DIR. The runner mounts the volume of the user on it.
 ENV CLAUDE_CONFIG_DIR=/claude-config \
-    CODEX_HOME=/codex-home \
-    USE_BUILTIN_RIPGREP=0 \
-    HOME=/tmp \
-    USER=runner
-VOLUME ["/claude-config", "/codex-home"]
+    USE_BUILTIN_RIPGREP=0
+VOLUME ["/claude-config"]
 USER runner
-WORKDIR /work
-# The container does nothing by itself. The runner starts each program in it with `docker exec`.
-CMD ["sleep", "infinity"]

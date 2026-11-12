@@ -248,8 +248,8 @@ export interface RunActivity extends Activity {
   status: 'running' | 'done' | 'failed';
   started_at: string;
   detail: string | null;
-  /** The quote and the anchor of the comment. The viewer uses them when an event has no position. */
-  hint: { quote: string | null; anchor: string | null };
+  /** The quote, the text before it and the anchor of the thread of the comment. The cursor starts there, and the viewer uses them when an event has no position. */
+  hint: { quote: string | null; before: string | null; anchor: string | null };
 }
 
 export interface PageActivity {
@@ -270,6 +270,7 @@ interface RunRow {
   started_at: string;
   detail: string | null;
   quote: string | null;
+  prefix?: string | null;
   anchor: string | null;
 }
 
@@ -294,12 +295,12 @@ export function activeRuns(runs: RunRow[], events: EventRow[], since: number, no
   const byRun = new Map<string, ActivityEvent[]>();
   for (const e of events) byRun.set(e.run_id, [...(byRun.get(e.run_id) ?? []), { id: e.id, seq: e.seq, kind: e.kind, ...dataOf(e.data) }]);
   const out: RunActivity[] = [];
-  for (const { rid, quote, anchor, ...r } of runs) {
+  for (const { rid, quote, prefix, anchor, ...r } of runs) {
     const state = reduceActivity(byRun.get(rid) ?? []);
     const stale = r.status === 'running' && now - Date.parse(r.started_at) > STALE_MS;
     if (!(r.status === 'running' && !stale) && !(since > 0 && state.rev > since)) continue;
     const status = stale ? 'failed' : r.status;
-    out.push({ ...state, ...r, id: r.id ?? r.comment_id, status, detail: status === 'failed' ? (stale ? 'timeout: the runner sent no result' : r.detail) : null, phase: status === 'running' ? state.phase : status, hint: { quote, anchor } });
+    out.push({ ...state, ...r, id: r.id ?? r.comment_id, status, detail: status === 'failed' ? (stale ? 'timeout: the runner sent no result' : r.detail) : null, phase: status === 'running' ? state.phase : status, hint: { quote, before: prefix ?? null, anchor } });
   }
   return out;
 }
@@ -316,7 +317,7 @@ export async function pageActivity(env: Env, slug: string, since: number): Promi
   if (cursor === since) return { latest: head.latest, cursor };
   const [runs, events] = await Promise.all([
     env.DB.prepare(
-      'SELECT r.id AS rid, r.token_id AS id, r.comment_id, COALESCE(c.parent_id, c.id) AS thread, r.agent, r.status, r.started_at, r.detail, c.quote, c.anchor FROM agent_runs r JOIN comments c ON c.id = r.comment_id WHERE c.slug = ? ORDER BY r.started_at, r.rowid',
+      'SELECT r.id AS rid, r.token_id AS id, r.comment_id, COALESCE(c.parent_id, c.id) AS thread, r.agent, r.status, r.started_at, r.detail, t.quote, t.prefix, t.anchor FROM agent_runs r JOIN comments c ON c.id = r.comment_id JOIN comments t ON t.id = COALESCE(c.parent_id, c.id) WHERE c.slug = ? ORDER BY r.started_at, r.rowid',
     )
       .bind(slug)
       .all<RunRow>(),

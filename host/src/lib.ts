@@ -101,6 +101,7 @@ export type Route =
   | { kind: 'run-progress'; id: string }
   | { kind: 'api-activity'; slug: string }
   | { kind: 'api-comment-run'; id: string }
+  | { kind: 'api-warm' }
   | { kind: 'not-found' };
 
 const NUM = /^[1-9][0-9]{0,8}$/;
@@ -137,6 +138,7 @@ export function route(path: string): Route {
   }
   if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'resolve') return { kind: 'api-comment-resolve', id: p[2] };
   if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'run') return { kind: 'api-comment-run', id: p[2] };
+  if (path === '/api/assistants/warm') return { kind: 'api-warm' };
   if (path === '/api/connector-tokens') return { kind: 'api-connector-tokens' };
   if (p[0] === 'api' && p[1] === 'connector-tokens' && p.length === 3 && (isTokenId(p[2]) || isToken(p[2]))) return { kind: 'api-connector-token', token: p[2] };
   // The MCP connector takes any token text here. So a wrong token gets a 404 from the connector, not an Access error.

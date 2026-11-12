@@ -13,6 +13,8 @@ export const TOKEN_TTL_MS = 15 * 60 * 1000;
 export const STALE_MS = 5 * 60 * 1000;
 /** The events of a run stay this long after the run ends. A new run on the page deletes the older ones. */
 const ACTIVITY_TTL_MS = 10 * 60 * 1000;
+/** The host asks the runner to warm up for one person at most one time in this period. */
+export const WARM_EVERY_MS = 60 * 1000;
 const MAX_RESULT_BYTES = 64 * 1024;
 const MAX_DETAIL = 500;
 
@@ -163,4 +165,23 @@ export async function rerunComment(env: Env, comment: Comment, origin: string): 
     await finishRun(env, r.id, 'failed', 'timeout: the runner sent no result');
   }
   return () => runSandboxAgent(env, comment, origin);
+}
+
+/**
+ * POST /api/assistants/warm: a person opened a comment box, so the runner can get a sandbox ready before the comment arrives.
+ * The host sends POST <runner origin>/warm with { user } at most one time in 60 seconds for each person. D1 holds the time
+ * of the last call, because a Worker has no memory between requests. Returns the request to the runner, for waitUntil,
+ * or null when the host sends nothing: no runner, or a call for this person in the last 60 seconds.
+ */
+export async function warmRunner(env: Env, user: string, now = Date.now()): Promise<(() => Promise<void>) | null> {
+  if (!env.SANDBOX_RUNNER_URL) return null;
+  const res = await env.DB.prepare('INSERT INTO runner_warm (user, at) VALUES (?1, ?2) ON CONFLICT (user) DO UPDATE SET at = excluded.at WHERE runner_warm.at <= ?3')
+    .bind(user, new Date(now).toISOString(), new Date(now - WARM_EVERY_MS).toISOString())
+    .run();
+  if (!res.meta.changes) return null;
+  const url = new URL('/warm', env.SANDBOX_RUNNER_URL).href;
+  const secret = env.SANDBOX_RUNNER_SECRET;
+  return async () => {
+    await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(secret ? { 'x-runner-secret': secret } : {}) }, body: JSON.stringify({ user }), signal: AbortSignal.timeout(10_000) });
+  };
 }

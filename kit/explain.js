@@ -298,7 +298,69 @@ function findQuote(texts, quote, hint, fromNode) {
   return { a: [node[at], off[at]], b: [node[z], off[z] + 1], exact: n === need.length };
 }
 
-globalThis.Explain = { parseFlow, layoutFlow, evalExpr, evalDefs, fmt, dedent, diagramColor, DECK_LAYOUTS, findQuote };
+/* ─── Comments, the pure part: the place of a comment in the text of a page ───
+   A comment keeps the text that the person selected (quote) and the page text just before it and just after it
+   (prefix, suffix). texts is the text of each text node, in document order, as for findQuote. A position is
+   [text node, offset]. White space never counts in a comparison. */
+
+/** The quote and its context for a selection from position a to position b. Each white space run becomes one space. */
+function describeSelection(texts, a, b, ctx = 32) {
+  const tidy = (t) => t.replace(/\s+/g, ' ');
+  let quote = '';
+  for (let n = a[0]; n <= b[0]; n++) quote += texts[n].slice(n === a[0] ? a[1] : 0, n === b[0] ? b[1] : texts[n].length);
+  let prefix = texts[a[0]].slice(0, a[1]), suffix = texts[b[0]].slice(b[1]);
+  for (let n = a[0] - 1; n >= 0 && tidy(prefix).trim().length < ctx; n--) prefix = texts[n] + prefix;
+  for (let n = b[0] + 1; n < texts.length && tidy(suffix).trim().length < ctx; n++) suffix += texts[n];
+  return { quote: tidy(quote).trim(), prefix: tidy(prefix).trim().slice(-ctx), suffix: tidy(suffix).trim().slice(0, ctx) };
+}
+
+/* Finds the quote of a comment again. q is { quote, prefix, suffix }. from and to are the first text node of the
+   anchor element of the comment and the first text node after it, when the page still has that element.
+   Each place that has the quote gets a score: the number of characters next to it that agree with the prefix and with
+   the suffix. The best place wins. The answer is null when two places are equally good, and when a quote of under 24
+   characters lost its context, because the same short text in another sentence is not the place of the comment.
+   When the page no longer has the whole quote, the answer is the place of its start, as from findQuote, or the place
+   next to its prefix or suffix, with exact: false. Such a place gets no mark: only the card shows where the text was.
+   Returns { a, b, exact } or null. b is the position after the last character. */
+function anchorQuote(texts, q, from, to) {
+  const squash = (t) => String(t ?? '').replace(/\s+/g, '');
+  const need = squash(q && q.quote);
+  if (!need) return null;
+  const chars = [], node = [], off = [], start = [];
+  texts.forEach((t, n) => {
+    start.push(chars.length);
+    for (let i = 0; i < t.length; i++) if (!/\s/.test(t[i])) { chars.push(t[i]); node.push(n); off.push(i); }
+  });
+  start.push(chars.length);
+  const flat = chars.join(''), pre = squash(q.prefix), suf = squash(q.suffix);
+  const lo = from != null && from >= 0 && from < start.length ? start[from] : -1, hi = to != null && to >= 0 && to < start.length ? start[to] : -1;
+  const hits = [];
+  for (let at = flat.indexOf(need); at >= 0 && hits.length < 500; at = flat.indexOf(need, at + 1)) {
+    const z = at + need.length;
+    let p = 0, s = 0;
+    while (p < pre.length && p < at && flat[at - 1 - p] === pre[pre.length - 1 - p]) p++;
+    while (s < suf.length && z + s < flat.length && flat[z + s] === suf[s]) s++;
+    hits.push({ at, score: p + s, inside: lo >= 0 && at >= lo && (hi < 0 || at < hi) ? 1 : 0 });
+  }
+  if (!hits.length) {
+    const part = need.length >= 4 ? findQuote(texts, q.quote, q.prefix, lo >= 0 ? from : undefined) : null;
+    if (part) return { a: part.a, b: part.b, exact: false };
+    // The quote is gone, for example after a rewrite. The text next to it often stays: the place is just after the
+    // prefix, or at the start of the suffix. Each must occur one time only.
+    const once = (t) => { const i = t.length >= 8 ? flat.indexOf(t) : -1; return i >= 0 && flat.indexOf(t, i + 1) < 0 ? i : -1; };
+    const p = once(pre.slice(-24)), s = p < 0 ? once(suf.slice(0, 24)) : -1;
+    const at = p >= 0 ? Math.min(p + Math.min(24, pre.length), flat.length - 1) : s;
+    return at >= 0 ? { a: [node[at], off[at]], b: [node[at], off[at] + 1], exact: false } : null;
+  }
+  hits.sort((x, y) => y.score - x.score || y.inside - x.inside || x.at - y.at);
+  const best = hits[0], next = hits[1];
+  if (next && next.score === best.score && next.inside === best.inside) return null;
+  if (need.length < 24 && pre.length + suf.length >= 8 && best.score < 4) return null;
+  const z = best.at + need.length - 1;
+  return { a: [node[best.at], off[best.at]], b: [node[z], off[z] + 1], exact: true };
+}
+
+globalThis.Explain = { parseFlow, layoutFlow, evalExpr, evalDefs, fmt, dedent, diagramColor, DECK_LAYOUTS, findQuote, describeSelection, anchorQuote };
 if (!HAS_DOM) return;
 
 /* ─── Flow → SVG ───
@@ -622,6 +684,8 @@ function runDeck(deck) {
     if (railOn() && !('filled' in rail.dataset)) { fillRail(); layout(); }
     markRail();
     writeHash();
+    // The comments measure their places again: another slide shows now.
+    dispatchEvent(new Event('k-layout'));
   }
   function go(i, b = 0, opts = {}) {
     S.i = clamp(i, 0, N - 1); S.b = clamp(b, 0, builds(S.i)); show();
@@ -773,6 +837,29 @@ async function auditDeck(slides) {
   root.dataset.kDeck = 'ready';
 }
 
+/* ─── Text places, for presence and for comments ─── */
+/** The text nodes of the page in document order, without the nodes in the elements that match skip. */
+function textNodes(skip) {
+  const out = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest(skip)) out.push(n);
+  return out;
+}
+const shown = (el) => !!el && (el.checkVisibility ? el.checkVisibility({ visibilityProperty: true }) : getComputedStyle(el).visibility !== 'hidden');
+const hostOf = (g) => (g.startContainer.nodeType === 1 ? g.startContainer : g.startContainer.parentElement);
+/** One box for each line of the range, in viewport pixels. */
+function lines(g) {
+  if (!shown(hostOf(g))) return [];
+  const out = [];
+  [...g.getClientRects()].filter((b) => b.width > 0.5 && b.height > 0.5).sort((a, b) => a.top - b.top || a.left - b.left).forEach((b) => {
+    const l = out[out.length - 1];
+    if (l && Math.abs(b.top - l.top) < Math.max(l.height, b.height) / 2 && b.left <= l.right + 3) {
+      const top = Math.min(l.top, b.top), bottom = Math.max(l.bottom, b.bottom);
+      Object.assign(l, { top, bottom, height: bottom - top, right: Math.max(l.right, b.right) });
+    } else out.push({ left: b.left, right: b.right, top: b.top, bottom: b.bottom, height: b.height });
+  });
+  return out;
+}
+
 /* ─── Presence: the cursor of an assistant that edits the page ───────────
    The host viewer sends the state of each run with postMessage. Nothing here runs, and the page gets no
    element, until the first message from the parent window. Each text from the viewer is text from an
@@ -800,7 +887,7 @@ function runPresence() {
 function startPresence() {
   const NAMES = { claude: 'Claude', chatgpt: 'ChatGPT' };
   const VERBS = { starting: 'starting', reading: 'reading', editing: 'editing', replying: 'replying' };
-  const SKIP = 'script, style, template, noscript, .k-pr, .k-pr-dock, .k-pr-new, .k-rail, .k-deck-bar, .k-err';
+  const SKIP = 'script, style, template, noscript, .k-pr, .k-pr-dock, .k-pr-new, .k-cm, .k-rail, .k-deck-bar, .k-err';
   const POINTER = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.8 13.6 6.6 8.9 8.4 7 13.4z"/></svg>';
   const still = matchMedia('(prefers-reduced-motion: reduce)');
   const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -815,36 +902,16 @@ function startPresence() {
   let userAt = 0;
   ['wheel', 'touchstart', 'touchmove', 'keydown', 'pointerdown'].forEach((t) => addEventListener(t, (e) => { if (e.isTrusted) userAt = Date.now(); }, { passive: true, capture: true }));
 
-  function textNodes() {
-    const out = [], w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-    for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest(SKIP)) out.push(n);
-    return out;
-  }
   /** The range of a quote in the page, or null. */
   function rangeOf(quote, hint, anchor) {
     if (!quote) return null;
-    const nodes = textNodes(), el = anchor ? document.getElementById(anchor) : null;
+    const nodes = textNodes(SKIP), el = anchor ? document.getElementById(anchor) : null;
     const from = el ? nodes.findIndex((n) => el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING) : -1;
     const hit = findQuote(nodes.map((n) => n.data), quote, hint, from < 0 ? undefined : from);
     if (!hit) return null;
     const g = document.createRange();
     g.setStart(nodes[hit.a[0]], hit.a[1]); g.setEnd(nodes[hit.b[0]], hit.b[1]);
     return g;
-  }
-  const shown = (el) => !!el && (el.checkVisibility ? el.checkVisibility({ visibilityProperty: true }) : getComputedStyle(el).visibility !== 'hidden');
-  const hostOf = (g) => (g.startContainer.nodeType === 1 ? g.startContainer : g.startContainer.parentElement);
-  /** One box for each line of the range, in viewport pixels. */
-  function lines(g) {
-    if (!shown(hostOf(g))) return [];
-    const out = [];
-    [...g.getClientRects()].filter((b) => b.width > 0.5 && b.height > 0.5).sort((a, b) => a.top - b.top || a.left - b.left).forEach((b) => {
-      const l = out[out.length - 1];
-      if (l && Math.abs(b.top - l.top) < Math.max(l.height, b.height) / 2 && b.left <= l.right + 3) {
-        const top = Math.min(l.top, b.top), bottom = Math.max(l.bottom, b.bottom);
-        Object.assign(l, { top, bottom, height: bottom - top, right: Math.max(l.right, b.right) });
-      } else out.push({ left: b.left, right: b.right, top: b.top, bottom: b.bottom, height: b.height });
-    });
-    return out;
   }
   function paint(box, list, cls) {
     const o = layer.getBoundingClientRect();
@@ -1013,9 +1080,239 @@ function startPresence() {
   };
 }
 
+/* ─── Comments: the selection of the reader and the text of each comment ───────────
+   The host viewer draws the comments outside the page. The page reports and marks: it tells the viewer what the reader
+   selects and where each comment sits, and it marks the text of each comment. Nothing here runs, and the page gets no
+   element, until the first message from the parent window. A text from the viewer never becomes markup: the page only
+   searches for it.
+   Messages from the viewer, all { ns: 'k-cm', v: 1, type }:
+     hello     boxes. The page answers { type: 'ready' }. boxes: true draws the marks as boxes, as in a browser with no CSS Custom Highlight API.
+     threads   list: [{ id, quote, prefix, suffix, anchor, slide }], active, hover. The comments to place and to mark.
+     mark      active, hover. The ids of the comments with a strong mark.
+     reveal    id. Show the slide of that comment and scroll to it.
+     unselect  Remove the selection.
+     scroll    dy. Scroll the page by dy pixels.
+   Messages to the viewer:
+     select    on, live, quote, prefix, suffix, anchor, slide, rects: [[x, y, w, h]], y. The selection, one box for each line. live: the pointer is down.
+     anchors   y, vh, dh, deck: { n, cur, paged } | null, list: [{ id, state, top, slide, hidden }]. top is in pixels from the top of the document.
+               state is 'exact' (the quote is there, and it has a mark), 'changed' (the text changed: the place is the start of the quote or the anchor element),
+               'spot' (a comment on an element) or 'lost' (no place).
+     scroll    y. One message for each scroll event.
+     pick      id. A click on the mark of a comment, or '' for a click on other text.
+     hover     id. The mark under the pointer, or ''.
+     key       key: 'comment' for Ctrl or Cmd + Alt + M, or 'esc'. */
+function runComments() {
+  if (parent === window) return;
+  let C = null;
+  addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || d.ns !== 'k-cm' || d.v !== 1 || e.source !== parent) return;
+    if (!C) C = startComments();
+    C(d);
+  });
+}
+function startComments() {
+  const SKIP = 'script, style, template, noscript, .k-pr, .k-pr-dock, .k-pr-new, .k-cm, .k-rail, .k-deck-bar, .k-err';
+  const OWN = '.k-pr, .k-pr-dock, .k-pr-new, .k-cm, .k-rail, .k-deck-bar';
+  const DRAFT = '~draft';
+  const root = document.documentElement;
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const hasApi = !!(globalThis.Highlight && globalThis.CSS && CSS.highlights);
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const say = (msg) => parent.postMessage({ ns: 'k-cm', v: 1, ...msg }, '*');
+  const layer = document.createElement('div');
+  layer.className = 'k-cm'; layer.setAttribute('aria-hidden', 'true');
+  document.body.append(layer);
+  const slides = () => [...document.querySelectorAll('main.k-deck > .k-frame > .k-slide')];
+  // items: one for each comment, with its range or its element. over: the mark under the pointer. hover: the comment under the pointer in the viewer.
+  let items = [], key = '', active = '', hover = '', over = '', boxes = !hasApi, stale = false, queued = 0, sent = '', painted = '', epoch = 0, down = false;
+
+  /** Finds the place of each comment in the text of the page. */
+  function resolveAll() {
+    stale = false; epoch++;
+    const nodes = textNodes(SKIP), texts = nodes.map((n) => n.data);
+    items.forEach((it) => {
+      const q = it.q, slide = q.slide ? document.getElementById(q.slide) : null;
+      const el = (q.anchor && document.getElementById(q.anchor)) || (slide && slide.classList.contains('k-slide') ? slide : null);
+      it.range = null; it.el = el; it.state = el ? 'spot' : 'lost';
+      if (!q.quote) return;
+      let from = -1, to = -1;
+      if (el) {
+        from = nodes.findIndex((n) => el.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING);
+        if (from >= 0) { to = from; while (to < nodes.length && el.contains(nodes[to])) to++; }
+      }
+      const hit = anchorQuote(texts, q, from, to);
+      it.state = hit && hit.exact ? 'exact' : hit || el ? 'changed' : 'lost';
+      if (hit) { it.range = document.createRange(); it.range.setStart(nodes[hit.a[0]], hit.a[1]); it.range.setEnd(nodes[hit.b[0]], hit.b[1]); }
+    });
+  }
+  /** Measures the place of each comment and tells the viewer when a place changed. Only an exact quote gets a mark. */
+  function measure() {
+    const o = layer.getBoundingClientRect(), all = slides(), list = [], count = new Map();
+    items.forEach((it) => {
+      const host = it.range ? hostOf(it.range) : it.el, slide = host ? host.closest('.k-slide') : null, n = slide ? all.indexOf(slide) + 1 : 0;
+      let ls = [], top = null;
+      if (it.range) { ls = lines(it.range); if (ls.length) top = ls[0].top; }
+      else if (it.el && shown(it.el)) { const b = it.el.getBoundingClientRect(); if (b.width || b.height) top = b.top; }
+      it.lines = it.state === 'exact' ? ls.map((l) => [l.left - o.left, l.top - o.top, l.right - l.left, l.height].map((v) => Math.round(v * 2) / 2)) : [];
+      if (n && it.id !== DRAFT) count.set(n, (count.get(n) || 0) + 1);
+      list.push({ id: it.id, state: it.state, top: top == null ? null : Math.round(top + scrollY), slide: n, hidden: top == null && it.state !== 'lost' });
+    });
+    const deck = all.length ? { n: all.length, cur: all.findIndex((s) => s.parentElement.classList.contains('k-cur')) + 1, paged: root.dataset.kView === 'slide' } : null;
+    const body = JSON.stringify([innerHeight, root.scrollHeight, deck, list]);
+    if (body !== sent) { sent = body; say({ type: 'anchors', y: scrollY, vh: innerHeight, dh: root.scrollHeight, deck, list }); }
+    paint();
+    // A deck shows the number of comments of each slide on its thumbnail, and a dot on its tick.
+    if (all.length) document.querySelectorAll('.k-tick[data-i], .k-thumb[data-i]').forEach((b) => {
+      const n = count.get(+b.dataset.i + 1) || 0;
+      let m = b.querySelector(':scope > .k-cmn');
+      if (!n) { if (m) m.remove(); return; }
+      if (!m) { m = document.createElement('span'); m.className = 'k-cmn'; b.append(m); }
+      if (m.textContent !== String(n)) { m.textContent = n; m.setAttribute('aria-label', n === 1 ? '1 comment' : n + ' comments'); }
+    });
+  }
+  const strong = (it) => it.id === active || it.id === hover || it.id === over || it.id === DRAFT;
+  function highlight(name, list, priority) {
+    if (!list.length) { CSS.highlights.delete(name); return; }
+    const h = new Highlight(...list.map((it) => it.range));
+    h.priority = priority;
+    CSS.highlights.set(name, h);
+  }
+  function paint() {
+    const marked = items.filter((it) => it.state === 'exact' && it.range);
+    const k = boxes + ' ' + epoch + ' ' + marked.map((it) => it.id + (strong(it) ? '!' : '') + (boxes ? it.lines.join(';') : '')).join(' ');
+    if (k === painted) return;
+    painted = k;
+    if (hasApi) { highlight('k-cm', boxes ? [] : marked.filter((it) => !strong(it)), 1); highlight('k-cm-on', boxes ? [] : marked.filter(strong), 2); }
+    layer.replaceChildren(...(boxes ? marked.flatMap((it) => it.lines.map((l) => {
+      const i = document.createElement('i');
+      i.className = 'k-cm-hl' + (strong(it) ? ' on' : '');
+      i.style.cssText = `left:${l[0] - 1}px;top:${l[1]}px;width:${l[2] + 2}px;height:${l[3]}px`;
+      return i;
+    })) : []));
+  }
+  /** The comment whose mark has the point. Of two marks, the shorter quote wins. */
+  function hit(x, y) {
+    const o = layer.getBoundingClientRect();
+    x -= o.left; y -= o.top;
+    let best = null;
+    items.forEach((it) => {
+      if (it.id !== DRAFT && it.lines && it.lines.some((l) => x >= l[0] - 1 && x <= l[0] + l[2] + 1 && y >= l[1] && y <= l[1] + l[3]) && (!best || it.q.quote.length < best.q.quote.length)) best = it;
+    });
+    return best ? best.id : '';
+  }
+
+  /** The selection as a message: the quote, its context, the nearest element id and one box for each line. */
+  function selection(live) {
+    const sel = getSelection(), off = { type: 'select', on: false };
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return off;
+    const g = sel.getRangeAt(0), host = hostOf(g);
+    if (!host || host.closest(SKIP + ', input, textarea, select, [contenteditable]')) return off;
+    if (live) return { type: 'select', on: true, live: true };
+    const nodes = textNodes(SKIP), i = nodes.findIndex((n) => g.intersectsNode(n));
+    if (i < 0) return off;
+    let j = i;
+    while (j + 1 < nodes.length && g.intersectsNode(nodes[j + 1])) j++;
+    const texts = nodes.map((n) => n.data);
+    let a = [i, nodes[i] === g.startContainer ? g.startOffset : 0], b = [j, nodes[j] === g.endContainer ? g.endOffset : texts[j].length];
+    // The white space at the two ends is not part of the quote.
+    const before = () => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
+    while (before()) { if (a[1] >= texts[a[0]].length) { if (a[0] === b[0]) break; a = [a[0] + 1, 0]; } else if (/\s/.test(texts[a[0]][a[1]])) a[1]++; else break; }
+    while (before()) { if (b[1] <= 0) { if (a[0] === b[0]) break; b = [b[0] - 1, texts[b[0] - 1].length]; } else if (/\s/.test(texts[b[0]][b[1] - 1])) b[1]--; else break; }
+    if (!before()) return off;
+    const d = describeSelection(texts, a, b), r = document.createRange();
+    r.setStart(nodes[a[0]], a[1]); r.setEnd(nodes[b[0]], b[1]);
+    const ls = lines(r), start = hostOf(r);
+    if (!d.quote || !ls.length) return off;
+    // An id inside an SVG comes from the kit, and the next version can give it to another element.
+    let el = start.closest('[id]');
+    while (el && el.closest('svg')) el = el.parentElement && el.parentElement.closest('[id]');
+    const slide = start.closest('.k-slide');
+    return { type: 'select', on: true, live: false, quote: d.quote.slice(0, 1000), prefix: d.prefix, suffix: d.suffix, anchor: el ? el.id.slice(0, 200) : '', slide: slide ? slide.id.slice(0, 200) : '',
+      rects: ls.slice(0, 24).map((l) => [l.left, l.top, l.right - l.left, l.height].map(Math.round)), y: scrollY };
+  }
+  let selTick = 0, lastSel = '';
+  function report(live) {
+    const m = selection(live), k = JSON.stringify(m);
+    if (k !== lastSel) { lastSel = k; say(m); }
+  }
+  document.addEventListener('selectionchange', () => { if (!selTick) selTick = requestAnimationFrame(() => { selTick = 0; report(down); }); });
+  addEventListener('pointerdown', () => { down = true; }, true);
+  // The end of a drag: the viewer gets the selection at once, so its button shows in the same frame.
+  const up = () => { if (down) { down = false; report(false); } };
+  addEventListener('pointerup', up, true);
+  addEventListener('pointercancel', up, true);
+
+  function setOver(id) {
+    if (id === over) return;
+    over = id;
+    root.classList.toggle('k-cm-over', !!id);
+    paint();
+    say({ type: 'hover', id });
+  }
+  let moveTick = 0, mx = 0, my = 0;
+  addEventListener('pointermove', (e) => {
+    if (down || !items.length) return;
+    mx = e.clientX; my = e.clientY;
+    if (!moveTick) moveTick = requestAnimationFrame(() => { moveTick = 0; setOver(hit(mx, my)); });
+  }, { passive: true });
+  root.addEventListener('pointerleave', () => setOver(''));
+  addEventListener('click', (e) => {
+    const sel = getSelection();
+    if ((sel && !sel.isCollapsed) || (e.target.closest && e.target.closest('a[href], button, input, textarea, select, summary, label, ' + OWN))) return;
+    say({ type: 'pick', id: hit(e.clientX, e.clientY) });
+  });
+  addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyM') { e.preventDefault(); say({ type: 'key', key: 'comment' }); }
+    else if (e.key === 'Escape' && !e.defaultPrevented) say({ type: 'key', key: 'esc' });
+  });
+  addEventListener('scroll', () => say({ type: 'scroll', y: scrollY }), { passive: true });
+
+  // One measure for each frame at most. A change of the page text finds each place again; a change of size only measures.
+  const queue = () => { if (!queued) queued = requestAnimationFrame(() => { queued = 0; if (stale) resolveAll(); measure(); }); };
+  new MutationObserver((list) => {
+    if (list.some((m) => { const el = m.target.nodeType === 1 ? m.target : m.target.parentElement; return !el || !el.closest(OWN); })) stale = true;
+    queue();
+  }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  const sized = new ResizeObserver(queue);
+  sized.observe(root); sized.observe(document.body);
+  addEventListener('k-layout', queue);
+  addEventListener('load', queue);
+  if (document.fonts) document.fonts.ready.then(queue, () => {});
+
+  function reveal(id) {
+    const it = items.find((x) => x.id === id), host = it && (it.range ? hostOf(it.range) : it.el);
+    if (!host) return;
+    const slide = host.closest('.k-slide');
+    if (slide) slide.dispatchEvent(new CustomEvent('k-show'));
+    requestAnimationFrame(() => {
+      const b = it.range ? it.range.getBoundingClientRect() : host.getBoundingClientRect();
+      if ((b.width || b.height) && (b.top < 72 || b.top > innerHeight - 120)) scrollBy({ top: b.top - innerHeight * 0.32, behavior: still.matches ? 'auto' : 'smooth' });
+    });
+  }
+  return (d) => {
+    if (d.type === 'hello') {
+      boxes = d.boxes === true || !hasApi;
+      sent = ''; painted = '';
+      say({ type: 'ready' });
+      queue();
+    } else if (d.type === 'threads' && Array.isArray(d.list)) {
+      const list = d.list.slice(0, 300).filter((t) => t && typeof t.id === 'string' && t.id)
+        .map((t) => ({ id: str(t.id, 64), q: { quote: str(t.quote, 1000), prefix: str(t.prefix, 64), suffix: str(t.suffix, 64), anchor: str(t.anchor, 200), slide: str(t.slide, 200) } }));
+      const k = JSON.stringify(list);
+      active = str(d.active, 64); hover = str(d.hover, 64);
+      if (k !== key) { key = k; items = list; stale = true; sent = ''; queue(); } else paint();
+    } else if (d.type === 'mark') { active = str(d.active, 64); hover = str(d.hover, 64); paint(); }
+    else if (d.type === 'reveal') reveal(str(d.id, 64));
+    else if (d.type === 'unselect') { const s = getSelection(); if (s) s.removeAllRanges(); }
+    else if (d.type === 'scroll' && Number.isFinite(d.dy)) scrollBy({ top: d.dy, behavior: d.smooth === true && !still.matches ? 'smooth' : 'instant' });
+  };
+}
+
 function init() {
   document.documentElement.classList.remove('no-js');
   runPresence();
+  runComments();
   document.querySelectorAll('main.k-deck').forEach(runDeck);
   document.querySelectorAll('.k-flow').forEach((el) => { try { drawFlow(el); } catch (e) { el.innerHTML = `<div class="k-err">${esc(e.message)}</div>`; } });
   document.querySelectorAll('figure.k-diagram').forEach((el) => { try { drawDiagram(el); } catch (e) { el.insertAdjacentHTML('afterbegin', `<div class="k-err">${esc(e.message)}</div>`); } });

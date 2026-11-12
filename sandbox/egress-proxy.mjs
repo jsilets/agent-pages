@@ -10,10 +10,13 @@
 // Port 3129, for the runner only (the header x-control-secret must match CONTROL_SECRET):
 //   PUT /route/<ip>        Body: { "mcp_url": "…" }. The container with this address now reaches this connector URL.
 //   DELETE /route/<ip>     The end of the run.
+//   PUT /cache             Body: { "answers": { "<method>": { "status": 200, "body": "<JSON text>" } } }. Stored answers
+//                          for the methods below, which the runner got from the host before the first run.
 //   GET /health
 //
-// A container that has no run gets a stored answer for `initialize` and `tools/list`, when a run before it got one.
-// The answers are the same for each token. So a program that starts before its job arrives can connect and wait.
+// A container that has no run gets a stored answer for `server/discover`, `initialize` and `tools/list`, when a run
+// before it got one or the runner gave one with PUT /cache. The answers are the same for each token.
+// So a program that starts before its job arrives can connect and wait.
 import { createServer, request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { connect } from 'node:net';
@@ -135,6 +138,18 @@ export function startProxy({ allow = DEFAULT_ALLOW, secret, port = 3128, control
     const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     if (!sameSecret(req.headers['x-control-secret'], secret)) return send(401, { error: 'no' });
     if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, routes: routes.size, cached: [...cache.keys()], allow });
+    if (req.url === '/cache') {
+      if (req.method !== 'PUT') return send(405, { error: 'PUT' });
+      try {
+        const { answers } = JSON.parse((await readBody(req, 256 * 1024)).toString('utf8'));
+        const list = Object.entries(answers ?? {});
+        if (!list.length || list.some(([k, a]) => !CACHED.has(k) || !(a?.status >= 200 && a.status < 300) || typeof a.body !== 'string')) throw new Error('answers');
+        for (const [k, a] of list) cache.set(k, { status: a.status, headers: { 'content-type': 'application/json' }, body: a.body });
+        return send(200, { ok: true, cached: [...cache.keys()] });
+      } catch {
+        return send(400, { error: 'send { "answers": { "<method>": { "status": 2xx, "body": "…" } } } for ' + [...CACHED].join(', ') });
+      }
+    }
     const m = /^\/route\/([0-9a-f.:]+)$/i.exec(req.url);
     if (!m) return send(404, { error: 'no such route' });
     if (req.method === 'DELETE') { routes.delete(m[1]); return send(200, { ok: true }); }

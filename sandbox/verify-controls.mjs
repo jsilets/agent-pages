@@ -3,8 +3,9 @@
 // runner, and then it tries each forbidden thing inside the container. It needs Docker and no sign-in, and it makes no
 // model request. It has no dependencies.
 //
-//   node sandbox/verify-controls.mjs
+//   node sandbox/verify-controls.mjs [claude|codex]
 //
+// With no argument it checks the container of each image: agent-pages-sandbox-claude and agent-pages-sandbox-codex.
 // It prints one line for each check and exits with 1 when a check fails. It uses the port number 8899 for the names of
 // its Docker objects, so it does not touch a runner on another port. It removes what it made.
 import { spawn, spawnSync } from 'node:child_process';
@@ -20,24 +21,31 @@ const env = { PATH: process.env.PATH, HOME: process.env.HOME, DOCKER_HOST: proce
 for (const k of Object.keys(env)) if (!env[k]) delete env[k];
 const docker = (...args) => { const r = spawnSync('docker', args, { env, encoding: 'utf8', timeout: 60_000 }); return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim() }; };
 let failed = 0;
-const check = (name, ok, proof) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}\n      ${String(proof).replace(/\s*\n\s*/g, ' | ').slice(0, 300)}`); };
+let engine = '';
+const check = (name, ok, proof) => { if (!ok) failed++; console.log(`${ok ? 'PASS' : 'FAIL'}  [${engine}] ${name}\n      ${String(proof).replace(/\s*\n\s*/g, ' | ').slice(0, 300)}`); };
+const ENGINES = process.argv[2] ? [process.argv[2]] : ['claude', 'codex'];
+const MOUNT = { claude: '/claude-config', codex: '/codex-home' };
+const OTHER = { claude: 'codex', codex: 'claude' };
 
+for (engine of ENGINES) {
 let box;
 try {
   await R.ensureInfra();
-  ({ box } = await R.ensureBox(USER));
+  ({ box } = await R.ensureBox(USER, engine));
   const sh = (script) => docker('exec', box.name, 'sh', '-c', script);
   const proxy = `agent-pages-egress-${process.env.RUNNER_PORT}`;
 
   // The file system
   let r = sh('touch /etc/x; touch /work/x; touch /usr/bin/x; touch /home/runner/x');
   check('the root file system is read-only', r.code !== 0 && (r.out.match(/Read-only file system/g) ?? []).length === 4, r.out);
-  r = sh('echo ok > /tmp/t && cat /tmp/t && echo ok > /claude-config/.verify && rm /claude-config/.verify && echo ok > /codex-home/.verify && rm /codex-home/.verify && echo volumes-ok');
-  check('/tmp and the two sign-in volumes take a write', r.code === 0 && r.out.endsWith('volumes-ok'), r.out);
+  r = sh(`echo ok > /tmp/t && cat /tmp/t && echo ok > ${MOUNT[engine]}/.verify && rm ${MOUNT[engine]}/.verify && echo volume-ok`);
+  check('/tmp and the sign-in volume of the engine take a write', r.code === 0 && r.out.endsWith('volume-ok'), r.out);
+  r = sh(`command -v ${engine}; command -v ${OTHER[engine]} || echo "no ${OTHER[engine]}"; command -v node || echo "no node"; ls -d ${MOUNT[OTHER[engine]]} 2>&1`);
+  check('the image has the program of its engine, and not the other program and not Node', r.out.startsWith(`/usr/`) && r.out.includes(`no ${OTHER[engine]}`) && r.out.includes('no node') && /No such file/.test(r.out), r.out);
   r = sh('cp /bin/busybox /tmp/bb && /tmp/bb true');
   check('no program runs from /tmp (noexec)', r.code !== 0 && /Permission denied/.test(r.out), r.out);
   r = docker('inspect', '-f', '{{range .Mounts}}{{.Destination}}:{{.RW}} {{end}}| ro={{.HostConfig.ReadonlyRootfs}}', box.name);
-  check('the two volumes are the only mounts that keep data', /^(\/claude-config:true \/codex-home:true|\/codex-home:true \/claude-config:true) \| ro=true$/.test(r.out), r.out);
+  check('the sign-in volume of the engine is the only mount that keeps data', r.out === `${MOUNT[engine]}:true | ro=true`, r.out);
 
   // The user and its rights
   r = sh('id -u; id -g; grep -E "^(CapEff|CapPrm|CapBnd|NoNewPrivs)" /proc/self/status');
@@ -103,8 +111,10 @@ try {
 } catch (e) {
   check('the script ran to its end', false, `${e.stack || e} ${e.cause?.message ?? ''}`);
 } finally {
-  R.cleanup();
-  for (const v of [R.volumeOf(USER), R.codexVolumeOf(USER)]) docker('volume', 'rm', v);
+  await R.removeBox(box?.key ?? '', 'verify end');
 }
+}
+R.cleanup();
+for (const v of [R.volumeOf(USER), R.codexVolumeOf(USER)]) docker('volume', 'rm', v);
 console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed');
 process.exit(failed ? 1 : 0);

@@ -35,7 +35,7 @@ function fakeDb(o: { first?: (q: string) => unknown; all?: (q: string) => unknow
   return { DB, ran };
 }
 
-const comment = (c: Partial<Comment> = {}): Comment => ({ id: 'c'.repeat(24), slug: 'g/n', version: 1, anchor: null, quote: null, body: '@claude fix it', author: 'ann@example.com', mention: 'claude', parent_id: null, status: 'open', created_at: '2026-01-01T00:00:00.000Z', ...c });
+const comment = (c: Partial<Comment> = {}): Comment => ({ id: 'c'.repeat(24), slug: 'g/n', version: 1, anchor: null, quote: null, prefix: null, suffix: null, slide: null, body: '@claude fix it', author: 'ann@example.com', mention: 'claude', parent_id: null, status: 'open', created_at: '2026-01-01T00:00:00.000Z', ...c });
 
 afterEach(() => vi.unstubAllGlobals());
 

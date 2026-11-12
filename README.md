@@ -64,8 +64,9 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }` |
 | `DELETE /api/shares/<token>` | Access | Revoke a share link |
 | `GET /api/pages/<group>/<name>/comments` | Access | The comment threads of the page, each with its replies. `run` is the latest sandbox run of the thread or `null`. `runs` has the latest run of each comment that started one, by comment id. `?status=open` or `?status=resolved` keeps one status. |
-| `POST /api/pages/<group>/<name>/comments` | Access | Add a comment. Body: `{ "body": "...", "anchor": "...", "quote": "...", "parent_id": "..." }`. Only `body` is necessary. The author is the Access identity. |
-| `PUT /api/comments/<id>/resolve` | Access | Resolve a thread |
+| `POST /api/pages/<group>/<name>/comments` | Access | Add a comment. Body: `{ "body": "...", "quote": "...", "prefix": "...", "suffix": "...", "anchor": "...", "slide": "...", "parent_id": "..." }`. Only `body` is necessary. `prefix` and `suffix` are the text before and after the quote. The host keeps at most 64 characters of each, next to the quote, and drops them for a comment with no quote. `slide` is the id of the deck slide, at most 200 characters. The host stores the latest version with the comment. The author is the Access identity. |
+| `PUT`, `DELETE /api/comments/<id>/resolve` | Access | Resolve a thread, or open it again. The route answers 204, or 404 for an unknown id. |
+| `POST /api/assistants/warm` | Access | Ask the sandbox runner to get ready for the person. The host sends `POST <runner origin>/warm` with `{ "user": "..." }` and the header `x-runner-secret`, at most one time in 60 seconds for each person. The route answers 202 with `{ "sent": true }` or `{ "sent": false }`. |
 | `POST /api/comments/<id>/run` | Access | Start the run of a comment again. The comment must have `@claude` or `@chatgpt`. The route answers 202, or 409 while a run of the comment is running, or 503 with no sandbox runner. |
 | `GET /api/pages/<group>/<name>/activity?since=<cursor>` | Access | The latest version of the page, a `cursor`, and `runs`: the state of each run that is running or that changed after `since`. The answer has no `runs` when the cursor did not move. |
 | `GET`, `POST /api/connector-tokens` | Access | List or make connector tokens. POST body: `{ "label": "..." }`. The POST response has the `id`, the token and the `mcp_url`. The list has the `id`, the last 4 characters of the token, the `label`, the `slug` scope and `expires_at` of each token. |
@@ -124,6 +125,36 @@ With `SANDBOX_RUNNER_SECRET` set, the host sends that value as the header `x-run
 
 Each run gets its own connector token. The token has the page of the comment as its scope, and it ends after 15 minutes. The host deletes the token when the runner reports the result of the run.
 
+## Comments in the viewer
+
+The viewer shows comments in a column at the right of the page, next to the text that they are about.
+
+- Select text in the page. A "Comment" button appears next to the selection. Click it, or press Cmd+Alt+M (Ctrl+Alt+M on Windows and Linux). A comment box opens in the column, level with the text. Enter starts a new line. Cmd+Enter or Ctrl+Enter posts the comment. Esc closes the box.
+- The comment button in the bar opens a box for a comment on the whole page. These comments show at the top of the column.
+- Each card shows the first lines of its thread. A click on a card or on its marked text opens the card, moves it a little to the left, and shows the replies and a reply box. The other cards move up or down so that no two cards overlap. The cards follow the page when it scrolls.
+- "Resolve" on a card hides the thread. The bar then shows "N resolved". That button lists the resolved threads, each with "Reopen".
+- Type `@` in a box to pick an assistant from a list. The list shows when an assistant is not connected. The viewer asks the runner to warm up when a person focuses a comment box (see `POST /api/assistants/warm`).
+
+The frame sends the selected text to the viewer with `postMessage`. The kit (`Explain.describeSelection`) makes the quote and up to 32 characters of text before and after it. The viewer stores these with the id of the nearest element, the slide id and the version. The viewer checks the type and the length of each field in each message from the frame.
+
+When the page changes, `Explain.anchorQuote` finds each quote again. It finds all copies of the quote and picks the copy whose text before and after matches best. A card has one of these states:
+
+- The quote is in the page: the page marks it.
+- The quote changed or is gone: the card shows "Original text changed" and the old quote with a line through it. The card stays next to the start of the quote that is still there, or next to the text that was before it. The page marks no text, so a wrong mark never shows.
+- The page has no place for the quote: the card goes to the top of the column.
+
+The page marks text with the CSS Custom Highlight API. A browser with no support for that API gets boxes behind the text. Add `?hl=boxes` to the viewer URL to see the boxes in any browser.
+
+The column changes with the width of the window:
+
+- Wide: the column is 328 px.
+- Medium: the column shows a dot for each thread. A click on a dot opens its card over the page.
+- Narrow: dots show at the edge of the page. A click on a dot opens the thread in a sheet at the bottom of the window.
+
+In a deck, the column shows the threads of the current slide. The slide thumbnails show the number of open threads of each slide.
+
+When a person writes a comment with `@claude` or `@chatgpt`, the assistant cursor starts at the quote of that comment. It does not wait for the first event of the run. When the run ends, the reply appears in the card.
+
 ## Run activity
 
 While an assistant works, the viewer shows it in three places:
@@ -171,7 +202,7 @@ The viewer sends the state to the page frame with `postMessage`. The frame keeps
 
 `Explain.findQuote` finds the quote in the text of the page. White space does not count, so a quote can cross inline elements and blocks. The start of a quote counts when the end is not in the page text. A quote that occurs two times needs the text before it or an element id. With neither one, the page marks no text and the cursor stays at the top of the window. In a deck, the page shows the slide that has the quote, unless the reader moved the deck in the last 2.5 seconds.
 
-`host/dev/simulate-run.mjs` is a fake runner for work on the viewer. It plays one run with no assistant: it sends the progress events and it calls the real connector, so the page gets a new version and the thread gets a reply.
+`host/dev/simulate-run.mjs` is a fake runner for work on the viewer. It plays one run with no assistant: it sends the progress events and it calls the real connector, so the page gets a new version and the thread gets a reply. It answers `POST /warm` with 202 and logs the user.
 
 ```bash
 node host/dev/simulate-run.mjs --port 8812

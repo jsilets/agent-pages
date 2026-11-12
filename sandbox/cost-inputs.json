@@ -1,0 +1,57 @@
+{
+  "_about": "Inputs of cost.mjs. 'measured' values come from the runs of 2026-11-12 in PERF.md and COST.md. 'assumed' values are guesses that a cloud test must replace.",
+  "rates": {
+    "_source": "https://developers.cloudflare.com/containers/pricing/, /durable-objects/platform/pricing/, /r2/pricing/, /workers/platform/pricing/ (read 2026-11-12)",
+    "memory_gib_s": 0.0000025,
+    "vcpu_s": 0.00002,
+    "disk_gb_s": 0.00000007,
+    "do_gb_s": 0.0000125,
+    "do_request": 0.00000015,
+    "r2_class_a": 0.0000045,
+    "r2_class_b": 0.00000036,
+    "worker_request": 0.0000003
+  },
+  "included": {
+    "_source": "Workers Paid, each month: 25 GiB-hours of memory, 375 vCPU-minutes, 200 GB-hours of disk, 400,000 GB-s and 1 million requests of Durable Objects, 1 million class A and 10 million class B R2 operations, 10 million Worker requests",
+    "memory_gib_s": 90000,
+    "vcpu_s": 22500,
+    "disk_gb_s": 720000,
+    "do_gb_s": 400000,
+    "do_requests": 1000000,
+    "r2_class_a": 1000000,
+    "r2_class_b": 10000000,
+    "worker_requests": 10000000
+  },
+  "instances": {
+    "basic": { "vcpu": 0.25, "memory_gib": 1, "disk_gb": 4 },
+    "standard-1": { "vcpu": 0.5, "memory_gib": 4, "disk_gb": 8 }
+  },
+  "instance": "standard-1",
+  "load": { "users": 1000, "runs_per_user": 20, "burst_size": 4, "burst_gap_s": 60 },
+  "engine": {
+    "_measured": "Claude Code 2.1.311, sonnet, docker mode on one Mac, 2026-11-12",
+    "cold_busy_s": 6.7,
+    "warm_busy_s": 5.1,
+    "cpu_program_start_s": 1.0,
+    "cpu_run_s": 0.7,
+    "cpu_idle_per_s": 0.05,
+    "warm_s": 60
+  },
+  "cloud": {
+    "_assumed": "Not measured on Cloudflare. start_s: the FAQ says cold starts are often 1 to 3 s. restore_s and save_s: the credential folder (512 KB) from and to R2.",
+    "start_s": 2,
+    "restore_s": 0.5,
+    "save_s": 0.5,
+    "typing_s": 20,
+    "unused_warms_per_episode": 0.5,
+    "do_requests_per_run": 25,
+    "worker_requests_per_run": 20
+  },
+  "policies": [
+    { "name": "No linger", "linger_s": 0, "intent": false },
+    { "name": "30 s linger", "linger_s": 30, "intent": false },
+    { "name": "90 s linger", "linger_s": 90, "intent": false },
+    { "name": "10 min linger", "linger_s": 600, "intent": false },
+    { "name": "Warm on intent + 90 s linger", "linger_s": 90, "intent": true }
+  ]
+}

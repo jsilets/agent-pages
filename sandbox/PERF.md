@@ -1,12 +1,74 @@
 # Speed of a run
 
-Date: 2026-11-11. One Mac (Apple silicon), OrbStack with Docker 29.4.0, Claude Code 2.1.311 in the image, Codex 0.167.2.
+Dates: 2026-11-11, and 2026-11-12 for the first section. One Mac (Apple silicon), OrbStack with Docker 29.4.0, Claude Code 2.1.311 in the image, Codex 0.167.2.
 
 The page of each test is `page.html` below: 1 KB, three paragraphs, a typo in the heading. Each run after run 9 had a new page with one comment. Each number is one run. The model is not exact from run to run, so a difference of less than about 0.5 s between two rows means nothing.
 
 All times are from the comment POST unless a column says something else.
 
-## Before and after
+## 2026-11-12: the reply in edit_page, warm on intent, one image for each engine
+
+Same Mac, same page, model `claude-sonnet-5-5`, docker mode. "Before" is commit e2e241e (its host on port 8805, its runner and its image `agent-pages-sandbox`). "After" is this code. Each cell is one run on a new page. Times are from the comment POST to the reply in the comments API.
+
+### The reply in edit_page
+
+| Comment | Before: reply stored | After: reply stored | Before: tool calls | After: tool calls |
+|---|---|---|---|---|
+| fix the typo in the title, first run of the runner (no container) | 6.77 s | 5.34 s | 4 | 3 |
+| make the second paragraph shorter, next run | 4.88 s | 4.42 s | 4 | 3 |
+| fix the typo in the title, next run | 4.21 s | 3.44 s (and 3.55 s, 3.65 s in two more runs) | 4 | 3 |
+| make it better, next run | 3.59 s (a question) | 3.79 s (a question) in one run. 5.85 s in another run, where Claude made an edit. | 3 | 3 |
+
+- A run with an edit has 4 model turns in place of 5, and it makes 3 tool calls in place of 4. The reply comes 0.5 to 1.4 s earlier.
+- The replies were as good as before: one sentence that says what changed, and the thread resolved.
+- **A quality change to watch.** In one of two runs of "make it better", Claude fixed the typo and split the long sentence, and resolved the thread. Before, and in the other run, it asked one question with choices and made no edit. Two runs cannot show if the new step 4 of the prompt causes this. Test more runs of unclear comments before a release.
+- A failed edit stores no reply, and the model gets the error (unit tests in `host/src/mcp.test.ts`). No real run had a failed edit in this test.
+- Codex in host mode, "fix the typo in the title": 3 tool calls, the reply in `edit_page`, reply stored after 11.3 s (1 run). The runs of the old code with 4 tool calls took 13.7 to 14.7 s on another comment.
+
+### Warm on intent
+
+| Run | First tool call after the job | Reply stored after the comment POST |
+|---|---|---|
+| Cold: a new runner, no container, no `POST /warm` | 2.65 s (container 0.40 s, program `init` 1.51 s, first token 2.25 s) | 5.34 s |
+| Warm on intent: a new runner, `POST /api/assistants/warm` on the host, 3 s wait, then the comment | 0.89 s (`init` 43 ms after the job) | 3.65 s |
+
+- The host sent `/warm` to the runner. The runner started the container and the program in 397 ms. The program was ready about 1.5 s later, so 3 s of typing is enough.
+- Before this change, the first job after a runner start never got a program that waits: the proxy had no stored connector answers yet. Now the runner gets them from `<host>/s/_mcp/discover` with its shared secret when the proxy starts (76 to 102 ms), and gives them to the proxy with `PUT /cache`. The proxy never gets the secret.
+
+### CPU limit and speed
+
+| CPU limit of the container | Reply stored, warm on intent | Note |
+|---|---|---|
+| 2 (the local default) | 3.65 s | |
+| 1/2 vCPU (`standard-1`) | 3.55 s | The waiting program was ready 2.5 s after `/warm`. |
+| 1/4 vCPU (`basic`) | 9.20 s | The waiting program was not ready after 10 s. `init` came 4.0 s after the job, and the cgroup throttled the container 326 times. |
+
+### Memory and CPU of a container
+
+| Engine | State | Memory | CPU |
+|---|---|---|---|
+| Claude | One program waits, no job | 134 MB `memory.current` (110 MB anonymous), 146 MB peak | Program start 0.75 to 1.2 s. Then 0.017 vCPU-s each second with no CPU limit, about 0.05 at 1/2 vCPU. |
+| Claude | Peak of a run | 175 to 392 MB (9 runs). This includes the file cache of the binary and two programs at the end of a run. | 0.5 to 0.8 s for each run with a waiting program. 2.2 s for a cold run with its program start. |
+| Codex | No job | About 1 MB: Codex takes its prompt as an argument, so no program waits. | 0 |
+| Codex | One `codex exec` with one tool call, stand-in model | 249 to 260 MB peak when the binary is not in the page cache of the machine (2 runs), 26 to 41 MB when it is (8 runs). The cgroup counts the file pages that the program reads. | 2.2 to 2.5 s with a cold page cache, 0.13 to 0.49 s after |
+
+The runner logs the life of each container (`container_stopped`): billable seconds, runs, CPU seconds and peak memory. `COST.md` has the four lifetimes of this test and the price.
+
+### The images
+
+| Image | Size | `docker save \| gzip` | What it has |
+|---|---|---|---|
+| `agent-pages-sandbox` (before) | 713 MB | 296 MB | Claude Code and Codex |
+| `agent-pages-sandbox-claude` | 301 MB | 135 MB | Claude Code 2.1.311 from the apk repository, `libgcc`, `libstdc++`, `ripgrep` |
+| `agent-pages-sandbox-codex` | 360 MB | 146 MB | Codex 0.167.2: `bin/codex` (279 MB), `bin/codex-code-mode-host` (72 MB), `codex-package.json` |
+| `agent-pages-egress` | 76 MB | 29 MB | Node and `egress-proxy.mjs` |
+
+- Container start (`docker run -d`): 180 to 300 ms for each image. The first program start in a new container: `claude --version` 1.1 s the first time and 90 ms after that, `codex --version` 80 ms.
+- The Codex image leaves out the voice host and its libraries (`codex-resources/voice`, 53 MB), `codex-path/rg` (4.5 MB) and `codex-resources/bwrap` (0.5 MB). A stand-in model and a stand-in connector proved it: `codex exec` in the image, with the arguments of docker mode, made its connector tool call and ended with exit code 0. `node sandbox/codex-standin.mjs` repeats the test.
+- `codex-code-mode-host` must stay. With the model name `gpt-6.1-sol`, Codex gives the model the JavaScript tool `exec`, and it starts the host for it. In an image with no host, Codex printed "Code Mode is unavailable because failed to spawn code-mode host … Code mode will fail closed", and the model still got an `exec` tool that cannot work. `--disable code_mode` would remove the tool and allow a 288 MB image, but it changes what the model gets, and no real run tested it.
+- The Claude image keeps `ripgrep`, because the Anthropic page lists it as a runtime package for Alpine. It is 3 MB.
+
+## Before and after (2026-11-11)
 
 | Setup | Model | First tool call | Reply stored | Run ended | Runs |
 |---|---|---|---|---|---|
@@ -61,7 +123,7 @@ What the table shows:
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | Median 486 ms on the same test: 170 ms less. | No. It also stops the feature flags of Claude Code. No test with a sign-in ran with it. A program that waits makes this time zero in any case. |
 | `--bare` | Not possible. Bare mode does not read a subscription sign-in. | No |
 | One long program for many jobs, with `/clear` between them. | Not safe, see below. | No |
-| A smaller image. | Not possible in a useful amount. The two programs are 665 MB of 713 MB. | See "The image" |
+| A smaller image. | One image for each engine (2026-11-12): 301 MB for Claude, 360 MB for Codex, in place of 713 MB for both. | Yes. See "The images" at the top. |
 
 ### One long program for many jobs: why not
 
@@ -73,7 +135,7 @@ What the table shows:
 
 So one program takes one job. The runner starts the next program right after a job ends, and that program waits for its prompt on stdin. This gives the same speed, and no job can see another job.
 
-The connector URL is different for each run, because it has the token. A program that waits cannot know it. The egress proxy solves this: the program always gets `http://<proxy>:3128/mcp`, and the proxy sends each request to the connector URL of the run that the container has at that moment. A program that waits gets a stored answer for `server/discover`, `initialize` and `tools/list`. Those answers are the same for each token. The first job after the start of the runner has no stored answer, so it starts its own program.
+The connector URL is different for each run, because it has the token. A program that waits cannot know it. The egress proxy solves this: the program always gets `http://<proxy>:3128/mcp`, and the proxy sends each request to the connector URL of the run that the container has at that moment. A program that waits gets a stored answer for `server/discover`, `initialize` and `tools/list`. Those answers are the same for each token. On 2026-11-11 the first job after the start of the runner had no stored answer, so it started its own program. Now the runner gets the answers from the host before the first job (see "Warm on intent" at the top).
 
 ### The start of the program, measured
 
@@ -129,12 +191,14 @@ Host mode, Codex 0.167.2, the default model of the signed-in account, the commen
 
 ## Fewer turns: what the connector could do
 
+Change 1 is done (2026-11-12): `edit_page` takes `reply`. The table at the top has the result. Change 2 is not done.
+
 The runner cannot change the connector. Two changes to the host would save model time. The numbers are from the `sonnet` and `opus` rows of "Where the time goes".
 
 1. **A reply inside `edit_page`.** An optional `reply: { body, resolve }` in the input of `edit_page`. The host stores the edit and the reply together, and stores no reply when the edit fails. This removes the third model turn: about 1.5 s with `sonnet` and 3.3 s with `opus`.
 2. **One tool for the thread and the page.** `get_comment_context({ comment_id })` returns the thread of the comment and the HTML of its page. Claude makes the two calls in one turn today, so this saves no turn. It saves the time that the model needs to write the second call, and the text of the other threads: about 0.4 s with `sonnet` and 0.7 s with `opus`. For Codex it saves one whole turn (2 to 3 s), because Codex makes one call in each turn.
 
-## The image
+## The image (2026-11-11)
 
 | Image | Size |
 |---|---|
@@ -147,7 +211,7 @@ The runner cannot change the connector. Two changes to the host would save model
 - An image with Claude Code only would be 317 MB.
 - The image has 2 layers of its own in place of 3. The start time of a container did not change: 340 to 910 ms for `docker run -d`, with the image on the local disk.
 
-## Memory
+## Memory (2026-11-11)
 
 `memory.peak` of the container cgroup after a run: 152 to 315 MB for one Claude Code program, and 508 MB when a second program waits for the next job. The limit is 1 GB.
 
@@ -190,3 +254,25 @@ node sandbox/measure.mjs http://localhost:8804 sandbox-perf/hp-1 "@claude make t
 The "before" row: `git show d853782:sandbox/local-runner.mjs` and `git show d853782:sandbox/run-comment.mjs` in a temporary folder, with the image that `git show d853782:sandbox/Dockerfile` builds, and `node <folder>/local-runner.mjs --mode docker`.
 
 The start test with no sign-in ran `docker exec -i [-e …] <container> claude -p --input-format stream-json …` five times for each set of variables, in a container whose volume has no sign-in, and took the time to the exit.
+
+The tests of 2026-11-12:
+
+```bash
+# The host and the runner share a secret, so the runner can get the connector answers before the first job.
+SECRET=$(openssl rand -hex 24)
+cd host && SANDBOX_RUNNER_SECRET=$SECRET CF_STATE_DIR=.cloudflare/state-run SANDBOX_RUNNER_URL=http://localhost:8811/run bunx vite --port 8804 --strictPort
+SANDBOX_RUNNER_SECRET=$SECRET SANDBOX_DISCOVER_ORIGIN=http://localhost:8804 node sandbox/local-runner.mjs --mode docker
+SANDBOX_CPUS=0.5 SANDBOX_RUNNER_SECRET=$SECRET SANDBOX_DISCOVER_ORIGIN=http://localhost:8804 node sandbox/local-runner.mjs --mode docker   # the CPU of standard-1. 0.25 is basic.
+
+# Warm on intent: the call of the viewer, a wait, then the comment.
+curl -X POST http://localhost:8804/api/assistants/warm -H 'content-type: application/json' -d '{}'
+sleep 3; node sandbox/measure.mjs http://localhost:8804 sandbox-perf/hp-2 "@claude fix the typo in the title"
+
+# The Codex image with a stand-in model and connector: no sign-in, no model request.
+node sandbox/codex-standin.mjs
+
+# The price of each warm policy, from the measured inputs.
+node sandbox/cost.mjs
+```
+
+The "before" columns: `git worktree add --detach <folder> e2e241e`, a link from `<folder>/host/node_modules` to `host/node_modules`, the migrations in a state folder of its own, its host on port 8805 with `SANDBOX_RUNNER_URL=http://localhost:8812/run`, and `node <folder>/sandbox/local-runner.mjs --mode docker --port 8812` with the image `agent-pages-sandbox`.

@@ -4,18 +4,20 @@ A person writes `@claude` in a comment. The host starts the unmodified Claude Co
 
 A comment with `@chatgpt` starts the unmodified Codex program in the same way. Codex uses the ChatGPT sign-in of that person.
 
-This folder is a test. It proves the loop on one machine and measures the time. `PERF.md` has the measurements. `CLOUD.md` describes where the sandbox can run later.
+This folder is a test. It proves the loop on one machine and measures the time. `PERF.md` has the measurements. `COST.md` has the price on Cloudflare for each warm policy. `CLOUD.md` describes where the sandbox can run later.
 
 | File | Purpose |
 |---|---|
 | `local-runner.mjs` | The runner: an HTTP server that takes jobs, with a queue for each user. In docker mode it owns the containers. |
 | `run-comment.mjs` | One run: the arguments of the program, the readers of its output, the progress events, the result. |
 | `egress-proxy.mjs` | The only way out of the network of the containers. It also keeps the connector token away from them. |
-| `Dockerfile` | The sandbox image (Claude Code and Codex) and the egress image (Node and the proxy). |
+| `Dockerfile` | Three images: one for Claude Code, one for Codex, and the egress image (Node and the proxy). |
 | `connect.mjs` | Signs one person in to Claude or ChatGPT in their volume. |
 | `verify-controls.mjs` | Tries each forbidden thing in a real container. |
 | `fake-progress.mjs` | Replays the progress events of a run, for work on the viewer. |
 | `measure.mjs` | Writes one comment and prints the times. |
+| `codex-standin.mjs` | Runs `codex exec` in the Codex image with a stand-in model and a stand-in connector. |
+| `cost.mjs`, `cost-inputs.json` | The price of each warm policy, from the measured inputs. `COST.md` explains them. |
 | `samples/` | Recorded output of Claude Code and Codex, for the tests. |
 
 ## How a run works
@@ -23,15 +25,17 @@ This folder is a test. It proves the loop on one machine and measures the time. 
 1. A person posts a comment with `@claude`. The Worker stores the comment and answers.
 2. `runSandboxAgent` in `host/src/sandbox.ts` makes a new connector token for the run. The token has the label `claude`, it reaches only the page of the comment, and it ends after 15 minutes. The function adds a row to `agent_runs` with the status `running`, and it sends the job to `SANDBOX_RUNNER_URL`.
 3. The runner checks the secret and the job, puts the job in the queue of the user, and answers 202.
-4. docker mode: the runner starts the container of the user, or takes the one that waits. It tells the egress proxy the connector URL of the run.
+4. docker mode: the runner checks that the user has a sign-in volume for the engine. With none, the run ends as `not_signed_in` at once, and no container starts. Else the runner starts the container of the user for that engine, or takes the one that waits. It tells the egress proxy the connector URL of the run.
 5. `run-comment.mjs` gives the prompt to Claude Code on stdin. In docker mode the program can be one that waits already.
-6. Claude calls `list_comments`, `get_page`, `edit_page` and `reply_to_comment`. The runner reads each event of the program and sends progress events to the host.
-7. When the result of `reply_to_comment` arrives, the runner sends the result to `POST /s/_run/<run id>`. The Worker stores `done` or `failed`, and it deletes the connector token of the run. Claude then writes one last line, and the program ends.
-8. docker mode: the runner starts the next program, which waits for the next job of this user. After 10 minutes with no job, the runner removes the container.
+6. Claude calls `list_comments` and `get_page`. For an edit it calls `edit_page` with `reply`, so one call stores the edit and the answer. For a question it calls `reply_to_comment`. The runner reads each event of the program and sends progress events to the host.
+7. When the result of the stored reply arrives, the runner sends the result to `POST /s/_run/<run id>`. The Worker stores `done` or `failed`, and it deletes the connector token of the run. Claude then writes one last line, and the program ends.
+8. docker mode: the runner starts the next program, which waits for the next job of this user. After 90 seconds with no job (`SANDBOX_IDLE_MS`), the runner removes the container.
 
 The Worker does not wait for the run. A run that sends no result shows as failed after 5 minutes.
 
-There is no check of the sign-in before a run. Claude Code with no sign-in ends by itself with "Not logged in", and the run reports `not_signed_in` after 0.6 to 2.4 seconds. Codex with no sign-in tries the model for about 15 seconds, so `codex login status` runs at the same time as the job and ends it in about 1.5 seconds.
+docker mode checks one thing before a run: that the sign-in volume of the user for the engine exists. `connect.mjs` makes the volume at a sign-in, removes it at a sign-out, and removes it after a sign-in that did not finish. The runner never makes a volume. So with no volume the run ends as `not_signed_in` in about 50 ms, and no container starts. The check is one `docker volume inspect`.
+
+A volume can still hold a sign-in that has ended. The run finds that. Claude Code with no sign-in ends by itself with "Not logged in", and the run reports `not_signed_in` after 0.6 to 2.4 seconds. Codex with no sign-in tries the model for about 15 seconds, so `codex login status` runs at the same time as the job and ends it in about 1.5 seconds. The runner then removes the container at once.
 
 ## The job
 
@@ -54,7 +58,7 @@ node sandbox/local-runner.mjs [--mode host|docker] [--port 8811]
 | Route | Does |
 |---|---|
 | `POST /run` | Takes a job. 202 with `callback_url`. With no `callback_url` it waits and answers with the JSON of the run. 400 for a bad job, 401 for a bad secret, 429 for a full queue. |
-| `POST /warm` | Body `{ "user": "…" }`. docker mode: starts the container of the user before a job exists. The host can call it when a person starts to write a comment. |
+| `POST /warm` | Body `{ "user": "…", "engine": "claude" }`. `engine` is optional, and the default is `claude`. docker mode: starts the container and the program before a job exists. The host calls it when a person opens a comment box (`POST /api/assistants/warm`). The runner starts nothing for an engine that the user has not connected. 202, or 200 with `warm: false` when warming is off. |
 | `GET /health` | `{ "ok": true }` |
 
 ### Environment of the runner
@@ -68,11 +72,13 @@ node sandbox/local-runner.mjs [--mode host|docker] [--port 8811]
 | `SANDBOX_CODEX_MODEL`, `SANDBOX_CODEX_EFFORT` | none | The same for Codex (`-m`, and `model_reasoning_effort`). |
 | `RUN_TIMEOUT_MS` | `180000` | The time limit of one run. |
 | `SANDBOX_MAX_QUEUE` | `5` | How many jobs of one user can wait while one runs. |
-| `SANDBOX_IDLE_MS` | `600000` | docker mode: how long the container of a user stays after a run. `0` gives each run its own container. |
+| `SANDBOX_IDLE_MS` | `90000` | docker mode: how long the container of a user stays after a run. `0` gives each run its own container. |
+| `SANDBOX_WARM_MS` | `60000` | docker mode: how long a container from `POST /warm` stays with no job. `0` turns `/warm` off. A later `/warm` or run can make the time longer, never shorter. |
+| `SANDBOX_DISCOVER_ORIGIN` | the first of `SANDBOX_CONNECTOR_ORIGINS`, then the origin of the last job | docker mode, with `SANDBOX_RUNNER_SECRET`: the host that answers `POST /s/_mcp/discover`. See "The egress proxy". |
 | `SANDBOX_PREWARM` | `1` | docker mode: `0` starts no program before its job arrives. |
 | `SANDBOX_MEMORY`, `SANDBOX_CPUS`, `SANDBOX_PIDS` | `1g`, `2`, `256` | docker mode: the limits of one container. |
 | `SANDBOX_EGRESS_ALLOW` | see "The egress proxy" | docker mode: a comma list of hosts, in place of the default list. |
-| `SANDBOX_IMAGE`, `SANDBOX_EGRESS_IMAGE` | `agent-pages-sandbox`, `agent-pages-egress` | docker mode: the two images. |
+| `SANDBOX_CLAUDE_IMAGE`, `SANDBOX_CODEX_IMAGE`, `SANDBOX_EGRESS_IMAGE` | `agent-pages-sandbox-claude`, `agent-pages-sandbox-codex`, `agent-pages-egress` | docker mode: the three images. The runner builds a missing image from its target in `Dockerfile`. It does not rebuild an image that exists, so build again after a change. |
 | `SANDBOX_RECORD_DIR` | none | For tests: a folder that gets each output line of each program. The lines have page text. |
 | `CLAUDE_BIN`, `CODEX_BIN` | `claude`, `codex` | host mode: another binary. |
 
@@ -84,7 +90,15 @@ The runner prints one JSON object on each line. A run gives one line:
 {"at":"2026-11-12T04:54:23.031Z","ev":"run","comment_id":"…","slug":"sandbox-perf/hp-1794459257","user":"25bf8e1a2393f110","engine":"claude","model":"claude-sonnet-5-5","status":"done","mode":"docker","warm":true,"cold_container":false,"ms_queue":1,"ms_container":0,"ms_init":72,"ms_first_token":888,"ms_first_tool":888,"ms_reply":5135,"ms_callback":5135,"ms_engine":6271,"ms_runner":6481,"num_turns":5,"total_cost_usd":0.0200475,"peak_memory_mb":214,"tools":"list_comments@889 get_page@1280 edit_page@2231 reply_to_comment@4233","timeline":"engine@0 init@72 message@888 …","callback_status":200,"progress_sent":9,"progress_accepted":9}
 ```
 
-`user` is a hash. No line has the connector URL, the callback URL, a token or the secret. Other lines have `ev` as `start`, `infra`, `build`, `refused`, `container_removed`, `warm_failed` or `infra_failed`. The egress proxy has its own log (`docker logs agent-pages-egress-<port>`): one line for each tunnel, each refusal and each connector request, with the tool name and never the URL.
+`user` is a hash. No line has the connector URL, the callback URL, a token or the secret. Other lines have `ev` as `start`, `infra`, `build`, `refused`, `discovered`, `discover_failed`, `container_started`, `container_stopped`, `warm`, `warm_failed` or `infra_failed`.
+
+One `container_stopped` line gives what a cloud host bills for the life of one container:
+
+```json
+{"ev":"container_stopped","user":"25bf8e1a2393f110","engine":"claude","why":"idle","started_by":"warm","runs":2,"ms_start":259,"s_billable":117.212,"cpu_s":7.162865,"peak_memory_mb":366}
+```
+
+`s_billable` is the time from `docker run` to `docker rm`. `cpu_s` is `usage_usec` of the cgroup `cpu.stat`, read just before the stop. `why` is `idle`, `warm unused`, `timeout`, `not signed in`, `run end` or `exited`. A run line also has `container_cpu_s`: the CPU seconds of the container so far. The egress proxy has its own log (`docker logs agent-pages-egress-<port>`): one line for each tunnel, each refusal and each connector request, with the tool name and never the URL.
 
 ## Progress events
 
@@ -153,7 +167,7 @@ One program takes one job. A second message to the same program would see the fi
 
 | Field | Meaning |
 |---|---|
-| `ok`, `status` | `status` is `done`, `failed`, `not_signed_in` or `timeout`. `ok` is true for `done`. A run is `done` only when the result of `reply_to_comment` arrived with no error. |
+| `ok`, `status` | `status` is `done`, `failed`, `not_signed_in` or `timeout`. `ok` is true for `done`. A run is `done` only when a reply is stored: a result of `reply_to_comment` with no error, or a result of `edit_page` with a `reply` that has an id. An `edit_page` result with `reply_error` stored the edit and no reply. |
 | `engine`, `model` | `claude` or `codex`, and the model. For Codex with no model in the job, `model` is `default`, because `codex exec --json` does not print the model. |
 | `warm` | True when the job went to a program that waited. |
 | `ms_init`, `ms_first_token`, `ms_first_tool`, `ms_reply`, `ms_callback`, `ms_engine`, `ms_total` | Milliseconds from the start of `runJob`: the `init` event, the first model token, the first tool call, the stored reply, the POST of the result, the end of the program. |
@@ -168,15 +182,15 @@ The runner adds `mode`, `ms_queue`, `ms_container`, `cold_container`, `peak_memo
 ## Docker mode and its controls
 
 ```bash
-node sandbox/local-runner.mjs --mode docker      # builds the two images when they are missing
-node sandbox/verify-controls.mjs                 # proves each control below, with no sign-in and no model request
+node sandbox/local-runner.mjs --mode docker      # builds an image when it is missing
+node sandbox/verify-controls.mjs                 # proves each control below for both images, with no sign-in and no model request
 ```
 
 The runner makes three kinds of Docker objects. Their names have the port of the runner.
 
 - The network `agent-pages-sandbox-<port>`. It is internal: it has no route to the outside.
 - The container `agent-pages-egress-<port>` with `egress-proxy.mjs`. It is on that network and on the normal network.
-- One container for each user, `agent-pages-sbx-<port>-<hash of the user>`, on the internal network only. It does nothing by itself. Each program starts in it with `docker exec`.
+- One container for each user and engine, `agent-pages-sbx-<port>-<engine>-<hash of the user>`, on the internal network only. It does nothing by itself. Each program starts in it with `docker exec`. The Claude container has the image `agent-pages-sandbox-claude` and the Claude volume of the user. The Codex container has `agent-pages-sandbox-codex` and the ChatGPT volume.
 
 The runner removes all three when it gets SIGINT or SIGTERM, and when it starts.
 
@@ -185,7 +199,8 @@ Each control, and the check in `verify-controls.mjs` that proves it:
 | Control | How | The check |
 |---|---|---|
 | Read-only root file system | `--read-only` | `touch` in `/etc`, `/work`, `/usr/bin` and `/home/runner` fails with "Read-only file system". |
-| The only places to write | `--tmpfs /tmp` (64 MB, `noexec`), and the two volumes of the user | A write to `/tmp`, `/claude-config` and `/codex-home` works. A copy of `busybox` in `/tmp` does not run. `docker inspect` shows two mounts. |
+| The only places to write | `--tmpfs /tmp` (64 MB, `noexec`), and the sign-in volume of the user for the engine | A write to `/tmp` and to the volume works. A copy of `busybox` in `/tmp` does not run. `docker inspect` shows one mount. |
+| One program in each image | Two images from two targets of `Dockerfile` | The Claude image has `claude` and no `codex`, no Node and no `/codex-home`. The Codex image has the reverse. |
 | Not root, no capability | `--user 10001:10001 --cap-drop ALL --security-opt no-new-privileges` | `id -u` is 10001. `CapPrm`, `CapEff` and `CapBnd` are 0. `NoNewPrivs` is 1. `chown` and `su` fail. |
 | Limits | `--pids-limit 256 --memory 1g --memory-swap 1g --cpus 2` | The cgroup files have 256, 1073741824, 0 and `200000 100000`. A loop that starts 400 processes gets "can't fork". A program that takes more than 1 GB is killed (`oom_kill 1`). |
 | No inbound port | No `-p`. The network is internal. | `docker inspect` shows no port and one network, and the network has `Internal: true`. |
@@ -197,9 +212,9 @@ Each control, and the check in `verify-controls.mjs` that proves it:
 | The shared secret | `x-runner-secret`, compared with `timingSafeEqual` over SHA-256 of both values | A unit test starts the real runner: no header and a wrong header get 401. |
 | Logs with no secret | See "The log" | The unit tests search the logs of the runner and of the proxy for the token and for `/s/_mcp/`. |
 
-`verify-controls.mjs` prints 18 lines with `PASS` and then `all checks passed`. `SANDBOX_DOCKER_TESTS=1 node --test tests/sandbox.test.mjs` runs it as a test.
+`verify-controls.mjs` checks the container of each image. It prints 19 lines with `PASS` for each image, then `all checks passed`. `node sandbox/verify-controls.mjs claude` checks one image. `SANDBOX_DOCKER_TESTS=1 node --test tests/sandbox.test.mjs` runs it as a test.
 
-Real runs with the controls on: 15 Claude runs in docker mode went through the proxy. Its log for one run had tunnels to `api.anthropic.com` only, the four tool calls, and two refused tunnels to `http-intake.logs.us5.datadoghq.com` (telemetry of Claude Code).
+Real runs with the controls on: 27 Claude runs in docker mode went through the proxy (15 on 2026-11-11, 12 on 2026-11-12). Its log for one run had tunnels to `api.anthropic.com` only, the four tool calls, and two refused tunnels to `http-intake.logs.us5.datadoghq.com` (telemetry of Claude Code).
 
 ### The egress proxy
 
@@ -220,7 +235,12 @@ The proxy opens a tunnel and does not read it. It never sees a model request, a 
 
 The connector is not on the list. The proxy itself calls the connector, at the URL that the runner gave it for the run.
 
-A container that has no run gets a stored answer for `server/discover`, `initialize` and `tools/list`. The proxy takes these answers from the first real run. They are the same for each token, because the connector has no session. This lets a program connect before its job arrives. After a deploy that changes the tools of the connector, restart the runner.
+A container that has no run gets a stored answer for `server/discover`, `initialize`, `notifications/initialized` and `tools/list`. They are the same for each token, because the connector has no session. This lets a program connect before its job arrives. The proxy gets these answers in two ways:
+
+- The runner asks the host for them at `POST <host>/s/_mcp/discover`, with its secret in `x-runner-secret`, when the proxy starts and before it starts a program that waits. It sends the four requests that Claude Code 2.1.311 sends at its start, and it gives the answers to the proxy with `PUT /cache` on the control port. The proxy never gets the secret. This needs `SANDBOX_RUNNER_SECRET` on both sides and an origin (`SANDBOX_DISCOVER_ORIGIN`).
+- The proxy keeps the answers of each real run.
+
+With neither, the first job after a runner start starts its own program. After a deploy that changes the tools of the connector, restart the runner.
 
 What the controls do not cover:
 
@@ -238,7 +258,7 @@ node sandbox/connect.mjs claude [user] --status
 node sandbox/connect.mjs chatgpt [user] --logout
 ```
 
-`user` is the author name that the host sends with a job. In development it is `local`, and that is the default. The command prints the two volume names of the user, `agent-pages-claude-<hash>` and `agent-pages-codex-<hash>`. It starts the sign-in of the program in the right volume, in a container with the same limits as a run and with the normal network.
+`user` is the author name that the host sends with a job. In development it is `local`, and that is the default. The command prints the two volume names of the user, `agent-pages-claude-<hash>` and `agent-pages-codex-<hash>`. It starts the sign-in of the program in the right volume, in a container of the image of that engine, with the same limits as a run and with the normal network. `--status` starts no container when the volume does not exist, so it makes no empty volume. `--logout` signs out and removes the volume.
 
 Claude (`claude auth login`):
 
@@ -292,11 +312,12 @@ A check with Codex 0.167.1 showed what the model gets. A stand-in model provider
 
 Codex in docker mode:
 
-- The image has Codex 0.167.2 from the npm package `@openai/codex`. The build installs the package with `npm install -g` and copies the folder of the native program into the sandbox image. No file of it changes. The Node launcher of the package is not in the image, because the image has no Node.
-- `CODEX_HOME` is `/codex-home`, the second volume of the user.
+- The image `agent-pages-sandbox-codex` has Codex 0.167.2 from the npm package `@openai/codex`, and no Claude Code. The build installs the package with `npm install -g` and copies three files of this platform into the image: `bin/codex`, `bin/codex-code-mode-host` and `codex-package.json`. No file changes. The image leaves out the voice host, `rg` and `bwrap`, which a run with only the connector never starts. The Node launcher of the package is not in the image, because the image has no Node. `node sandbox/codex-standin.mjs` runs `codex exec` in the image with a stand-in model and connector.
+- `CODEX_HOME` is `/codex-home`, the ChatGPT volume of the user. The Codex container mounts no other volume.
 - **The connector token is not on the command line.** The command line has `http://<proxy>:3128/mcp`, and the proxy has the real URL.
 - **No `AGENTS.md` of the person loads.** `CODEX_HOME` is a volume that holds only what Codex writes. After a first start, the folder had the sign-in lock files, the SQLite files, `installation_id`, `log`, `tmp` and `shell_snapshots`, and no `AGENTS.md`.
-- With no sign-in, a job ends in about 1.5 s with `not_signed_in`. The viewer shows "ChatGPT: not connected".
+- With no ChatGPT volume, a job ends in about 50 ms with `not_signed_in`, and no container starts. With a volume and no sign-in in it, the job ends in about 1.5 s. The viewer shows "ChatGPT: not connected".
+- No program waits in a Codex container: `codex exec` takes its prompt as an argument.
 - No real Codex run was made in a container, because no volume has a ChatGPT sign-in. One real run on this machine went through `egress-proxy.mjs` for the model and for the connector, with the same arguments as docker mode, and it was correct.
 
 Codex in host mode:
@@ -348,7 +369,7 @@ A container reaches the dev server as `host.docker.internal`. The runner changes
 ## Tests
 
 ```bash
-node --test tests/sandbox.test.mjs                              # 26 tests, no Docker, no sign-in, no network
+node --test tests/sandbox.test.mjs                              # 32 tests, no Docker, no sign-in, no network
 SANDBOX_DOCKER_TESTS=1 node --test tests/sandbox.test.mjs       # adds verify-controls.mjs
 cd host && npm run typecheck && npm run test
 ```

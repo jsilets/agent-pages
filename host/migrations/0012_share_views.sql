@@ -2,9 +2,23 @@
 -- One row of share_views is one visit: one load of a share link. share_view_parts holds the active time of
 -- the visit on each part of the page: a slide of a deck, or a section of a document.
 
--- A link can have a name, for example the person it is for. A revoked link stays, so its visits keep their name.
+-- Sharing blends Google Docs and DocSend. A link is one of two kinds:
+--   public: "Anyone with the link", the general access of the page. It can require an email before the page shows.
+--   person: a link for one person. Its name says who, so each visit of the link is that person.
+-- A revoked link stops at once. Its row stays, so its visits keep the name of the link.
+ALTER TABLE shares ADD COLUMN kind TEXT NOT NULL DEFAULT 'public';
 ALTER TABLE shares ADD COLUMN name TEXT;
+ALTER TABLE shares ADD COLUMN require_email INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE shares ADD COLUMN revoked_at TEXT;
+
+-- A pass of the email gate of a link: the reader gave an email. A cookie that only the link's path gets holds the
+-- random id, and the pass lasts 30 days. The email is not verified, as in DocSend without email verification.
+CREATE TABLE share_passes (
+  id TEXT PRIMARY KEY,
+  token TEXT NOT NULL,
+  email TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 
 -- A share link needs no login, so a visit has no name and no IP address.
 -- visitor is a hash of the IP address and the browser with the salt of one day (share_salts). The host deletes
@@ -23,6 +37,8 @@ CREATE TABLE share_views (
   country TEXT,
   -- The host name of the page that linked here, or NULL for a direct visit.
   referrer TEXT,
+  -- The email that the reader gave at the email gate of the link, or NULL.
+  email TEXT,
   started_at TEXT NOT NULL,
   last_at TEXT NOT NULL,
   -- The sum of the active time on the parts.

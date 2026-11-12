@@ -96,11 +96,9 @@ function partBars(rows: { label: string; ms: number; note?: string }[]) {
 export function viewsHtml(input: ViewsInput, nonce: string) {
   const { slug, title, repo, kind, views: v } = input;
   const unit = kind === 'deck' ? 'slide' : 'section';
-  const linkName = new Map(v.links.map((l) => [l.token, l.name]));
-  const linkOf = (token: string) => {
-    const l = v.links.find((x) => x.token === token);
-    return l ? l.name || 'Link from ' + l.created_at.slice(0, 10) : 'A deleted link';
-  };
+  // A link is for one person, or it is the public link: "Anyone with the link", as in Google Docs.
+  const linkLabel = (l: Views['links'][number]) => (l.kind === 'person' ? l.name || 'A person' : 'Anyone with the link');
+  const linkOf = new Map(v.links.map((l) => [l.token, l]));
   const cards = [
     [String(v.totals.views), v.totals.views === 1 ? 'Visit' : 'Visits'],
     [String(v.totals.visitors), v.totals.visitors === 1 ? 'Visitor' : 'Visitors'],
@@ -109,8 +107,12 @@ export function viewsHtml(input: ViewsInput, nonce: string) {
   ];
   const visits = v.visits
     .map((x) => {
-      const who = linkName.get(x.token) || (linkName.has(x.token) ? 'Anonymous' : linkOf(x.token));
-      const device = [x.os, x.device].filter(Boolean).join(' · ');
+      // A visit is named by the email from the gate or by the person of the link. A public visit with no gate is anonymous.
+      const l = linkOf.get(x.token);
+      const who = x.who || 'Anonymous';
+      // The small line says which link a visit came by, then the device. A named person's own link needs no label.
+      const via = l ? (l.kind === 'person' && !x.email ? '' : linkLabel(l)) : 'A deleted link';
+      const device = [via, x.os, x.device].filter(Boolean).join(' · ');
       const place = [countryName(x.country), x.referrer ? 'from ' + x.referrer : ''].filter(Boolean).join(', ');
       const detail = x.parts.length
         ? partBars(x.parts.map((p) => ({ label: p.label, ms: p.ms })))
@@ -126,7 +128,7 @@ export function viewsHtml(input: ViewsInput, nonce: string) {
     })
     .join('');
   const links = v.links
-    .map((l) => `<tr${l.revoked_at ? ' class="is-off"' : ''}><td>${esc(l.name || 'No name')}${l.revoked_at ? '<span class="vw-tag">Revoked</span>' : ''}<br><code>/s/${esc(l.token.slice(0, 10))}…</code></td>
+    .map((l) => `<tr${l.revoked_at ? ' class="is-off"' : ''}><td>${esc(linkLabel(l))}${l.require_email ? '<span class="vw-tag">Email required</span>' : ''}${l.revoked_at ? '<span class="vw-tag">Revoked</span>' : ''}<br><code>/s/${esc(l.token.slice(0, 10))}…</code></td>
       <td class="vw-hide">${l.version ? 'v' + l.version : 'Latest'}</td><td class="vw-hide">${time(l.created_at)}</td><td class="vw-num">${l.views}</td><td>${l.last_at ? time(l.last_at) : '–'}</td></tr>`)
     .join('');
   const body = `<style>${CSS}</style><div class="v">
@@ -136,7 +138,7 @@ export function viewsHtml(input: ViewsInput, nonce: string) {
 </header>
 <div class="vw"><main class="vw-main">
   <h1>Views</h1>
-  <p class="vw-lede">Visits to the share links of this page, newest first. A visit counts time only while the page is on screen and the reader was active in the last 5 minutes. Your own visits do not count. To know who read the page, make one named link for each reader.</p>
+  <p class="vw-lede">Visits to the share links of this page, newest first. A visit counts time only while the page is on screen and the reader was active in the last 5 minutes. Your own visits do not count. To know who read the page, add each reader in Share, or require an email on the public link.</p>
   ${
     v.totals.views
       ? `<div class="vw-cards">${cards.map(([n, l]) => `<div class="vw-card"><b>${esc(n)}</b><span>${esc(l)}</span></div>`).join('')}</div>

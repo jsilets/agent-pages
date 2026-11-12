@@ -96,6 +96,7 @@ export type Route =
   | { kind: 'share-pdf'; token: string }
   | { kind: 'share-start'; token: string }
   | { kind: 'share-ping'; token: string }
+  | { kind: 'share-pass'; token: string }
   | { kind: 'api-views'; slug: string }
   | { kind: 'not-found' };
 
@@ -142,6 +143,7 @@ export function route(path: string): Route {
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'pdf') return { kind: 'share-pdf', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'view') return { kind: 'share-start', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'ping') return { kind: 'share-ping', token: p[1] };
+  if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'pass') return { kind: 'share-pass', token: p[1] };
   return { kind: 'not-found' };
 }
 

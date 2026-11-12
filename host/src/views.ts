@@ -147,14 +147,35 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-create { width: 100%; height: 34px; border: 0; border-radius: 8px; background: var(--p); color: var(--bg); font: 600 13px var(--sans); cursor: pointer; }
 .v-create:hover:not(:disabled) { background: var(--press); }
 .v-create:disabled { opacity: 0.5; cursor: default; }
-.v-links { list-style: none; margin: 12px 0 0; padding: 0; }
-.v-links:empty::before { content: "No active links."; display: block; padding: 4px 2px; font-size: 12.5px; color: var(--t); }
+.v-links { list-style: none; margin: 8px 0 0; padding: 0; }
+.v-links:empty { display: none; }
 .v-links li { display: flex; align-items: center; gap: 4px; height: 36px; padding-left: 2px; border-top: 0.5px solid var(--b); }
 .v-links code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
 .v-links .v-tag { margin-right: 4px; }
 .v-links .v-icon { width: 28px; height: 28px; }
-/* A link can have a name: the person it is for. The Views page shows the name on each visit. */
-.v-lname { display: block; box-sizing: border-box; width: 100%; height: 32px; margin: 0 0 8px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px var(--sans); }
+/* Sharing, as in Google Docs: the people you add, each with their own link, then the general access of the page. */
+.v-add { display: flex; gap: 6px; margin-top: 12px; }
+.v-add .v-create { flex: none; width: auto; height: 32px; padding: 0 14px; }
+.v-sharepop .v-hint { margin: 6px 0 0; font-size: 12px; color: var(--t); }
+.v-sec { margin: 16px 0 6px; font: 600 12px var(--sans); color: var(--s); }
+.v-gen { display: flex; align-items: center; gap: 10px; }
+.v-gen-ic { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--bg2); color: var(--s); }
+.v-gen-ic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.v-gen.is-on .v-gen-ic { background: color-mix(in srgb, var(--link) 16%, transparent); color: var(--link); }
+.v-gen-t { flex: 1; min-width: 0; font-size: 13px; line-height: 17px; }
+.v-gen-t b { display: block; font-weight: 600; }
+.v-gen-t span { display: block; font-size: 12px; color: var(--s); }
+.v-switch { flex: none; position: relative; width: 34px; height: 20px; padding: 0; border: 0; border-radius: 999px; background: var(--b2); cursor: pointer; }
+.v-switch i { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.15s; }
+.v-switch[aria-checked="true"] { background: var(--link); }
+.v-switch[aria-checked="true"] i { transform: translateX(14px); }
+.v-pubrow { display: flex; align-items: center; gap: 4px; height: 36px; margin-top: 8px; padding-left: 2px; border-top: 0.5px solid var(--b); }
+.v-pubrow code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--s); }
+.v-pubrow .v-icon { width: 28px; height: 28px; }
+.v-check { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 13px; cursor: pointer; }
+.v-check input { width: 15px; height: 15px; margin: 0; accent-color: var(--link); }
+.v-check span { color: var(--t); font-size: 12px; }
+.v-lname { display: block; box-sizing: border-box; flex: 1; min-width: 0; width: 100%; height: 32px; margin: 0; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: var(--bg); color: var(--p); font: 13px var(--sans); }
 .v-lname::placeholder { color: var(--t); }
 .v-links .v-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
 .v-links .v-icon.is-armed { width: auto; padding: 0 8px; background: var(--fill); color: var(--ink); font: 600 12px var(--sans); }
@@ -434,20 +455,30 @@ export function viewerHtml(input: ViewerInput, nonce: string) {
   </div>
   <div class="v-pop v-sharepop" id="pop-share" hidden>
     <h2>Share</h2>
-    <p>Anyone with a link can read this page without signing in. Revoke a link to stop it at once.</p>
-    <div class="v-seg" role="group" aria-label="Link points to">
+    <form class="v-add" id="add">
+      <input class="v-lname" id="pname" type="text" maxlength="80" placeholder="Add a person, for example Dana at Acme" aria-label="Name of the person" autocomplete="off">
+      <button type="submit" class="v-create">Add</button>
+    </form>
+    <p class="v-hint">Each person gets their own link, so Views shows who read the page. Copy the link and send it to them.</p>
+    <ul class="v-links" id="people"></ul>
+    <div class="v-sec">General access</div>
+    <div class="v-gen" id="gen">
+      <span class="v-gen-ic" id="gen-ic"></span>
+      <span class="v-gen-t"><b id="gen-t"></b><span id="gen-s"></span></span>
+      <button type="button" class="v-switch" id="gen-on" role="switch" aria-checked="false" aria-label="Anyone with the link"><i></i></button>
+    </div>
+    <div id="pub"></div>
+    <div class="v-sec">New links point to</div>
+    <div class="v-seg" role="group" aria-label="New links point to">
       <button type="button" data-target="latest" aria-pressed="true">Latest version</button>
       <button type="button" data-target="${n}" aria-pressed="false">Only v${n}</button>
     </div>
-    <input class="v-lname" id="lname" type="text" maxlength="80" placeholder="Who is it for? For example, Dana at Acme" aria-label="Name of the link" autocomplete="off">
-    <button type="button" class="v-create" id="create">Create link</button>
-    <ul class="v-links" id="links"></ul>
   </div>
 </header>
 <iframe class="v-frame" title="${esc(title)}" ${frameAttrs(input.kind)} data-src="/raw/${esc(slug)}/${n}?k=${KIT}"></iframe>
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>
-<script type="application/json" id="data">${data({ slug, version: n, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x } })}</script>`;
+<script type="application/json" id="data">${data({ slug, version: n, followsLatest: input.followsLatest, icons: { link: ICON.link, check: ICON.check, x: ICON.x, globe: ICON.globe, lock: ICON.lock } })}</script>`;
 
   const script =
     COMMON_SCRIPT +
@@ -476,41 +507,100 @@ $('#del').addEventListener('click', async (e) => {
 });
 $('#pop-more').addEventListener('open', () => { const b = $('#del'); b.classList.remove('is-armed'); b.querySelector('span').textContent = 'Delete page'; });
 
-// Share links
+// Sharing, as in Google Docs with DocSend's email gate: the people you add, each with a link of their own,
+// then the general access: off, or anyone with the link, with an email first if you want.
 let target = 'latest';
 $$('[data-target]').forEach((b) => b.addEventListener('click', () => {
   target = b.dataset.target;
   $$('[data-target]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
 }));
+const shareApi = '/api/pages/' + D.slug + '/shares';
+const versionOf = () => (target === 'latest' ? 'latest' : +target);
+const mk = (tag, cls, text) => { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; };
+function iconButton(name, label, tip, onclick, end) {
+  const b = mk('button', 'v-icon'); b.type = 'button'; b.innerHTML = svg(name); b.setAttribute('aria-label', label); b.dataset.tip = tip;
+  if (end) b.dataset.tipEnd = '';
+  b.onclick = onclick;
+  return b;
+}
+/** The button that takes a person's link away. The first click arms it, and the second click revokes the link. */
+function revokeButton(s) {
+  const r = iconButton('x', 'Remove ' + s.name, 'Remove', null, true); r.classList.add('c-red');
+  r.onclick = async () => {
+    if (!r.classList.contains('is-armed')) { r.classList.add('is-armed'); r.textContent = 'Remove'; delete r.dataset.tip; return; }
+    await api('/api/shares/' + s.token, { method: 'DELETE' }); toast('Link for ' + s.name + ' removed'); loadLinks();
+  };
+  return r;
+}
+const copyLink = (url, what) => () => copyText(url).then(() => toast(what + ' copied'));
+let publics = [];
 async function loadLinks() {
-  const list = await api('/api/pages/' + D.slug + '/shares');
-  const ul = $('#links');
-  ul.replaceChildren(...list.map((s) => {
-    const li = document.createElement('li');
-    const code = document.createElement(s.name ? 'span' : 'code');
-    if (s.name) code.className = 'v-nm';
-    code.textContent = s.name || s.url.replace(/^https?:\\/\\//, ''); code.title = s.url;
-    const tag = document.createElement('span'); tag.className = 'v-tag'; tag.textContent = s.version ? 'v' + s.version : 'Latest';
-    const c = document.createElement('button'); c.type = 'button'; c.className = 'v-icon'; c.innerHTML = svg('link'); c.setAttribute('aria-label', 'Copy link'); c.dataset.tip = 'Copy';
-    c.onclick = () => copyText(s.url).then(() => toast('Link copied'));
-    const r = document.createElement('button'); r.type = 'button'; r.className = 'v-icon c-red'; r.innerHTML = svg('x'); r.setAttribute('aria-label', 'Revoke link'); r.dataset.tip = 'Revoke'; r.dataset.tipEnd = '';
-    r.onclick = async () => {
-      if (!r.classList.contains('is-armed')) { r.classList.add('is-armed'); r.textContent = 'Revoke'; delete r.dataset.tip; return; }
-      await api('/api/shares/' + s.token, { method: 'DELETE' }); toast('Link revoked'); loadLinks();
-    };
-    li.append(code, tag, c, r);
+  const list = await api(shareApi);
+  const people = list.filter((s) => s.kind === 'person');
+  publics = list.filter((s) => s.kind !== 'person');
+  $('#people').replaceChildren(...people.map((s) => {
+    const li = mk('li');
+    const nm = mk('span', 'v-nm', s.name); nm.title = s.url;
+    li.append(nm);
+    if (s.version) li.append(mk('span', 'v-tag', 'v' + s.version));
+    li.append(iconButton('link', 'Copy the link for ' + s.name, 'Copy link', copyLink(s.url, 'Link for ' + s.name)), revokeButton(s));
     return li;
   }));
+  const on = publics.length > 0, gated = on && publics.every((s) => s.require_email);
+  $('#gen').classList.toggle('is-on', on);
+  $('#gen-ic').innerHTML = svg(on ? 'globe' : 'lock');
+  $('#gen-t').textContent = on ? 'Anyone with the link' : 'Restricted';
+  $('#gen-s').textContent = on ? (gated ? 'Anyone with the link can view after they give an email' : 'Anyone on the internet with the link can view') : 'Only the people you add can open this page';
+  $('#gen-on').setAttribute('aria-checked', String(on));
+  const pub = $('#pub');
+  pub.replaceChildren();
+  for (const s of publics) {
+    const row = mk('div', 'v-pubrow');
+    const code = mk('code', '', s.url.replace(/^https?:\\/\\//, '')); code.title = s.url;
+    row.append(code);
+    if (s.version) row.append(mk('span', 'v-tag', 'v' + s.version));
+    row.append(iconButton('link', 'Copy the public link', 'Copy link', copyLink(s.url, 'Link'), true));
+    pub.append(row);
+  }
+  if (on) {
+    const lab = mk('label', 'v-check');
+    const box = mk('input'); box.type = 'checkbox'; box.checked = gated; box.id = 'gate';
+    box.onchange = async () => {
+      try {
+        await Promise.all(publics.map((s) => api('/api/shares/' + s.token, { method: 'PATCH', body: JSON.stringify({ require_email: box.checked }) })));
+        toast(box.checked ? 'Readers give an email first' : 'No email needed');
+      } catch (err) { toast('Could not change the link: ' + err.message); }
+      loadLinks();
+    };
+    lab.append(box, document.createTextNode('Require email to view'), mk('span', '', 'Views shows each email'));
+    pub.append(lab);
+  }
 }
 $('#pop-share').addEventListener('open', loadLinks);
-$('#create').addEventListener('click', async (e) => {
+$('#add').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#pname').value.trim();
+  if (!name) { $('#pname').focus(); return; }
+  try {
+    const s = await api(shareApi, { method: 'POST', body: JSON.stringify({ kind: 'person', name, version: versionOf() }) });
+    $('#pname').value = '';
+    await copyText(s.url).then(() => toast('Link for ' + name + ' copied'), () => toast('Link for ' + name + ' made'));
+    await loadLinks();
+  } catch (err) { toast('Could not add ' + name + ': ' + err.message); }
+});
+// General access on makes the public link. Off revokes every public link at once, so nobody keeps an old one.
+$('#gen-on').addEventListener('click', async (e) => {
   const b = e.currentTarget; b.disabled = true;
   try {
-    const s = await api('/api/pages/' + D.slug + '/shares', { method: 'POST', body: JSON.stringify({ version: target === 'latest' ? 'latest' : +target, name: $('#lname').value }) });
-    $('#lname').value = '';
-    await copyText(s.url).then(() => toast('Link created and copied'), () => toast('Link created'));
+    if (publics.length) {
+      await Promise.all(publics.map((s) => api('/api/shares/' + s.token, { method: 'DELETE' })));
+      toast('Only the people you add can open this page');
+    } else {
+      const s = await api(shareApi, { method: 'POST', body: JSON.stringify({ kind: 'public', version: versionOf() }) });
+      await copyText(s.url).then(() => toast('Public link copied'), () => toast('Public link made'));
+    }
     await loadLinks();
-  } catch (err) { toast('Could not create the link: ' + err.message); }
+  } catch (err) { toast('Could not change the access: ' + err.message); }
   b.disabled = false;
 });
 `;
@@ -622,6 +712,44 @@ export function sharedHtml(input: { token: string; title: string; repo: string |
 </div>
 <div class="v-toast" id="toast" role="status" hidden></div>`;
   return shell(input.title, nonce, body, COMMON_SCRIPT + SHARE_COUNT, '/s/_/explain.css');
+}
+
+/**
+ * The email gate of a public link, as DocSend's "Require email to view": the reader gives an email, then the page shows.
+ * The host keeps the pass in a cookie for the path of this link only. The page says who sees the email.
+ */
+export function gateHtml(input: { title: string }, nonce: string) {
+  const body = `<style>
+.g { display: grid; place-items: center; min-height: 100%; padding: 24px 16px; box-sizing: border-box; }
+.g-card { width: 100%; max-width: 380px; }
+.g-card h1 { margin: 0 0 6px; font: 600 20px/26px var(--sans); letter-spacing: -0.01em; }
+.g-card p { margin: 0 0 18px; font-size: 13.5px; line-height: 20px; color: var(--s); }
+.g-card label { display: block; margin-bottom: 6px; font: 500 12.5px var(--sans); color: var(--s); }
+.g-card input { display: block; box-sizing: border-box; width: 100%; height: 40px; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); color: var(--p); font: 15px var(--sans); }
+.g-card .v-create { height: 40px; margin-top: 10px; border-radius: 10px; font-size: 14px; }
+.g-card small { display: block; margin-top: 12px; font-size: 12px; line-height: 17px; color: var(--t); }
+.g-err { min-height: 18px; margin-top: 6px; font-size: 12.5px; color: var(--line, #c33); }
+</style>
+<main class="g"><form class="g-card" id="gate">
+  <h1>${esc(input.title)}</h1>
+  <p>Enter your email to view this page.</p>
+  <label for="email">Email</label>
+  <input id="email" type="email" autocomplete="email" required autofocus placeholder="you@company.com">
+  <div class="g-err" id="err" role="alert"></div>
+  <button type="submit" class="v-create">Continue</button>
+  <small>The owner of this page sees your email and how long you read each part.</small>
+</form></main>`;
+  const script = `
+const form = document.getElementById('gate');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const b = form.querySelector('button'); b.disabled = true;
+  const r = await fetch(location.pathname.replace(/\\/$/, '') + '/pass', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: document.getElementById('email').value }) }).catch(() => null);
+  if (r && r.ok) { location.reload(); return; }
+  document.getElementById('err').textContent = r ? ((await r.json().catch(() => ({}))).error || 'Try again.') : 'The network failed. Try again.';
+  b.disabled = false;
+});`;
+  return shell(input.title, nonce, body, script, '/s/_/explain.css');
 }
 
 export function messageHtml(title: string, text: string, nonce: string, cssPath?: string) {

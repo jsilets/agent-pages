@@ -219,6 +219,7 @@ describe('folders', () => {
     const t = 'a'.repeat(43);
     expect(route(`/s/${t}/view`)).toEqual({ kind: 'share-start', token: t });
     expect(route(`/s/${t}/ping`)).toEqual({ kind: 'share-ping', token: t });
+    expect(route(`/s/${t}/pass`)).toEqual({ kind: 'share-pass', token: t });
     expect(route('/s/short/ping')).toEqual({ kind: 'not-found' });
     expect(route('/api/folders/short')).toEqual({ kind: 'not-found' });
     expect(route(`/api/folders/${id}/x`)).toEqual({ kind: 'not-found' });

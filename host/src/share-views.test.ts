@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanLabels, cleanPing, completion, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
+import { cleanEmail, cleanLabels, cleanPing, completion, cookieValue, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
 
 const CHROME = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
@@ -43,6 +43,23 @@ describe('who counts as a reader', () => {
   });
 });
 
+describe('the email gate', () => {
+  it('takes an email in lower case and refuses anything else', () => {
+    expect(cleanEmail('  Dana@Acme.com ')).toBe('dana@acme.com');
+    expect(cleanEmail('dana@acme')).toBe(null);
+    expect(cleanEmail('dana acme.com')).toBe(null);
+    expect(cleanEmail('a@b.c'.padStart(300, 'x'))).toBe(null);
+    expect(cleanEmail(42)).toBe(null);
+  });
+
+  it('reads one cookie by its exact name', () => {
+    expect(cookieValue('theme=dark; ap_pass=abc; x=1', 'ap_pass')).toBe('abc');
+    expect(cookieValue('xap_pass=abc', 'ap_pass')).toBe(null);
+    expect(cookieValue('ap_pass=', 'ap_pass')).toBe(null);
+    expect(cookieValue(null, 'ap_pass')).toBe(null);
+  });
+});
+
 describe('what the share page sends', () => {
   it('cleans the headings of the parts', () => {
     expect(cleanLabels(['  Why   it matters ', '', 7, 'x'.repeat(100)])).toEqual(['Why it matters', 'Part 2', 'Part 3', 'x'.repeat(80)]);
@@ -65,11 +82,11 @@ describe('what the share page sends', () => {
 
 describe('the views for the owner', () => {
   const view = (v: Partial<ViewRow> & Pick<ViewRow, 'id'>): ViewRow => ({
-    token: 't1', visitor: 'a', device: 'desktop', os: 'macOS', country: 'US', referrer: null,
+    token: 't1', visitor: 'a', device: 'desktop', os: 'macOS', country: 'US', referrer: null, email: null,
     started_at: '2026-11-12T10:00:00.000Z', last_at: '2026-11-12T10:05:00.000Z', active_ms: 0, parts: 4, downloads: 0, ...v,
   });
   const part = (view_id: string, i: number, ms: number): PartRow => ({ view_id, part: i, label: 'Slide ' + (i + 1), ms });
-  const link = (token: string, name: string | null): LinkRow => ({ token, name, version: null, created_at: '2026-11-11T00:00:00.000Z', revoked_at: null });
+  const link = (token: string, name: string | null, kind = 'person'): LinkRow => ({ token, kind, name, require_email: 0, version: null, created_at: '2026-11-11T00:00:00.000Z', revoked_at: null });
 
   it('counts completion as the parts seen for at least a second, out of all the parts', () => {
     expect(completion([part('v', 0, 5000), part('v', 1, 999), part('v', 2, 1000)], 4)).toBe(50);
@@ -92,5 +109,16 @@ describe('the views for the owner', () => {
     ]);
     expect(s.links.map((l) => [l.name, l.views, l.last_at])).toEqual([['Dana at Acme', 2, '2026-11-12T11:00:00.000Z'], [null, 1, '2026-11-12T12:00:00.000Z']]);
     expect(s.visits.map((v) => [v.id, v.completion, v.os, v.parts.length])).toEqual([['v3', 0, 'macOS', 0], ['v2', 50, 'iOS', 2], ['v1', 50, 'macOS', 2]]);
+  });
+
+  it('names a visit by the email from the gate, then by the person of the link, and leaves a public visit with no gate unnamed', () => {
+    const views = [
+      view({ id: 'g', token: 'pub', email: 'sam@bolt.io' }),
+      view({ id: 'p', token: 'dana' }),
+      view({ id: 'a', token: 'pub' }),
+      view({ id: 'x', token: 'gone' }),
+    ];
+    const s = summarize([link('pub', null, 'public'), link('dana', 'Dana at Acme')], views, []);
+    expect(Object.fromEntries(s.visits.map((v) => [v.id, v.who]))).toEqual({ g: 'sam@bolt.io', p: 'Dana at Acme', a: null, x: null });
   });
 });

@@ -44,7 +44,11 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 - A page whose `<main>` has the class `k-deck` is a deck, and D1 stores `kind = 'deck'` for it. At publish time, Browser Rendering opens the deck at 1920×1080, and the kit reports the slides that overflow. The publish response returns that audit, and the CLI prints it. The deck thumbnails show the first slide.
 - A second Access application bypasses Access for `/s/*`. On that path the Worker checks only the share token, which is 32 random bytes.
 - The host records the visits to share links on the model of Papermark and DocSend. One load of a link is one visit. The share page counts time only while the tab shows and the reader was active in the last 5 minutes, on the slide or section on screen. It reports every 10 seconds and with `sendBeacon` when the tab hides or closes. Completion is the share of the parts that the visit saw for at least 1 second.
-- A visit keeps no name, no cookie and no IP address. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. A link can have a name, for example the person it is for, so one link for each reader tells the readers apart. Link previews, crawlers, headless browsers and people who signed in to the host do not count. The owner sees the visits on the Views page of each document, `/p/<group>/<name>/views`.
+- Sharing follows Google Docs and DocSend. A page has two kinds of share link:
+  - A link for one person (`kind = 'person'`). The owner adds the person by name, and the Views page names each visit by that person.
+  - The public link (`kind = 'public'`). General access turns it on as "Anyone with the link". When the owner turns General access off, the host revokes the public link. The links for each person keep working.
+- The owner can require an email on the public link, as DocSend does. The share page then shows a form for the email before the page. The host stores the email in `share_passes` and sets the `ap_pass` cookie on the path of that one link for 30 days. Without a pass, the page, its raw HTML and its PDF return 403. The host does not verify the email. A person who signed in to the host skips the form.
+- A visit keeps no IP address. It keeps an email only when the reader gave one at the form. A visitor is a hash of the IP address and the browser with a random salt of one day, and the host deletes each salt after two days. Link previews, crawlers, headless browsers and people who signed in to the host do not count. The owner sees the visits on the Views page of each document, `/p/<group>/<name>/views`.
 - The host records which version of each page a person last saw and when they last opened it. The library uses the record for the blue dot of a new version, for Recent, and for the sort by the last open.
 
 | Route | Auth | Does |
@@ -62,7 +66,8 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `POST /api/pages/<group>/<name>/refresh` | Access | Index the latest version and take its thumbnails again |
 | `PUT /api/pages/<group>/<name>` | Access | Store a new version. The body is the HTML. |
 | `DELETE /api/pages/<group>/<name>` | Access | Delete the page, its versions, its share links and their visits |
-| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }`, and an optional `"name"` |
+| `GET`, `POST /api/pages/<group>/<name>/shares` | Access | List or make share links. POST body: `{ "version": n }` or `{ "version": "latest" }`, and `"kind"`: `"person"` with a `"name"`, or `"public"` with an optional `"require_email": true` |
+| `PATCH /api/shares/<token>` | Access | Turn the email requirement of the public link on or off. Body: `{ "require_email": true }` |
 | `DELETE /api/shares/<token>` | Access | Revoke a share link. Its visits stay. |
 | `GET /api/activity` | Access | The pages, the activity list and what the reader opened, for the library to poll |
 | `GET`, `POST /api/folders` | Access | List or make folders. POST body: `{ "name", "color", "parent_id" }` |
@@ -71,8 +76,9 @@ Without a host, the skill still works. Pages go to `~/.agent/explain/<repo>/`, a
 | `GET /p/<group>/<name>/views` | Access | The Views page of a document: the totals, the average time on each part, each visit, and the links |
 | `GET /api/pages/<group>/<name>/views` | Access | The same data as JSON |
 | `PUT /api/pages/<group>/<name>/seen` | Access | Record that the reader saw a version in Activity. Body: `{ "version": n }` |
-| `GET /s/<token>` | Token | The shared page |
-| `GET /s/<token>/pdf` | Token | The shared document or deck as a PDF attachment |
+| `GET /s/<token>` | Token | The shared page, or the email form when the link requires an email and the reader has no pass |
+| `GET /s/<token>/pdf` | Token, and a pass when the link requires an email | The shared document or deck as a PDF attachment |
+| `POST /s/<token>/pass` | Token, same origin | Give an email at the form. Body: `{ "email" }`. The host sets the `ap_pass` cookie. A bad email gets 400. |
 | `POST /s/<token>/view`, `POST /s/<token>/ping` | Token, same origin | The share page starts a visit and reports the time on each part. Other origins get 403. |
 
 ## Deploy the host

@@ -52,6 +52,28 @@ export async function visitorHash(salt: string, ip: string, ua: string) {
   return [...bytes.slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** The email that a reader gives at the email gate, in lower case, or null when it is not an email. */
+export function cleanEmail(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const e = v.trim().toLowerCase();
+  return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : null;
+}
+
+/** The cookie that holds the pass of the email gate. The host sets it on the path of one link, so each link has its own. */
+export const PASS_COOKIE = 'ap_pass';
+/** How long a pass of the email gate lasts: 30 days, as DocSend's email verification. */
+export const PASS_DAYS = 30;
+
+/** The value of one cookie from a Cookie header, or null. */
+export function cookieValue(header: string | null, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim() || null;
+  }
+  return null;
+}
+
 /** The headings of the parts of a page, as the share page sends them when a visit starts. */
 export function cleanLabels(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
@@ -96,6 +118,7 @@ export interface ViewRow {
   os: string | null;
   country: string | null;
   referrer: string | null;
+  email: string | null;
   started_at: string;
   last_at: string;
   active_ms: number;
@@ -110,7 +133,10 @@ export interface PartRow {
 }
 export interface LinkRow {
   token: string;
+  /** public: anyone with the link. person: a link for one person. */
+  kind: string;
   name: string | null;
+  require_email: number;
   version: number | null;
   created_at: string;
   revoked_at: string | null;
@@ -131,10 +157,14 @@ const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b,
 export function summarize(links: LinkRow[], views: ViewRow[], parts: PartRow[]) {
   const byView = new Map<string, PartRow[]>();
   for (const p of parts) (byView.get(p.view_id) ?? byView.set(p.view_id, []).get(p.view_id)!).push(p);
+  const linkOf = new Map(links.map((l) => [l.token, l]));
   const visits = [...views].sort((a, b) => b.started_at.localeCompare(a.started_at)).map((v) => {
     const mine = (byView.get(v.id) || []).sort((a, b) => a.part - b.part);
+    const l = linkOf.get(v.token);
+    // Who the visit was: the email from the gate, or the person of a personal link. A public link with no gate has no name.
+    const who = v.email || (l && l.kind === 'person' ? l.name : null);
     return {
-      id: v.id, token: v.token, started_at: v.started_at, last_at: v.last_at, active_ms: v.active_ms,
+      id: v.id, token: v.token, who, email: v.email, started_at: v.started_at, last_at: v.last_at, active_ms: v.active_ms,
       completion: completion(mine, v.parts), device: v.device, os: v.os, country: v.country, referrer: v.referrer, downloads: v.downloads,
       parts: mine.filter((p) => p.ms > 0).map((p) => ({ part: p.part, label: p.label, ms: p.ms })),
     };

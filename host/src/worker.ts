@@ -7,8 +7,8 @@ import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { accessCookie, verifyAccessJwt, type Identity } from './auth';
 import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
-import { KIT, READ_REPORTER, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
-import { MAX_ACTIVE_MS, cleanLabels, cleanPing, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
+import { KIT, READ_REPORTER, gateHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
+import { MAX_ACTIVE_MS, PASS_COOKIE, PASS_DAYS, cleanEmail, cookieValue, cleanLabels, cleanPing, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
 import { viewsHtml } from './views-page';
 import { libraryHtml, type FolderRow, type Opens } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
@@ -423,6 +423,7 @@ async function deletePage(env: Env, slug: string) {
     cursor = list.truncated ? list.cursor : undefined;
   } while (cursor);
   await env.DB.batch([
+    env.DB.prepare('DELETE FROM share_passes WHERE token IN (SELECT token FROM shares WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM share_view_parts WHERE view_id IN (SELECT id FROM share_views WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM share_views WHERE slug = ?').bind(slug),
@@ -437,22 +438,34 @@ async function deletePage(env: Env, slug: string) {
 async function createShare(req: Request, env: Env, slug: string, origin: string) {
   const p = await getPage(env, slug);
   if (!p) return fail(404, 'no such page');
-  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest'; name?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { version?: number | 'latest'; name?: unknown; kind?: unknown; require_email?: unknown };
   const v = body.version ?? 'latest';
-  // A name says who the link is for, as in DocSend and Papermark. One link for each reader tells the readers apart.
+  // Two kinds, as in Google Docs: a link for one person, named for that person, or the public link that anyone can use.
+  const kind = body.kind === 'person' ? 'person' : 'public';
   const name = typeof body.name === 'string' ? body.name.replace(/\s+/g, ' ').trim().slice(0, 80) || null : null;
+  if (kind === 'person' && !name) return fail(400, 'a link for a person needs a name');
+  const requireEmail = kind === 'public' && body.require_email === true ? 1 : 0;
   let version: number | null = null;
   if (v !== 'latest') {
     if (!Number.isInteger(v) || !(await getVersion(env, slug, v))) return fail(400, 'no such version');
     version = v;
   }
   const token = newToken();
-  await env.DB.prepare('INSERT INTO shares (token, slug, version, name, created_at) VALUES (?, ?, ?, ?, ?)').bind(token, slug, version, name, now()).run();
-  return json({ token, slug, version, name, url: `${origin}/s/${token}` }, 201);
+  await env.DB.prepare('INSERT INTO shares (token, slug, version, kind, name, require_email, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(token, slug, version, kind, name, requireEmail, now()).run();
+  return json({ token, slug, version, kind, name, require_email: requireEmail, url: `${origin}/s/${token}` }, 201);
+}
+
+/** Changes a link: whether its readers must give an email first. Only a public link has the gate. */
+async function updateShare(req: Request, env: Env, token: string) {
+  const body = (await req.json().catch(() => ({}))) as { require_email?: unknown };
+  if (typeof body.require_email !== 'boolean') return fail(400, 'require_email must be true or false');
+  const res = await env.DB.prepare("UPDATE shares SET require_email = ? WHERE token = ? AND kind = 'public' AND revoked_at IS NULL").bind(body.require_email ? 1 : 0, token).run();
+  return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such public link');
 }
 
 async function listShares(env: Env, slug: string, origin: string) {
-  const { results } = await env.DB.prepare('SELECT token, name, version, created_at FROM shares WHERE slug = ? AND revoked_at IS NULL ORDER BY created_at DESC').bind(slug).all<{ token: string; name: string | null; version: number | null; created_at: string }>();
+  const { results } = await env.DB.prepare('SELECT token, kind, name, require_email, version, created_at FROM shares WHERE slug = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+    .bind(slug).all<{ token: string; kind: string; name: string | null; require_email: number; version: number | null; created_at: string }>();
   return json(results.map((s) => ({ ...s, url: `${origin}/s/${s.token}` })));
 }
 
@@ -483,15 +496,17 @@ async function startShareView(req: Request, env: Env, token: string) {
   const ua = req.headers.get('user-agent');
   if (isBot(ua)) return json({ id: null });
   // The owner and anyone else who signed in to the host is not a reader of the link. Their visit does not count.
-  if (env.ACCESS_AUD && (await verifyAccessJwt(accessCookie(req.headers.get('cookie')), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD }))?.kind === 'person') return json({ id: null });
+  if (await signedIn(req, env)) return json({ id: null });
+  const email = await passEmail(req, env, token);
+  if (hit.requireEmail && !email) return fail(403, 'this link needs an email');
   const body = (await req.json().catch(() => ({}))) as { referrer?: unknown; parts?: unknown };
   const labels = cleanLabels(body.parts);
   const visitor = await visitorHash(await daySalt(env), req.headers.get('cf-connecting-ip') || '', ua || '');
   const id = newToken().slice(0, 24), at = now();
   const country = typeof req.cf?.country === 'string' ? req.cf.country : null;
   await env.DB.batch([
-    env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, os, country, referrer, started_at, last_at, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), osOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), at, at, labels.length),
+    env.DB.prepare('INSERT INTO share_views (id, token, slug, version, visitor, device, os, country, referrer, email, started_at, last_at, parts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, token, hit.page.slug, hit.version.version, visitor, deviceOf(ua), osOf(ua), country, referrerHost(body.referrer, new URL(req.url).hostname), email, at, at, labels.length),
     ...labels.map((label, i) => env.DB.prepare('INSERT INTO share_view_parts (view_id, part, label) VALUES (?, ?, ?)').bind(id, i, label)),
   ]);
   return json({ id }, 201);
@@ -523,8 +538,8 @@ async function pingShareView(req: Request, env: Env, token: string) {
 
 /** The views of a page for its owner: the totals, the time on each part, the links, and each visit. Revoked links keep their visits. */
 async function listViews(env: Env, slug: string) {
-  const { results: links } = await env.DB.prepare('SELECT token, name, version, created_at, revoked_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<LinkRow>();
-  const { results: views } = await env.DB.prepare('SELECT id, token, visitor, device, os, country, referrer, started_at, last_at, active_ms, parts, downloads FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 1000')
+  const { results: links } = await env.DB.prepare('SELECT token, kind, name, require_email, version, created_at, revoked_at FROM shares WHERE slug = ? ORDER BY created_at DESC').bind(slug).all<LinkRow>();
+  const { results: views } = await env.DB.prepare('SELECT id, token, visitor, device, os, country, referrer, email, started_at, last_at, active_ms, parts, downloads FROM share_views WHERE slug = ? ORDER BY started_at DESC LIMIT 1000')
     .bind(slug).all<ViewRow>();
   const { results: parts } = await env.DB.prepare('SELECT p.view_id, p.part, p.label, p.ms FROM share_view_parts p JOIN share_views v ON v.id = p.view_id WHERE v.slug = ?')
     .bind(slug).all<PartRow>();
@@ -533,12 +548,42 @@ async function listViews(env: Env, slug: string) {
 
 /** Resolves a share token to its page and version, or null when the page or version is gone. */
 async function resolveShare(env: Env, token: string) {
-  const s = await env.DB.prepare('SELECT slug, version FROM shares WHERE token = ? AND revoked_at IS NULL').bind(token).first<{ slug: string; version: number | null }>();
+  const s = await env.DB.prepare('SELECT slug, version, require_email FROM shares WHERE token = ? AND revoked_at IS NULL').bind(token).first<{ slug: string; version: number | null; require_email: number }>();
   if (!s) return null;
   const p = await getPage(env, s.slug);
   if (!p) return null;
   const v = await getVersion(env, s.slug, s.version ?? p.latest);
-  return v ? { page: p, version: v } : null;
+  return v ? { page: p, version: v, requireEmail: !!s.require_email } : null;
+}
+
+/** True when a person who signed in to the host sent the request. The owner sees a link as a reader does, with no gate and no visit. */
+async function signedIn(req: Request, env: Env) {
+  if (!env.ACCESS_AUD) return false;
+  return (await verifyAccessJwt(accessCookie(req.headers.get('cookie')), { team: env.ACCESS_TEAM, aud: env.ACCESS_AUD }))?.kind === 'person';
+}
+
+/** The email of the pass of the gate of a link that the request carries, or null. A pass lasts PASS_DAYS. */
+async function passEmail(req: Request, env: Env, token: string) {
+  const id = cookieValue(req.headers.get('cookie'), PASS_COOKIE);
+  if (!id) return null;
+  const since = new Date(Date.now() - PASS_DAYS * 86400_000).toISOString();
+  const row = await env.DB.prepare('SELECT email FROM share_passes WHERE id = ? AND token = ? AND created_at > ?').bind(id, token, since).first<{ email: string }>();
+  return row?.email ?? null;
+}
+
+/** The email gate: the reader gives an email, and the host sets a cookie for the path of this link only. */
+async function passGate(req: Request, env: Env, url: URL, token: string) {
+  const hit = await resolveShare(env, token);
+  if (!hit) return fail(404, 'no such link');
+  const email = cleanEmail(((await req.json().catch(() => ({}))) as { email?: unknown }).email);
+  if (!email) return fail(400, 'Enter an email address.');
+  const id = newToken();
+  await env.DB.prepare('INSERT INTO share_passes (id, token, email, created_at) VALUES (?, ?, ?, ?)').bind(id, token, email, now()).run();
+  const secure = url.protocol === 'https:' ? '; Secure' : '';
+  return new Response(null, {
+    status: 204,
+    headers: { ...BASE_HEADERS, 'set-cookie': `${PASS_COOKIE}=${id}; Path=/s/${token}; Max-Age=${PASS_DAYS * 86400}; HttpOnly; SameSite=Lax${secure}` },
+  });
 }
 
 async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -559,15 +604,21 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
 
   // Share links: Access lets /s/* through with no login, so the token is the only check.
   // The share page reports its views with two writes. Only the share page itself may send them.
-  if (r.kind === 'share-start' || r.kind === 'share-ping') {
+  if (r.kind === 'share-start' || r.kind === 'share-ping' || r.kind === 'share-pass') {
     if (method !== 'POST') return fail(405, 'method not allowed');
     if (req.headers.get('origin') !== url.origin) return fail(403, 'cross-origin write refused');
+    if (r.kind === 'share-pass') return passGate(req, env, url, r.token);
     return r.kind === 'share-start' ? startShareView(req, env, r.token) : pingShareView(req, env, r.token);
   }
   if (r.kind === 'share-view' || r.kind === 'share-raw' || r.kind === 'share-pdf') {
     if (method !== 'GET') return fail(405, 'method not allowed');
     const hit = await resolveShare(env, r.token);
     if (!hit) return page(messageHtml('Link not found', 'This share link does not exist or was revoked.', nonce, '/s/_/explain.css'), nonce, 404);
+    // The email gate holds the page, its HTML and its PDF until the reader gives an email. A person who signed in passes.
+    if (hit.requireEmail && !(await passEmail(req, env, r.token)) && !(await signedIn(req, env))) {
+      if (r.kind !== 'share-view') return fail(403, 'this link needs an email');
+      return page(gateHtml({ title: hit.page.title }, nonce), nonce);
+    }
     if (r.kind === 'share-view') return page(sharedHtml({ token: r.token, title: hit.page.title, repo: hit.page.repo, kind: hit.page.kind, version: hit.version }, nonce), nonce);
     if (r.kind === 'share-pdf') return pagePdf(env, hit.page.slug, hit.version.version, pdfName(hit.page.title, hit.version.version));
     const obj = await env.PAGES.get(blobKey(hit.page.slug, hit.version.version));
@@ -668,6 +719,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (method === 'GET') return listShares(env, r.slug, url.origin);
       return fail(405, 'method not allowed');
     case 'api-share': {
+      if (method === 'PATCH') return updateShare(req, env, r.token);
       if (method !== 'DELETE') return fail(405, 'method not allowed');
       // A revoked link stops at once. Its row stays, so its visits keep the name of the link.
       const res = await env.DB.prepare('UPDATE shares SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL').bind(now(), r.token).run();

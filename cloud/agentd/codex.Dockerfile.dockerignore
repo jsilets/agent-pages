@@ -1,0 +1,5 @@
+*
+!sandbox/run-comment.mjs
+!sandbox/egress-proxy.mjs
+!sandbox/signin.mjs
+!cloud/agentd/agentd.mjs

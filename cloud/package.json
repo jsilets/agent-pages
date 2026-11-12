@@ -1,0 +1,16 @@
+{
+  "name": "agent-pages-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The production runner of the assistant sandbox on Cloudflare: a Worker, one Durable Object for each user, and one container for each Durable Object.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "cost": "node cost.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.sha-52b0dc0e9",
+    "cf": "1.0.0-beta.13",
+    "vite": "8.2.2"
+  }
+}

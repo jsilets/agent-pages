@@ -6,23 +6,23 @@ import faviconSvg from '../../brand/mark-small.svg?raw';
 import faviconIco from '../../brand/favicon.ico?inline';
 import touchIcon from '../../brand/apple-touch-icon.png?inline';
 import { accessCookie, verifyAccessJwt, type Identity } from './auth';
-import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, route, thumbKey, withKit, withTheme, type Theme } from './lib';
+import { handleRunProgress, pageActivity } from './run-activity';
+import { onCommentCreated } from './agents';
+import { assistantStates, chooseModel, connectStatus, disconnect, RunnerError, sendCode, startConnect } from './assistants';
+import { addComment, deleteComment, editComment, getComment, listThreads, reopenThread, resolveThread } from './comments';
+import { auditFromHtml, auditLines, blobKey, claimId, type DeckAudit, type IconName, ftsQuery, isFolderColor, isFolderId, newFolderId, newToken, newTokenId, pageChunks, pageKind, type PageKind, parseMeta, parseTheme, pdfKey, readJson, route, thumbKey, withKit, withTheme, type Theme } from './lib';
+import { handleMcp } from './mcp';
+import { handleRunResult, rerunComment, sandboxAgents, warmRunner, withRuns } from './sandbox';
+import type { Env, Refusal, Stored } from './types';
 import { KIT, READ_REPORTER, gateHtml, messageHtml, sharedHtml, viewerHtml, type PageRow, type VersionRow } from './views';
 import { MAX_ACTIVE_MS, PASS_COOKIE, PASS_DAYS, cleanEmail, cookieValue, cleanLabels, cleanPing, deviceOf, isBot, osOf, referrerHost, summarize, visitorHash, type LinkRow, type PartRow, type ViewRow } from './share-views';
 import { viewsHtml } from './views-page';
 import { libraryHtml, type FolderRow, type Opens } from './library';
 import { deriveActivity, type CommentRow, type Item, type RunRow, type VersionEvent } from './activity';
 
-interface Env {
-  DB: D1Database;
-  PAGES: R2Bucket;
-  BROWSER: BrowserRun;
-  ENVIRONMENT: string;
-  ACCESS_TEAM: string;
-  ACCESS_AUD: string;
-}
-
 const MAX_BYTES = 5 * 1024 * 1024;
+/** The limit for the JSON body of a comment or a connector token. */
+const MAX_JSON_BYTES = 64 * 1024;
 
 /** Stored pages run with no origin: they cannot read the host's cookies, storage or API. */
 const PAGE_CSP = 'sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox';
@@ -379,10 +379,15 @@ async function getVersion(env: Env, slug: string, version: number) {
 async function publish(req: Request, env: Env, ctx: ExecutionContext, slug: string, origin: string) {
   if (!(req.headers.get('content-type') || '').startsWith('text/html')) return fail(415, 'send the page as text/html');
   if (+(req.headers.get('content-length') || 0) > MAX_BYTES) return fail(413, 'the page is over 5 MB');
-  const html = await req.text();
+  const out = await storeVersion(env, ctx, slug, await req.text(), origin);
+  return 'error' in out ? fail(out.status, out.error) : json(out, 201);
+}
+
+/** Stores the HTML as a new version of the page. A publish and the edit_page tool of the MCP connector both use it. */
+async function storeVersion(env: Env, ctx: ExecutionContext, slug: string, html: string, origin: string): Promise<Stored | Refusal> {
   const bytes = new TextEncoder().encode(html).byteLength;
-  if (bytes > MAX_BYTES) return fail(413, 'the page is over 5 MB');
-  if (!/<html[\s>]/i.test(html)) return fail(400, 'the body is not an HTML document');
+  if (bytes > MAX_BYTES) return { status: 413, error: 'the page is over 5 MB' };
+  if (!/<html[\s>]/i.test(html)) return { status: 400, error: 'the body is not an HTML document' };
   const meta = parseMeta(html, slug);
   const kind: PageKind = pageKind(html);
   const at = now();
@@ -411,7 +416,7 @@ async function publish(req: Request, env: Env, ctx: ExecutionContext, slug: stri
   // A deck waits for its audit, so the agent that published it sees the slides that overflow.
   const audit = kind === 'deck' ? await auditDeck(env, html) : undefined;
   const auditOut = audit && ('error' in audit ? audit : { pass: audit.pass, problems: auditLines(audit) });
-  return json({ slug, version, kind, title: meta.title, url: `${origin}/p/${slug}`, versionUrl: `${origin}/p/${slug}/v/${version}`, ...(auditOut ? { audit: auditOut } : {}) }, 201);
+  return { slug, version, kind, title: meta.title, url: `${origin}/p/${slug}`, versionUrl: `${origin}/p/${slug}/v/${version}`, ...(auditOut ? { audit: auditOut } : {}) };
 }
 
 async function deletePage(env: Env, slug: string) {
@@ -425,6 +430,11 @@ async function deletePage(env: Env, slug: string) {
   await env.DB.batch([
     env.DB.prepare('DELETE FROM share_passes WHERE token IN (SELECT token FROM shares WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM shares WHERE slug = ?').bind(slug),
+    // The runs go first, because a run finds its page through its comment.
+    env.DB.prepare('DELETE FROM agent_runs WHERE comment_id IN (SELECT id FROM comments WHERE slug = ?)').bind(slug),
+    env.DB.prepare('DELETE FROM run_events WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM connector_tokens WHERE slug = ?').bind(slug),
+    env.DB.prepare('DELETE FROM comments WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM share_view_parts WHERE view_id IN (SELECT id FROM share_views WHERE slug = ?)').bind(slug),
     env.DB.prepare('DELETE FROM share_views WHERE slug = ?').bind(slug),
     env.DB.prepare('DELETE FROM page_opens WHERE slug = ?').bind(slug),
@@ -625,6 +635,12 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
     return obj ? rawPage(obj, false, theme, READ_REPORTER) : fail(404, 'no such version');
   }
 
+  // The MCP connector sits under /s/ too, so Access lets it through. The connector token is the only check.
+  if (r.kind === 'mcp') return handleMcp(req, env, ctx, r.token, url.origin, storeVersion);
+  // The sandbox runner reports a run here. The secret run id is the only check.
+  if (r.kind === 'run-result') return handleRunResult(req, env, r.id);
+  if (r.kind === 'run-progress') return handleRunProgress(req, env, r.id);
+
   const who = await identify(req, env);
   if (!who) return fail(403, 'Cloudflare Access did not sign this request');
 
@@ -633,6 +649,17 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
   if (method !== 'GET' && method !== 'HEAD') {
     const o = req.headers.get('origin');
     if (o && o !== url.origin) return fail(403, 'cross-origin write refused');
+  }
+  // The assistant routes pass a sign-in on to the runner. They take requests from the viewer of this host only.
+  if (r.kind === 'api-assistants' || r.kind === 'api-assistant' || r.kind === 'api-assistant-connect' || r.kind === 'api-assistant-connection' || r.kind === 'api-connect' || r.kind === 'api-connect-code') {
+    const site = req.headers.get('sec-fetch-site');
+    if (site && site !== 'same-origin' && site !== 'none') return fail(403, 'the assistant routes take requests from this host only');
+    try {
+      return await assistantRoute(req, env, r, who.who);
+    } catch (e) {
+      if (e instanceof RunnerError) return fail(503, e.message);
+      throw e;
+    }
   }
 
   switch (r.kind) {
@@ -652,7 +679,7 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       if (!version) return page(messageHtml('Version not found', `${r.slug} has no version ${r.version}.`, nonce), nonce, 404);
       // A person who opens a page has seen that version. An agent that reads a page with a service token has not.
       if (who.kind === 'person') ctx.waitUntil(recordOpen(env, who.who, p.slug, version.version));
-      return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null }, nonce), nonce);
+      return page(viewerHtml({ slug: p.slug, title: p.title, repo: p.repo, kind: p.kind, version, versions, latest: p.latest, followsLatest: r.version === null, who: who.who, agents: env.SANDBOX_RUNNER_URL ? sandboxAgents(env) : [] }, nonce), nonce);
     }
     case 'raw': {
       const obj = await env.PAGES.get(blobKey(r.slug, r.version));
@@ -725,8 +752,124 @@ async function handle(req: Request, env: Env, ctx: ExecutionContext): Promise<Re
       const res = await env.DB.prepare('UPDATE shares SET revoked_at = ? WHERE token = ? AND revoked_at IS NULL').bind(now(), r.token).run();
       return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such share');
     }
+    case 'api-comments': {
+      if (method === 'GET') {
+        if (!(await getPage(env, r.slug))) return fail(404, 'no such page');
+        const status = url.searchParams.get('status');
+        return json(await withRuns(env, r.slug, await listThreads(env, { slug: r.slug, status: status === 'open' || status === 'resolved' ? status : undefined })));
+      }
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const body = (await readJson(req, MAX_JSON_BYTES)) as { body?: unknown; anchor?: unknown; quote?: unknown; prefix?: unknown; suffix?: unknown; slide?: unknown; parent_id?: unknown } | null | undefined;
+      if (!body || typeof body !== 'object') return fail(400, 'send the comment as JSON of at most 64 KB');
+      const c = await addComment(env, { slug: r.slug, body: body.body, anchor: body.anchor, quote: body.quote, prefix: body.prefix, suffix: body.suffix, slide: body.slide, parent_id: body.parent_id, author: who.who });
+      if ('error' in c) return fail(c.status, c.error);
+      // The agent triggers run after the response, so a slow assistant never holds the comment back.
+      ctx.waitUntil(onCommentCreated(env, ctx, c, url.origin).catch((e) => console.error('comment hook', c.id, e)));
+      return json(c, 201);
+    }
+    case 'api-comment-resolve':
+      // PUT resolves the thread and DELETE opens it again, like the pin route.
+      if (method !== 'PUT' && method !== 'DELETE') return fail(405, 'method not allowed');
+      return (await (method === 'PUT' ? resolveThread : reopenThread)(env, r.id)) ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such thread');
+    case 'api-comment': {
+      // A person changes or deletes a comment of their own. Deleting the first comment of a thread deletes the thread.
+      if (method === 'PATCH') {
+        const body = (await readJson(req, MAX_JSON_BYTES)) as { body?: unknown } | null | undefined;
+        if (!body || typeof body !== 'object') return fail(400, 'send { "body": "..." } as JSON of at most 64 KB');
+        const c = await editComment(env, r.id, who.who, body.body);
+        return 'error' in c ? fail(c.status, c.error) : json(c);
+      }
+      if (method === 'DELETE') {
+        const out = await deleteComment(env, r.id, who.who);
+        return 'error' in out ? fail(out.status, out.error) : json(out);
+      }
+      return fail(405, 'method not allowed');
+    }
+    case 'api-comment-run': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const c = await getComment(env, r.id);
+      if (!c) return fail(404, 'no such comment');
+      const start = await rerunComment(env, c, url.origin);
+      if (typeof start !== 'function') return fail(start.status, start.error);
+      ctx.waitUntil(start().catch((e) => console.error('rerun', c.id, e)));
+      return json({ started: true }, 202);
+    }
+    case 'api-warm': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      // The runner gets the call after the response, so the viewer never waits for it.
+      const warm = await warmRunner(env, who.who);
+      if (warm) ctx.waitUntil(warm().catch((e) => console.error('warm', e)));
+      return json({ sent: !!warm }, 202);
+    }
+    case 'api-page-activity': {
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      const since = +(url.searchParams.get('since') || 0);
+      const a = await pageActivity(env, r.slug, Number.isSafeInteger(since) && since > 0 ? since : 0);
+      return a ? json(a) : fail(404, 'no such page');
+    }
+    case 'api-connector-tokens': {
+      if (method === 'GET') {
+        const at = now();
+        await env.DB.prepare('DELETE FROM connector_tokens WHERE expires_at <= ?').bind(at).run();
+        const { results } = await env.DB.prepare('SELECT id, substr(token, -4) AS last4, label, slug, expires_at, created_at FROM connector_tokens ORDER BY created_at DESC').all();
+        return json(results);
+      }
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const body = (await readJson(req, MAX_JSON_BYTES)) as { label?: unknown } | null | undefined;
+      const label = body && typeof body.label === 'string' ? body.label.trim() : '';
+      if (!label || label.length > 80) return fail(400, 'send a label of 1 to 80 characters as JSON');
+      const token = newToken();
+      const id = newTokenId();
+      await env.DB.prepare('INSERT INTO connector_tokens (token, id, label, created_at) VALUES (?, ?, ?, ?)').bind(token, id, label, now()).run();
+      // The response is the one place that shows the whole token. The id is for the DELETE route.
+      return json({ id, token, label, mcp_url: `${url.origin}/s/_mcp/${token}` }, 201);
+    }
+    case 'api-connector-token': {
+      if (method !== 'DELETE') return fail(405, 'method not allowed');
+      const res = await env.DB.prepare('DELETE FROM connector_tokens WHERE id = ?1 OR token = ?1').bind(r.token).run();
+      return res.meta.changes ? new Response(null, { status: 204, headers: BASE_HEADERS }) : fail(404, 'no such connector token');
+    }
     default:
       return url.pathname.startsWith('/api/') ? fail(404, 'no such route') : page(messageHtml('Not found', 'No page is at this address.', nonce), nonce, 404);
+  }
+}
+
+type AssistantRoute = Extract<ReturnType<typeof route>, { kind: 'api-assistants' | 'api-assistant' | 'api-assistant-connect' | 'api-assistant-connection' | 'api-connect' | 'api-connect-code' }>;
+
+/** The assistant settings and the sign-in. See assistants.ts. A runner that does not answer gives 503. */
+async function assistantRoute(req: Request, env: Env, r: AssistantRoute, user: string): Promise<Response> {
+  const method = req.method;
+  const handled = env.SANDBOX_RUNNER_URL ? sandboxAgents(env) : [];
+  const refused = (out: object) => ('error' in out && 'status' in out ? fail((out as Refusal).status, (out as Refusal).error) : null);
+  switch (r.kind) {
+    case 'api-assistants':
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      return json(await assistantStates(env, user, handled));
+    case 'api-assistant': {
+      if (method !== 'PUT') return fail(405, 'method not allowed');
+      const out = await chooseModel(env, user, r.name, req);
+      return refused(out) ?? json(out);
+    }
+    case 'api-assistant-connect': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      if (!handled.includes(r.name)) return fail(503, `no sandbox runner handles @${r.name}`);
+      const out = await startConnect(env, user, r.name);
+      return refused(out) ?? json(out, 201);
+    }
+    case 'api-assistant-connection':
+      if (method !== 'DELETE') return fail(405, 'method not allowed');
+      return json(await disconnect(env, user, r.name));
+    case 'api-connect': {
+      if (method !== 'GET') return fail(405, 'method not allowed');
+      const out = await connectStatus(env, user, r.id);
+      return out ? json(out) : fail(404, 'no such sign-in');
+    }
+    case 'api-connect-code': {
+      if (method !== 'POST') return fail(405, 'method not allowed');
+      const out = await sendCode(env, user, r.id, req);
+      if (!out) return fail(404, 'no such sign-in');
+      return (typeof out.status === 'number' ? refused(out) : null) ?? json(out);
+    }
   }
 }
 

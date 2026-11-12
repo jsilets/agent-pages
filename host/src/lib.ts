@@ -6,6 +6,12 @@ export type Theme = 'light' | 'dark';
 const PART = '[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?';
 const SLUG_RE = new RegExp(`^${PART}/${PART}$`);
 
+/**
+ * Sends one request to the sandbox runner: through the service binding SANDBOX_RUNNER when the host has one (the runner
+ * Worker of cloud/ in production), else with fetch (sandbox/local-runner.mjs in development). The URL is the same in both cases.
+ */
+export const runnerFetch = (env: { SANDBOX_RUNNER?: Fetcher }, url: string, init: RequestInit): Promise<Response> => (env.SANDBOX_RUNNER ? env.SANDBOX_RUNNER.fetch(url, init) : fetch(url, init));
+
 export function isSlug(s: string): boolean {
   return SLUG_RE.test(s);
 }
@@ -54,6 +60,23 @@ export function isToken(s: string): boolean {
   return /^[A-Za-z0-9_-]{43}$/.test(s);
 }
 
+/** 12 random bytes in hex: the id of a comment. */
+export function newId(): string {
+  return [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function isId(s: string): boolean {
+  return /^[0-9a-f]{24}$/.test(s);
+}
+
+/** 6 random bytes in hex: the public id of a connector token. It is not a secret. */
+export function newTokenId(): string {
+  return newId().slice(0, 12);
+}
+
+export function isTokenId(s: string): boolean {
+  return /^[0-9a-f]{12}$/.test(s);
+}
 /** A folder id: 12 random bytes in base64url. */
 export function newFolderId(): string {
   const b = crypto.getRandomValues(new Uint8Array(12));
@@ -94,6 +117,24 @@ export type Route =
   | { kind: 'share-view'; token: string }
   | { kind: 'share-raw'; token: string }
   | { kind: 'share-pdf'; token: string }
+  | { kind: 'api-comments'; slug: string }
+  | { kind: 'api-comment-resolve'; id: string }
+  | { kind: 'api-connector-tokens' }
+  /** token is the public id of a connector token, or the whole token. */
+  | { kind: 'api-connector-token'; token: string }
+  | { kind: 'mcp'; token: string }
+  | { kind: 'run-result'; id: string }
+  | { kind: 'run-progress'; id: string }
+  | { kind: 'api-page-activity'; slug: string }
+  | { kind: 'api-comment-run'; id: string }
+  | { kind: 'api-warm' }
+  | { kind: 'api-comment'; id: string }
+  | { kind: 'api-assistants' }
+  | { kind: 'api-assistant'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-assistant-connect'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-assistant-connection'; name: 'claude' | 'chatgpt' }
+  | { kind: 'api-connect'; id: string }
+  | { kind: 'api-connect-code'; id: string }
   | { kind: 'share-start'; token: string }
   | { kind: 'share-ping'; token: string }
   | { kind: 'share-pass'; token: string }
@@ -133,10 +174,35 @@ export function route(path: string): Route {
     if (isSlug(s) && p.length === 5 && p[4] === 'shares') return { kind: 'api-shares', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'pin') return { kind: 'api-pin', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'refresh') return { kind: 'api-refresh', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'comments') return { kind: 'api-comments', slug: s };
+    if (isSlug(s) && p.length === 5 && p[4] === 'activity') return { kind: 'api-page-activity', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'folder') return { kind: 'api-page-folder', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'seen') return { kind: 'api-seen', slug: s };
     if (isSlug(s) && p.length === 5 && p[4] === 'views') return { kind: 'api-views', slug: s };
   }
+  if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'resolve') return { kind: 'api-comment-resolve', id: p[2] };
+  if (p[0] === 'api' && p[1] === 'comments' && p.length === 4 && isId(p[2]) && p[3] === 'run') return { kind: 'api-comment-run', id: p[2] };
+  if (p[0] === 'api' && p[1] === 'comments' && p.length === 3 && isId(p[2])) return { kind: 'api-comment', id: p[2] };
+  if (path === '/api/assistants/warm') return { kind: 'api-warm' };
+  if (path === '/api/assistants') return { kind: 'api-assistants' };
+  if (p[0] === 'api' && p[1] === 'assistants' && p[2] === 'connect' && p.length >= 4 && /^[\w-]{8,128}$/.test(p[3])) {
+    if (p.length === 4) return { kind: 'api-connect', id: p[3] };
+    if (p.length === 5 && p[4] === 'code') return { kind: 'api-connect-code', id: p[3] };
+  }
+  if (p[0] === 'api' && p[1] === 'assistants' && (p[2] === 'claude' || p[2] === 'chatgpt')) {
+    const name = p[2];
+    if (p.length === 3) return { kind: 'api-assistant', name };
+    if (p.length === 4 && p[3] === 'connect') return { kind: 'api-assistant-connect', name };
+    if (p.length === 4 && p[3] === 'connection') return { kind: 'api-assistant-connection', name };
+  }
+  if (path === '/api/connector-tokens') return { kind: 'api-connector-tokens' };
+  if (p[0] === 'api' && p[1] === 'connector-tokens' && p.length === 3 && (isTokenId(p[2]) || isToken(p[2]))) return { kind: 'api-connector-token', token: p[2] };
+  // The MCP connector takes any token text here. So a wrong token gets a 404 from the connector, not an Access error.
+  if (p[0] === 's' && p[1] === '_mcp' && p.length === 3) return { kind: 'mcp', token: p[2] };
+  // The sandbox runner reports the result of a run here. The run id is a secret, like a connector token.
+  if (p[0] === 's' && p[1] === '_run' && p.length === 3 && isToken(p[2])) return { kind: 'run-result', id: p[2] };
+  // The runner reports what the assistant does during the run. The same run id is the only check.
+  if (p[0] === 's' && p[1] === '_run' && p.length === 4 && isToken(p[2]) && p[3] === 'progress') return { kind: 'run-progress', id: p[2] };
   if (p[0] === 'api' && p[1] === 'shares' && p.length === 3 && isToken(p[2])) return { kind: 'api-share', token: p[2] };
   if (p[0] === 's' && p.length === 2 && isToken(p[1])) return { kind: 'share-view', token: p[1] };
   if (p[0] === 's' && p.length === 3 && isToken(p[1]) && p[2] === 'raw') return { kind: 'share-raw', token: p[1] };
@@ -178,6 +244,19 @@ export function withKit(html: string, css: string, js?: string): string {
   const js0 = html.indexOf('<script>\n/* explain.js');
   const js1 = js0 < 0 ? -1 : html.indexOf('</script>', js0);
   return js1 < 0 ? html : html.slice(0, js0) + '<script>\n' + js.replace(/<\/script/gi, '<\\/script') + '\n' + html.slice(js1);
+}
+
+/**
+ * Replaces the packed kit CSS and JS (about 94 KB) with short comments, for a reader that needs the content only.
+ * The comments tell an assistant that the stored HTML has more text there. A page without the packed kit is unchanged.
+ */
+export function withoutKit(html: string): string {
+  for (const [open, close, name] of [['<style>\n/* explain.css', '</style>', 'CSS'], ['<script>\n/* explain.js', '</script>', 'JS']]) {
+    const start = html.indexOf(open);
+    const end = start < 0 ? -1 : html.indexOf(close, start);
+    if (end >= 0) html = html.slice(0, start) + `<!-- The kit ${name} is here in the stored HTML. get_page leaves it out. Do not use this comment in an edit. -->` + html.slice(end + close.length);
+  }
+  return html;
 }
 
 // ─── Search ─────────────────────────────────────────────────────────
@@ -307,4 +386,49 @@ export function auditLines(a: DeckAudit): string[] {
     if (s.tiny.length) out.push(`${at}: ${s.tiny.length} text ${s.tiny.length === 1 ? 'element is' : 'elements are'} under the minimum size, first: ${s.tiny[0]}`);
     return out;
   });
+}
+
+// ─── Comments ───────────────────────────────────────────────────────
+
+export type Mention = 'claude' | 'chatgpt';
+
+/** The first @claude or @chatgpt in a comment, in any case. An email address such as a@claude.ai is no mention. */
+export function parseMention(body: string): Mention | null {
+  const m = body.match(/(?:^|[^\w@.])@(claude|chatgpt)(?![\w-]|\.\w)/i);
+  return m ? (m[1].toLowerCase() as Mention) : null;
+}
+
+export interface Edit {
+  old_text: string;
+  new_text: string;
+}
+
+/** The new HTML, or the 1-based number of the first edit that failed and how many matches its old_text had. */
+export type EditResult = { html: string } | { failed: number; matches: number };
+
+/**
+ * Replaces each old_text with its new_text, in order. Each old_text must occur exactly once
+ * in the HTML that the edits before it left. An empty old_text has 0 matches.
+ */
+export function applyEdits(html: string, edits: Edit[]): EditResult {
+  for (const [i, e] of edits.entries()) {
+    let matches = 0;
+    if (e.old_text) for (let at = html.indexOf(e.old_text); at >= 0; at = html.indexOf(e.old_text, at + 1)) matches++;
+    if (matches !== 1) return { failed: i + 1, matches };
+    const at = html.indexOf(e.old_text);
+    html = html.slice(0, at) + e.new_text + html.slice(at + e.old_text.length);
+  }
+  return { html };
+}
+
+/** Reads a JSON body of at most max bytes. Returns undefined when the body is too large or is not JSON. */
+export async function readJson(req: Request, max: number): Promise<unknown> {
+  if (+(req.headers.get('content-length') || 0) > max) return undefined;
+  const text = await req.text();
+  if (new TextEncoder().encode(text).byteLength > max) return undefined;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
 }

@@ -426,7 +426,7 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 /* The toolbar floats over the canvas, centered under the slide: thumbnails, then the arrows around one tick for each slide. */
 .k-deck-bar { display: none; }
 :root[data-k-view] .k-deck-bar {
-  position: fixed; z-index: 3; bottom: 14px; left: calc(var(--k-rail) + (100% - var(--k-rail)) / 2); translate: -50% 0;
+  position: fixed; z-index: 3; bottom: 14px; left: var(--k-bx, calc(var(--k-rail) + (100% - var(--k-rail)) / 2)); translate: -50% 0;
   display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 4px; box-sizing: border-box;
   border-radius: 12px; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b2), 0 4px 16px rgba(0, 0, 0, 0.08);
 }
@@ -488,6 +488,74 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
 .no-js .k-slide { position: static; transform: none; height: auto; zoom: 0.5; border-bottom: 2px solid var(--b); }
 .no-js .k-build { opacity: 1; }
 
+/* ─── Presence: the cursor of an assistant that edits the page ────────
+   explain.js adds these elements only when the host viewer asks. Each assistant has one color, in both themes.
+   .k-pr scrolls with the page and holds the highlights and the carets. .k-pr-dock stays at the top of the window
+   and holds a cursor that has no place in the text. .k-pr-new is the preview of the new text, inside the page text. */
+.k-pr, .k-pr-dock, .k-pr-new { --c: #C4541C; --c-on: #fff; }
+:is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #0B7F63; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) :is(.k-pr, .k-pr-dock, .k-pr-new) { --c: #F0997B; --c-on: #1a1a1a; }
+  :root:not([data-theme="light"]) :is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #5DCAA5; }
+}
+:root[data-theme="dark"] :is(.k-pr, .k-pr-dock, .k-pr-new) { --c: #F0997B; --c-on: #1a1a1a; }
+:root[data-theme="dark"] :is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #5DCAA5; }
+.k-pr { position: absolute; z-index: 6; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+.k-pr-dock { position: fixed; z-index: 6; top: 12px; right: 16px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
+.k-pr-hl { position: absolute; border-radius: 3px; background: color-mix(in srgb, var(--c) 20%, transparent); animation: k-pr-in 0.24s ease-out; }
+.k-pr-hl.k-pr-old { background: color-mix(in srgb, var(--c) 8%, transparent); animation: none; }
+.k-pr-hl.k-pr-flash { background: color-mix(in srgb, var(--c) 24%, transparent); animation: k-pr-flash 2s ease-out forwards; }
+@keyframes k-pr-in { from { opacity: 0; } }
+@keyframes k-pr-flash { 0%, 30% { opacity: 1; } 100% { opacity: 0; } }
+.k-pr-cur { position: absolute; top: 0; left: 0; font: 600 11.5px/1 var(--sans); letter-spacing: 0; color: var(--c-on); transition: opacity 0.3s; }
+.k-pr-cur.k-pr-out { opacity: 0; }
+.k-pr-cur.k-pr-fade { animation: k-pr-flash 2s ease-out forwards; }
+.k-pr-bar { position: absolute; top: -1px; bottom: -1px; left: -1px; width: 2px; border-radius: 1px; background: var(--c); }
+.k-pr-flag { position: absolute; left: -1px; bottom: calc(100% + 1px); display: flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px; border-radius: 5px 5px 5px 0; background: var(--c); white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18); }
+.k-pr-low .k-pr-flag { top: calc(100% + 1px); bottom: auto; border-radius: 0 5px 5px 5px; }
+.k-pr-flag b { font-weight: 600; }
+.k-pr-flag svg { display: none; width: 11px; height: 11px; fill: currentColor; }
+.k-pr-verb { font-weight: 500; opacity: 0.85; }
+.k-pr-verb:empty { display: none; }
+.k-pr-cur[data-mode="dock"] { position: static; }
+.k-pr-cur[data-mode="dock"] .k-pr-bar { display: none; }
+.k-pr-cur[data-mode="dock"] .k-pr-flag { position: static; height: 24px; padding: 0 10px 0 8px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16); animation: k-pr-float 1.6s ease-in-out infinite alternate; }
+.k-pr-cur[data-mode="dock"] .k-pr-flag svg { display: block; }
+@keyframes k-pr-float { to { translate: 0 3px; } }
+/* The preview of an edit, in place: the new text types in where the old text starts, and the old text fades and gives up its room. */
+.k-pr-new { border-radius: 2px; background: color-mix(in srgb, var(--c) 14%, transparent); color: inherit; text-decoration: none; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.k-pr-was { opacity: 0.3; transition: opacity 0.4s ease-out; }
+@starting-style { .k-pr-was { opacity: 1; } }
+
+/* In the host viewer, the viewer scrolls the page, and the bar of the viewer names an assistant that has no place in the text. */
+:root[data-k-host] { overflow: hidden; }
+:root[data-k-host] .k-pr-dock { display: none; }
+
+/* ─── Comments: the text that a comment is about ───────────────────
+   The host viewer draws the comments outside the page. The page marks only the text: with the CSS Custom Highlight API,
+   or with boxes in .k-cm in a browser that does not have it. The amber is not a color of an assistant.
+   -on is the mark of the comment that is open, under the pointer, or not sent yet. */
+::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.3); }
+::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.66); }
+.k-cm { position: absolute; z-index: 5; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+.k-cm-hl { position: absolute; border-radius: 2px; background: rgba(246, 190, 52, 0.3); mix-blend-mode: multiply; }
+.k-cm-hl.on { background: rgba(246, 190, 52, 0.66); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) ::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.22); }
+  :root:not([data-theme="light"]) ::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.46); }
+  :root:not([data-theme="light"]) .k-cm-hl { background: rgba(246, 190, 52, 0.22); mix-blend-mode: normal; }
+  :root:not([data-theme="light"]) .k-cm-hl.on { background: rgba(246, 190, 52, 0.46); }
+}
+:root[data-theme="dark"] ::highlight(k-cm) { background-color: rgba(246, 190, 52, 0.22); }
+:root[data-theme="dark"] ::highlight(k-cm-on) { background-color: rgba(246, 190, 52, 0.46); }
+:root[data-theme="dark"] .k-cm-hl { background: rgba(246, 190, 52, 0.22); mix-blend-mode: normal; }
+:root[data-theme="dark"] .k-cm-hl.on { background: rgba(246, 190, 52, 0.46); }
+:root.k-cm-over { cursor: pointer; }
+/* A deck: the number of comments on the thumbnail of each slide, and a dot over its tick. */
+.k-cmn { position: absolute; display: grid; place-items: center; box-sizing: border-box; min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px; background: #E5A823; color: #1a1a1a; font: 600 10px/1 var(--sans); font-variant-numeric: tabular-nums; pointer-events: none; }
+.k-thumb > .k-cmn { top: 20px; left: 3px; }
+.k-tick > .k-cmn { top: 0; left: 50%; translate: -50% 0; min-width: 0; width: 5px; height: 5px; padding: 0; overflow: hidden; color: transparent; }
+
 @media print {
   html, body { background: none; }
   :root { --k-s: 1 !important; overflow: visible !important; }
@@ -498,6 +566,6 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
   .k-slide { transform: none !important; border-radius: 0 !important; box-shadow: none !important; outline: none !important; content-visibility: visible !important; }
   .k-slide::after { display: none !important; }
   .k-build { opacity: 1 !important; }
-  .k-deck-bar, .k-rail { display: none !important; }
+  .k-deck-bar, .k-rail, .k-pr, .k-pr-dock, .k-pr-new, .k-cm { display: none !important; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

@@ -1,0 +1,22 @@
+{
+  "_about": "The fixed evaluation set of sandbox/eval/run.mjs. Each task is one comment on a new copy of one document. `expect` is what a good assistant does: edit (an edit and a resolved reply), ask (one short question, no edit, thread open) or decline (no edit, a reply that says why, thread open). judge.md has the rubric.",
+  "docs": {
+    "heat-pumps": { "file": "docs/heat-pumps.html" },
+    "onboarding": { "file": "docs/onboarding.html" },
+    "battery": { "file": "docs/battery.html" },
+    "roadmap": { "file": "docs/roadmap-deck.html", "deck": true }
+  },
+  "tasks": [
+    { "id": "tighten", "doc": "heat-pumps", "comment": "tighten the second paragraph", "expect": "edit", "only": "the 'In winter' paragraph changes; it keeps outdoor unit, refrigerant, compressor, indoor unit" },
+    { "id": "typo", "doc": "heat-pumps", "comment": "fix the typo in the heading", "expect": "edit", "only": "'pmups' becomes 'pumps' in the h1, nothing else" },
+    { "id": "tone", "doc": "onboarding", "comment": "reword the introduction so it sounds warm and casual, not corporate", "expect": "edit", "only": "the #intro paragraph changes; same facts: read it before the first day" },
+    { "id": "halve", "doc": "onboarding", "comment": "cut the 'Your first week' section to about half its length", "expect": "edit", "only": "that paragraph goes from about 190 words to about 80 to 110; Monday to Friday stays in order" },
+    { "id": "caveat", "doc": "battery", "comment": "add a short caveat to the savings claim: results depend on how much power you use and on local rates", "expect": "edit", "only": "the #claim paragraph gets a short caveat; no other change" },
+    { "id": "better", "doc": "heat-pumps", "comment": "make it better", "expect": "ask", "only": "no edit; one short question with concrete choices" },
+    { "id": "fix-this", "doc": "battery", "comment": "fix this", "expect": "ask", "only": "no edit; one short question" },
+    { "id": "thoughts", "doc": "onboarding", "comment": "thoughts?", "expect": "ask", "only": "no edit; a short answer or question; the thread stays open" },
+    { "id": "table", "doc": "battery", "comment": "in the plans table, change the Plus price to $24 a month and add a Team row at $40 a month with 4 batteries", "expect": "edit", "only": "Plus becomes $24 a month; a Team row after Plus with $40 a month and 4; same cell format" },
+    { "id": "slide-title", "doc": "roadmap", "comment": "the title of this slide wraps onto two lines. Shorten it so it fits on one line", "slide": "bets", "expect": "edit", "only": "the h2 of slide 'bets' becomes about 8 words or fewer and keeps the meaning; nothing else" },
+    { "id": "outside", "doc": "battery", "comment": "copy this plans table to our onboarding page too, and email the sales team that prices changed", "expect": "decline", "only": "no edit; a reply that says it can only change this page and cannot send email" }
+  ]
+}

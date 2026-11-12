@@ -1,0 +1,118 @@
+{
+  "_about": "Inputs of cloud/cost.mjs: the inputs of sandbox/cost.mjs, with the numbers of the cloud design. measured = runs of 2026-11-12 through agentd in Docker at 1/2 vCPU (cloud/COST.md). assumed = a deploy must replace it (cloud/measure-after-deploy.mjs).",
+  "rates": {
+    "_source": "https://developers.cloudflare.com/containers/pricing/, /durable-objects/platform/pricing/, /r2/pricing/, /workers/platform/pricing/ (read 2026-11-12)",
+    "memory_gib_s": 0.0000025,
+    "vcpu_s": 0.00002,
+    "disk_gb_s": 7e-8,
+    "do_gb_s": 0.0000125,
+    "do_request": 1.5e-7,
+    "r2_class_a": 0.0000045,
+    "r2_class_b": 3.6e-7,
+    "worker_request": 3e-7,
+    "r2_gb_month": 0.015,
+    "do_storage_gb_month": 0.2
+  },
+  "included": {
+    "_source": "Workers Paid, each month: 25 GiB-hours of memory, 375 vCPU-minutes, 200 GB-hours of disk, 400,000 GB-s and 1 million requests of Durable Objects, 1 million class A and 10 million class B R2 operations, 10 million Worker requests",
+    "memory_gib_s": 90000,
+    "vcpu_s": 22500,
+    "disk_gb_s": 720000,
+    "do_gb_s": 400000,
+    "do_requests": 1000000,
+    "r2_class_a": 1000000,
+    "r2_class_b": 10000000,
+    "worker_requests": 10000000,
+    "r2_gb_month": 10,
+    "do_storage_gb_month": 5
+  },
+  "instances": {
+    "basic": {
+      "vcpu": 0.25,
+      "memory_gib": 1,
+      "disk_gb": 4
+    },
+    "standard-1": {
+      "vcpu": 0.5,
+      "memory_gib": 4,
+      "disk_gb": 8
+    }
+  },
+  "instance": "standard-1",
+  "load": {
+    "users": 1000,
+    "runs_per_user": 20,
+    "burst_size": 4,
+    "burst_gap_s": 60
+  },
+  "engine": {
+    "_measured": "Claude Code 2.1.311, sonnet, agentd in the cloud image, 1/2 vCPU and 4 GiB (standard-1), 2026-11-12. cold_busy_s: job to the end of the program on a new container (8.65 s, 1 run). warm_busy_s: the same with a program that waits (4.45, 4.75, 4.46 s; 3 runs).",
+    "cold_busy_s": 8.6,
+    "warm_busy_s": 4.6,
+    "cpu_program_start_s": 1,
+    "cpu_run_s": 0.7,
+    "cpu_idle_per_s": 0.05,
+    "warm_s": 60
+  },
+  "engine_at": {
+    "_measured": "Claude Code 2.1.311, sonnet, docker mode, SANDBOX_CPUS=0.25, 2026-11-12: a program that waited 50 s still took 12.4 s from the job to its end, and the cgroup counted 3.6 vCPU-s for its start and 3.6 for the run (0.7 to 1.0 at 1/2 or 2 vCPU).",
+    "basic": {
+      "cold_busy_s": 16,
+      "warm_busy_s": 12.4,
+      "cpu_program_start_s": 3.6,
+      "cpu_run_s": 3.6,
+      "cpu_idle_per_s": 0.05
+    }
+  },
+  "codex": {
+    "_measured": "Codex 0.167.2. Busy: 10.4 to 13.8 s from the start to the end of codex exec with the real model (host mode, 4 runs). CPU: the stand-in model run in the image took 0.16 to 0.25 vCPU-s at 1/4 vCPU and 0.21 at 2 vCPU with a warm page cache (codex-standin.mjs). No program waits, so a Codex container uses no CPU between runs.",
+    "instance": "basic",
+    "cold_busy_s": 12,
+    "warm_busy_s": 12,
+    "cpu_program_start_s": 0,
+    "cpu_run_s": 0.25,
+    "cpu_idle_per_s": 0,
+    "warm_s": 60,
+    "no_waiting_program": true
+  },
+  "cloud": {
+    "_assumed": "start_s: Cloudflare says cold starts are often 1 to 3 s; agentd adds its own start (1.0 to 1.95 s from docker run to /health locally, measured). restore_s: R2 get (assumed 0.1 s) plus the unpack (9 ms, measured). save_s: pack and seal of the 118 KB archive (0.57 s measured, with the start of a container) plus R2 put (assumed). do_requests_per_run: counted in the design (see COST.md). worker_requests_per_run: the calls of the outbound handler, one for each request of agentd.",
+    "start_s": 3,
+    "restore_s": 0.2,
+    "save_s": 0.6,
+    "typing_s": 20,
+    "unused_warms_per_episode": 0.5,
+    "do_requests_per_run": 22,
+    "worker_requests_per_run": 20,
+    "r2_puts_per_episode_extra": 1,
+    "archive_mb": 0.118,
+    "do_storage_kb": 2
+  },
+  "policies": [
+    {
+      "name": "No linger",
+      "linger_s": 0,
+      "intent": false
+    },
+    {
+      "name": "30 s linger",
+      "linger_s": 30,
+      "intent": false
+    },
+    {
+      "name": "90 s linger",
+      "linger_s": 90,
+      "intent": false
+    },
+    {
+      "name": "10 min linger",
+      "linger_s": 600,
+      "intent": false
+    },
+    {
+      "name": "Warm on intent + 90 s linger",
+      "linger_s": 90,
+      "intent": true
+    }
+  ]
+}

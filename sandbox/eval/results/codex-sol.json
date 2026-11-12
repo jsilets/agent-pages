@@ -1,0 +1,56 @@
+{
+  "label": "codex-sol",
+  "agent": "chatgpt",
+  "host": "http://localhost:8804",
+  "at": "2026-11-12T16:19:38.186Z",
+  "runs": [
+    {
+      "task": "typo",
+      "expect": "edit",
+      "comment": "fix the typo in the heading",
+      "slug": "eval-codex-sol/typo-1-mwdr6gow",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,edit_page",
+      "turns": 1,
+      "ms_reply": 9879,
+      "ms_first_tool": 4615,
+      "edited": true,
+      "versions": 1,
+      "thread_status": "resolved",
+      "reply": "I changed “pmups” to “pumps” in the heading.",
+      "replies": 1,
+      "words_before": 4,
+      "words_after": 4,
+      "removed": [
+        "<h1>How heat pmups work</h1>"
+      ],
+      "added": [
+        "<h1>How heat pumps work</h1>"
+      ]
+    },
+    {
+      "task": "better",
+      "expect": "ask",
+      "comment": "make it better",
+      "slug": "eval-codex-sol/better-1-mwdr6ort",
+      "run": 1,
+      "status": "done",
+      "model": null,
+      "tools": "list_comments,get_page,reply_to_comment",
+      "turns": 1,
+      "ms_reply": 11284,
+      "ms_first_tool": 5119,
+      "edited": false,
+      "versions": 0,
+      "thread_status": "open",
+      "reply": "Should I fix the heading typo, shorten the winter explanation, or explain running costs in more detail?",
+      "replies": 1,
+      "words_before": 0,
+      "words_after": 0,
+      "removed": [],
+      "added": []
+    }
+  ]
+}

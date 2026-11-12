@@ -2,7 +2,8 @@
 // The server sends the pages and folders as JSON. The script draws every view from them, so opening a folder,
 // moving a page, pinning and searching all redraw without a reload.
 
-import { COMMON_SCRIPT, ICON, KIT, appearance, data, icon, shell, type PageRow } from './views';
+import { COMMON_SCRIPT, ICON, KIT, UI_HELPERS, appearance, assistChip, assistDialog, assistSide, data, icon, shell, type PageRow } from './views';
+import assistantsJs from './assistants-ui.js?raw';
 import type { Item } from './activity';
 import studyCss from './study.css?raw';
 import studyJs from './study.js?raw';
@@ -292,6 +293,22 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
 @media (prefers-reduced-motion: reduce) {
   .fo-sheet, .fo-front, .l-caret, .l-side, .h-thumb { transition: none; }
 }
+
+/* The assistants: one row at the bottom of the sidebar, as the settings of an app sit there. It stays in view when the
+   sidebar scrolls. Without the sidebar, the compact chip in the bar takes its place. */
+.l-foot { position: sticky; bottom: -8px; z-index: 1; flex: none; margin: auto -8px -8px; padding: 6px 8px 8px; border-top: 0.5px solid var(--b); background: var(--side); }
+.l-nav.a-side { width: 100%; text-align: left; }
+.a-side .a-chip-lbl { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.a-side .a-chip-marks { flex: none; gap: 4px; }
+.a-side .a-mark { width: 18px; height: 18px; font-size: 9.5px; }
+.a-side .a-dot { box-shadow: 0 0 0 2px var(--side); }
+.a-side .a-dot.is-off { background: var(--side); }
+.a-side.is-wait .a-mark { background: var(--bg3); color: var(--t); }
+.a-side.is-wait .a-dot { visibility: hidden; }
+.a-side.is-none { color: var(--p); }
+.a-side.is-none > svg { color: var(--link); }
+.a-side[data-tip]:hover::after, .a-side[data-tip]:focus-visible::after { top: auto; bottom: calc(100% + 6px); left: 4px; transform: none; width: max-content; max-width: 200px; white-space: normal; text-align: left; line-height: 1.35; }
+@media (min-width: 761px) { .h-tools #assist-chip { display: none; } }
 `;
 
 /**
@@ -322,7 +339,8 @@ const SIDE = `
     <a class="l-nav" href="/?v=shared" data-nav="shared">${lu('link2')}Shared by link<span class="s-count" id="n-shared"></span></a>
     <div id="pins"></div>
     <div class="l-sec">Folders<button type="button" class="v-icon" id="new-folder" aria-label="New folder" data-tip="New folder" data-tip-end>${lu('plus')}</button></div>
-    <nav class="l-tree" id="tree" aria-label="Folders"></nav>`;
+    <nav class="l-tree" id="tree" aria-label="Folders"></nav>
+    <div class="l-foot">${assistSide()}</div>`;
 
 export function libraryHtml(input: LibraryInput, nonce: string) {
   const { pages, folders, activity, opens, me } = input;
@@ -337,6 +355,7 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
       <div class="l-crumb" id="crumb"></div>
       <label class="h-search">${icon('search')}<input id="q" type="search" placeholder="Search pages" autocomplete="off" spellcheck="false" aria-label="Search pages"><kbd>/</kbd></label>
       <div class="h-tools">
+        ${assistChip()}
         <button type="button" class="v-icon" data-pop="pop-more" data-tip="More" data-tip-end aria-label="More">${icon('more')}</button>
       </div>
       <div class="v-pop" id="pop-more" hidden>
@@ -375,6 +394,7 @@ export function libraryHtml(input: LibraryInput, nonce: string) {
 <div class="v-pop r-vers" id="pop-ver" data-anchor hidden></div>
 <div class="v-pop d-menu" id="pop-filter" data-anchor role="menu" hidden></div>
 <div class="v-toast" id="toast" role="status" hidden></div>
+${assistDialog()}
 <script type="application/json" id="data">${data({ pages, folders, activity, opens, me, kit: KIT, frame: { css: frameCss, js: frameJs }, icons: { more: ICON.more, pin: ICON.pin, lock: ICON.lock, globe: ICON.globe, right: ICON.right, check: ICON.check, pencil: LUCIDE.pencil, folder: LUCIDE.folder, deck: LUCIDE.deck, activity: LUCIDE.activity, file: LUCIDE.file, loader: LUCIDE.loader, pencilLine: LUCIDE.pencilLine, question: LUCIDE.question, alert: LUCIDE.alert, unplug: LUCIDE.unplug, upload: LUCIDE.upload, message: LUCIDE.message, arrowUpRight: LUCIDE.arrowUpRight, x: ICON.x, left: ICON.left, down: ICON.down, up: LUCIDE.up, undo: LUCIDE.undo, grid: ICON.grid, list: ICON.list, arrowUp: LUCIDE.arrowUp, arrowDown: LUCIDE.arrowDown } })}</script>`;
 
   const script =
@@ -769,7 +789,8 @@ function move(d) {
 }
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); q.focus(); q.select(); } return; }
-  if (open || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  // The keys of the library do not reach the page under the Assistants dialog.
+  if (open || $('dialog[open]') || e.target.closest('input, textarea, select, [contenteditable]')) return;
   const el = current(), slug = el && el.dataset.slug;
   if (e.key === '/') { e.preventDefault(); q.focus(); q.select(); }
   else if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); move(1); }
@@ -784,6 +805,8 @@ document.addEventListener('keydown', (e) => {
     studyJs +
     `
 render();
-`;
+` +
+    // The Assistants dialog and its two chips. A block keeps the helpers of the dialog, such as its own api(), apart from the library's.
+    `{\n${UI_HELPERS}${assistantsJs}\n}\n`;
   return shell('Pages', nonce, body, script);
 }

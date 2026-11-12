@@ -1,0 +1,82 @@
+{
+  "label": "haiku-after",
+  "agent": "claude",
+  "host": "http://localhost:8804",
+  "at": "2026-11-12T16:18:01.643Z",
+  "runs": [
+    {
+      "task": "tighten",
+      "expect": "edit",
+      "comment": "tighten the second paragraph",
+      "slug": "eval-haiku-after/tighten-1-mwdr4b68",
+      "run": 1,
+      "status": "done",
+      "model": "claude-haiku-5-5",
+      "tools": "list_comments,get_page,edit_page",
+      "turns": null,
+      "ms_reply": 9742,
+      "ms_first_tool": 2757,
+      "edited": true,
+      "versions": 1,
+      "thread_status": "resolved",
+      "reply": "I tightened the second paragraph (the winter explanation) from one long sentence into three shorter ones, keeping the same meaning.",
+      "replies": 1,
+      "words_before": 65,
+      "words_after": 50,
+      "removed": [
+        "<p>In winter, the outdoor unit takes heat from the cold air outside, even when the temperature is below zero, and a refrigerant carries that heat through a compressor, which raises its temperature a lot, and then the indoor unit releases the heat into the rooms of the house, where a fan or a set of radiators spreads it around so that every room gets warm.</p>"
+      ],
+      "added": [
+        "<p>In winter, the outdoor unit takes heat from the cold air, even below zero. A refrigerant carries that heat through a compressor, which raises its temperature a lot. The indoor unit then releases the heat into the rooms, where a fan or radiators spread it so every room gets warm.</p>"
+      ]
+    },
+    {
+      "task": "better",
+      "expect": "ask",
+      "comment": "make it better",
+      "slug": "eval-haiku-after/better-1-mwdr4ivw",
+      "run": 1,
+      "status": "done",
+      "model": "claude-haiku-5-5",
+      "tools": "list_comments,get_page,reply_to_comment",
+      "turns": null,
+      "ms_reply": 6641,
+      "ms_first_tool": 1997,
+      "edited": false,
+      "versions": 0,
+      "thread_status": "open",
+      "reply": "What should I change? I could fix the typo \"pmups\" in the heading, shorten the winter paragraph, or add a sentence on what a heat pump costs compared with a gas boiler.",
+      "replies": 1,
+      "words_before": 0,
+      "words_after": 0,
+      "removed": [],
+      "added": []
+    },
+    {
+      "task": "slide-title",
+      "expect": "edit",
+      "comment": "the title of this slide wraps onto two lines. Shorten it so it fits on one line",
+      "slug": "eval-haiku-after/slide-title-1-mwdr4o3c",
+      "run": 1,
+      "status": "done",
+      "model": "claude-haiku-5-5",
+      "tools": "list_comments,get_page,edit_page",
+      "turns": null,
+      "ms_reply": 6844,
+      "ms_first_tool": 1775,
+      "edited": true,
+      "versions": 1,
+      "thread_status": "resolved",
+      "reply": "Shortened the title of the bets slide to \"Three product bets our customers asked for most\" so it fits on one line.",
+      "replies": 1,
+      "words_before": 20,
+      "words_after": 8,
+      "removed": [
+        "<h2>We will focus the whole of the third quarter on three product bets that our customers asked for most often</h2>"
+      ],
+      "added": [
+        "<h2>Three product bets our customers asked for most</h2>"
+      ]
+    }
+  ]
+}

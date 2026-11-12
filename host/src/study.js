@@ -391,7 +391,7 @@ if ($('#pop-filter')) $('#pop-filter').addEventListener('click', (e) => {
 });
 // The keys of the page list: f goes to the filters, and v changes the layout.
 document.addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey || open || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || open || $('dialog[open]') || e.target.closest('input, textarea, select, [contenteditable]')) return;
   if (e.key === 'f') { const c = $('#main .d-chip'); if (c) { e.preventDefault(); c.focus(); } }
   else if (e.key === 'v' && $('#main .d-lay')) { e.preventDefault(); setLayout(view === 'grid' ? 'list' : 'grid'); }
 });
@@ -807,7 +807,7 @@ function reviewKey(key) {
 }
 // This listener runs before the keys of the library, so that Enter can open a row in the place of the list.
 document.addEventListener('keydown', (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey || open || !inRoom() || e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || open || $('dialog[open]') || !inRoom() || e.target.closest('input, textarea, select, [contenteditable]')) return;
   if ((e.key === 'Enter' || e.key === 'o') && !roomWide() && !place.ev && !e.target.closest('button')) {
     const el = e.target.closest('.e-row') || entries()[sel];
     if (el && el.dataset.ev) { e.preventDefault(); e.stopPropagation(); openItem(el.dataset.ev); }

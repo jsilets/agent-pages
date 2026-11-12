@@ -101,6 +101,8 @@ const Assistants = (() => {
     const intro = el('p', 'a-lede', 'You sign in on ' + P.site + ', in a new tab. Pages never sees your password. ' + P.name + ' then works on your comments with your own ' + P.plan + ' plan.');
     const live = el('div', 'a-live'); live.setAttribute('role', 'status');
     const go = el('button', 'a-go'); go.type = 'button'; go.disabled = true; go.textContent = 'Getting ready…';
+    // The runner starts a container for the person. That takes 5 to 15 seconds, so the dialog says so.
+    const slow = setTimeout(() => { if (go.disabled) setLive('Starting your private workspace. This takes a few seconds.', 'is-wait'); }, 1200);
     const steps = el('ol', 'a-steps'), one = el('li'), two = el('li');
     one.append(el('h3', '', 'Sign in to ' + P.name), go);
     steps.append(one, two);
@@ -108,7 +110,8 @@ const Assistants = (() => {
     const setLive = (text, cls = '') => { live.className = 'a-live' + (cls ? ' ' + cls : ''); live.textContent = text; };
     let f;
     try { f = await api('/api/assistants/' + a + '/connect', { method: 'POST' }); }
-    catch (err) { setLive('Could not start the sign-in: ' + err.message, 'is-bad'); go.textContent = 'Try again'; go.disabled = false; go.onclick = () => connect(a); return; }
+    catch (err) { clearTimeout(slow); setLive('Could not start the sign-in: ' + err.message, 'is-bad'); go.textContent = 'Try again'; go.disabled = false; go.onclick = () => connect(a); return; }
+    clearTimeout(slow); setLive('');
     if (!/^https?:\/\//.test(f.url)) { setLive('The sign-in page is not valid.', 'is-bad'); return; }
     flow = { a, id: f.id };
     go.disabled = false;
@@ -133,16 +136,15 @@ const Assistants = (() => {
     let input = null;
     if (f.needs_code) {
       two.append(el('h3', '', 'Paste the code from ' + P.name), el('p', '', 'After you approve, ' + P.name + ' shows a code. Copy it and paste it here.'));
-      const field = el('div', 'a-field'), paste = el('button', 'v-btn', 'Paste');
+      const field = el('div', 'a-field');
       input = el('input'); input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 2048; input.setAttribute('aria-label', 'The code from ' + P.name); input.placeholder = 'Code';
-      paste.type = 'button';
-      field.append(input, paste);
+      field.append(input);
       two.append(field);
       let sending = false;
       const send = async () => {
         const code = input.value.trim();
         if (sending || !flow || code.length < 8 || /\s/.test(code)) return;
-        sending = true; input.disabled = paste.disabled = true;
+        sending = true; input.disabled = true;
         setLive('Checking the code…', 'is-wait');
         try {
           const s = await api('/api/assistants/connect/' + encodeURIComponent(f.id) + '/code', { method: 'POST', body: JSON.stringify({ code }) });
@@ -151,15 +153,11 @@ const Assistants = (() => {
           else if (s.status === 'failed') { setLive('That code did not work. Copy the code again from ' + P.site + '.', 'is-bad'); input.value = ''; }
           else return ended(s);
         } catch (err) { setLive('Could not check the code: ' + err.message, 'is-bad'); }
-        sending = false; input.disabled = paste.disabled = false; input.focus();
+        sending = false; input.disabled = false; input.focus();
       };
       // A pasted code goes at once. A typed code goes with Enter.
       input.addEventListener('paste', () => setTimeout(send));
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
-      paste.addEventListener('click', async () => {
-        try { input.value = (await navigator.clipboard.readText()).trim(); send(); }
-        catch { input.focus(); setLive('Press ' + (/Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘V' : 'Ctrl+V') + ' to paste the code.'); }
-      });
     } else {
       two.append(el('h3', '', 'Type this code on the ' + P.name + ' page'));
       const code = el('div', 'a-code'), out = el('output', '', f.user_code || ''), copy = el('button', 'v-btn', 'Copy');

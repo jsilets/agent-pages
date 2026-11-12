@@ -58,6 +58,12 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object'
  * Sends POST <runner origin><path> with a JSON body and the shared secret, and returns the JSON object of the answer.
  * It throws RunnerError with no part of the body in its message, so a code never reaches a log.
  */
+/**
+ * The calls that can start a container, or stop one and start another for the other assistant. The runner allows a
+ * container 30 seconds to start, so 10 seconds is too short for these.
+ */
+const SLOW = new Set(['/connect', '/connect/code', '/disconnect']);
+
 export async function callRunner(env: Env, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (!env.SANDBOX_RUNNER_URL) throw new RunnerError('no sandbox runner');
   let res: Response;
@@ -66,7 +72,7 @@ export async function callRunner(env: Env, path: string, body: Record<string, un
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(env.SANDBOX_RUNNER_SECRET ? { 'x-runner-secret': env.SANDBOX_RUNNER_SECRET } : {}) },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(SLOW.has(path) ? 60_000 : 10_000),
     });
   } catch {
     throw new RunnerError(`the sandbox runner did not answer ${path}`);

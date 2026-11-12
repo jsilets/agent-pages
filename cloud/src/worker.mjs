@@ -1,5 +1,5 @@
 // The runner Worker on Cloudflare: the same HTTP contract as sandbox/local-runner.mjs (POST /run, /warm, /status,
-// /connect, /connect/code, /connect/status, /disconnect), one Durable Object for each user, and one container for each
+// /connect, /connect/code, /connect/status, /disconnect), one Durable Object for each assistant of each user, and one container for each
 // Durable Object. core.mjs has the logic. This file connects it to the platform.
 //
 // The Worker has no public URL (workersDev: false, no route, no domain). The host reaches it through a service binding.

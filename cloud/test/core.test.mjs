@@ -2,7 +2,7 @@
 // sign-in, archive, and the HTTP front. node --test cloud/test/
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { archiveKey, handle, keyOfFlow, RunnerCore, userKey } from '../src/core.mjs';
+import { archiveKey, handle, keyOfFlow, RunnerCore, userKey, objectKey } from '../src/core.mjs';
 import { fakeClock, fakeContainer, fakeHost, fakeR2, fakeStorage } from './fakes.mjs';
 
 const ORIGIN = 'https://pages.example.com';
@@ -249,13 +249,30 @@ test('disconnect: logout in the container, the archive and the key go', async ()
 test('the HTTP front: the secret, the user, the routes of a sign-in by id', async () => {
   const env = { RUNNER_SECRET: 'x'.repeat(32) };
   const calls = [];
-  const stubFor = (key) => new Proxy({}, { get: (_t, m) => async (body) => { calls.push({ key, m, body }); return [200, { ok: true }]; } });
+  const claudeKey = await objectKey('ada@example.com', 'claude'), codexKey = await objectKey('ada@example.com', 'codex');
+  const stubFor = (key) => new Proxy({}, { get: (_t, m) => async (body) => { calls.push({ key, m, body }); return [200, m === 'status' ? { assistants: { claude: { connected: key === claudeKey }, chatgpt: { connected: key === codexKey } } } : { ok: true }]; } });
   const post = (path, body, secret = env.RUNNER_SECRET) => handle(new Request(`http://runner${path}`, { method: 'POST', headers: { 'x-runner-secret': secret }, body: JSON.stringify(body) }), env, stubFor);
   assert.equal((await post('/run', job(), 'wrong')).status, 401);
   assert.equal((await post('/status', {})).status, 400);
-  assert.equal((await post('/status', { user: 'ada@example.com' })).status, 200);
-  const key = await userKey('ada@example.com');
-  assert.equal(calls[0].key, key);
+  // Each assistant has its own object. /status asks both and takes the state of each assistant from its own object.
+  const st = await post('/status', { user: 'ada@example.com' });
+  assert.equal(st.status, 200);
+  assert.deepEqual((await st.json()).assistants, { claude: { connected: true }, chatgpt: { connected: true } });
+  const key = claudeKey;
+  assert.deepEqual(calls.map((c) => c.key).sort(), [claudeKey, codexKey].sort());
+  assert.notEqual(claudeKey, codexKey);
+  assert.equal(claudeKey, await userKey('ada@example.com'), 'Claude keeps the key of the person, so an old sign-in stays');
+  calls.length = 0;
+  for (const [path, engine, want] of [['/run', 'codex', codexKey], ['/run', 'claude', claudeKey], ['/connect', 'codex', codexKey], ['/connect', 'claude', claudeKey], ['/disconnect', 'codex', codexKey], ['/warm', 'codex', codexKey], ['/warm', undefined, claudeKey]]) {
+    calls.length = 0;
+    await post(path, { ...(path === '/run' ? job() : {}), user: 'ada@example.com', engine });
+    assert.equal(calls[0].key, want, `${path} ${engine}`);
+  }
+  // A person named like the codex prefix does not get the codex object of another person.
+  assert.notEqual(await objectKey('codex:ada@example.com', 'claude'), codexKey);
+  calls.length = 0;
+  assert.equal((await post('/connect/code', { id: `${codexKey}-${'A'.repeat(24)}`, code: 'abcdefgh', user: 'ada@example.com' })).status, 200);
+  assert.equal(calls[0].key, codexKey);
   assert.equal((await post('/connect/code', { id: `${key}-${'A'.repeat(24)}`, code: 'abcdefgh' })).status, 200);
   assert.equal(calls[1].key, key);
   assert.equal(calls[1].m, 'connectCode');

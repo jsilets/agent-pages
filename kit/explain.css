@@ -492,8 +492,8 @@ pre.mermaid { background: transparent; padding: 0; text-align: center; font-fami
    explain.js adds these elements only when the host viewer asks. Each assistant has one color, in both themes.
    .k-pr scrolls with the page and holds the highlights and the carets. .k-pr-dock stays at the top of the window
    and holds a cursor that has no place in the text. .k-pr-new is the preview of the new text, inside the page text. */
-.k-pr, .k-pr-dock, .k-pr-new { --c: #C4541C; --c-on: #fff; }
-:is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #0B7F63; }
+.k-pr, .k-pr-dock, .k-pr-new { --c: #9E4119; --c-on: #fff; }
+:is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #096B54; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) :is(.k-pr, .k-pr-dock, .k-pr-new) { --c: #F0997B; --c-on: #1a1a1a; }
   :root:not([data-theme="light"]) :is(.k-pr-cur, .k-pr-box, .k-pr-new)[data-agent="chatgpt"] { --c: #5DCAA5; }

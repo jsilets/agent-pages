@@ -178,6 +178,7 @@ async function signIns(want) {
 const chipSeen = (page, sel = '#assist-chip') => page.evaluate((sel) => {
   const c = document.querySelector(sel);
   return { name: c.getAttribute('aria-label'), tip: c.dataset.tip, text: c.innerText.trim(), width: c.getBoundingClientRect().width,
+    marks: [...c.querySelectorAll('[data-mark]')].filter((m) => m.getClientRects().length).map((m) => m.dataset.mark).join(','),
     dots: [...c.querySelectorAll('.a-mark')].filter((m) => m.getClientRects().length).map((m) => { const d = m.querySelector('.a-dot'); if (!d || !d.getClientRects().length) return null; const s = getComputedStyle(d); return { bg: s.backgroundColor, border: s.borderTopWidth }; }) };
 }, sel);
 /** Where the Assistants row sits in the library sidebar: its box, the box of the sidebar, and the last row of the folder tree. */
@@ -908,8 +909,9 @@ const TESTS = {
         ok(await chip.count() === 1 && await chip.evaluate((e, sel) => e.matches(sel), sel), `${path}: the one visible control is ${sel}`);
         const seen = await chipSeen(page, sel);
         ok(seen.tip === CLAUDE_ONLY, `${path}: the tooltip has the same text (${seen.tip})`);
-        if (path === '/') ok(seen.text.replace(/\s/g, '') === 'AssistantsCG', `/: the row says "Assistants" and shows two marks (${JSON.stringify(seen.text)})`);
-        else ok(seen.text === 'C\nG' || seen.text.replace(/\s/g, '') === 'CG', `${path}: the chip shows two marks and no long text (${JSON.stringify(seen.text)})`);
+        ok(seen.marks === 'claude,chatgpt', `${path}: the chip shows the Claude and the OpenAI logos (${seen.marks})`);
+        if (path === '/') ok(seen.text === 'Assistants', `/: the row says "Assistants" (${JSON.stringify(seen.text)})`);
+        else ok(seen.text === '', `${path}: the chip shows the logos and no text (${JSON.stringify(seen.text)})`);
         ok(seen.dots.length === 2 && seen.dots[0].bg === 'rgb(59, 155, 84)', `${path}: Claude has a solid green dot (${JSON.stringify(seen.dots)})`);
         ok(seen.dots[1].bg !== 'rgb(59, 155, 84)' && parseFloat(seen.dots[1].border) > 0, `${path}: ChatGPT has a hollow dot (${JSON.stringify(seen.dots)})`);
         await shot(page, 'chip-' + (path === '/' ? 'library' : 'viewer'));
@@ -935,7 +937,7 @@ const TESTS = {
       await page.goto(BASE + '/');
       await until(() => page.getByRole('button', { name: NONE, exact: true }).isVisible(), `the library row says "${NONE}"`);
       const row = await chipSeen(page, '#assist-side');
-      ok(row.text.replace(/\s/g, '') === 'ConnectanassistantCG', `the row reads "Connect an assistant" with two marks (${JSON.stringify(row.text)})`);
+      ok(row.text === 'Connect an assistant' && row.marks === 'claude,chatgpt', `the row reads "Connect an assistant" with two logos (${JSON.stringify(row.text)}, ${row.marks})`);
       ok(row.dots.length === 2 && row.dots.every((d) => d && parseFloat(d.border) > 0), `the row has two hollow dots (${JSON.stringify(row.dots)})`);
       await page.getByRole('button', { name: NONE, exact: true }).click();
       await until(() => page.isVisible('#assist'), 'a click on the row opens the Assistants dialog');
@@ -976,7 +978,7 @@ const TESTS = {
               ok(Math.abs(s.row.h - s.navH) <= 0.5, `${where}: the row has the height of the other sidebar rows (${s.row.h} and ${s.navH} px)`);
               const seen = await chipSeen(page, sel);
               ok(seen.dots.length === 2 && seen.dots.every((d) => d), `${where}: the row shows a mark and a dot for each assistant (${JSON.stringify(seen.dots)})`);
-              ok(seen.text.replace(/\s/g, '') === (want.claude ? 'AssistantsCG' : 'ConnectanassistantCG'), `${where}: the row text (${JSON.stringify(seen.text)})`);
+              ok(seen.text === (want.claude ? 'Assistants' : 'Connect an assistant') && seen.marks === 'claude,chatgpt', `${where}: the row text and logos (${JSON.stringify(seen.text)}, ${seen.marks})`);
             } else {
               ok(m.chipH === 32 && m.chipLeft >= 0, `${where}: the chip has the height of the other controls (${m.chipH} px)`);
               ok(m.chipRight <= m.moreLeft, `${where}: the chip is before More`);

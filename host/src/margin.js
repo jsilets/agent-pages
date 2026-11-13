@@ -446,9 +446,8 @@ const Margin = (() => {
         o.id = id + '-' + i; o.setAttribute('role', 'option'); o.setAttribute('aria-selected', String(i === at));
         if (a === '~settings') o.append(el('span', 'cm-gear'), el('b', '', 'Assistant settings'));
         else {
-          const ava = el('span', 'cm-ava', nameOf(a)[0]), st = stateOf(a);
-          ava.setAttribute('aria-hidden', 'true');
-          o.append(ava, el('b', '', nameOf(a)), el('span', 'cm-at', '@' + a), el('span', 'cm-state' + (st === 'off' ? ' is-off' : ''), STATE_TEXT[st]));
+          const st = stateOf(a);
+          o.append(logo(a, 'cm-ava is-tile'), el('b', '', nameOf(a)), el('span', 'cm-at', '@' + a), el('span', 'cm-state' + (st === 'off' ? ' is-off c-red' : ''), STATE_TEXT[st]));
         }
         // mousedown, so the box keeps the focus.
         o.addEventListener('mousedown', (e) => { e.preventDefault(); pick(a); });
@@ -501,7 +500,9 @@ const Margin = (() => {
     return p;
   }
   function avatar(author, cls = '') {
-    const agent = AGENTS[author] ? author : '', a = el('span', 'cm-ava' + (agent ? ' is-agent ' + tone(agent) : '') + cls, who(author).initials);
+    // An assistant has its logo. A person has initials.
+    if (AGENTS[author]) return logo(author, 'cm-ava is-tile' + cls);
+    const a = el('span', 'cm-ava' + cls, who(author).initials);
     a.setAttribute('aria-hidden', 'true');
     return a;
   }
@@ -670,7 +671,7 @@ const Margin = (() => {
     c.el.setAttribute('aria-expanded', String(active));
     const agent = AGENTS[t.author] ? t.author : '';
     c.dot.className = 'cm-dot' + (agent ? ' is-agent ' + tone(agent) : '') + (active ? ' is-active' : '') + (unread.has(t.id) ? ' has-new' : '');
-    c.dot.replaceChildren(who(t.author).initials.slice(0, 1), ...(t.replies.length ? [el('i', '', String(t.replies.length + 1))] : []));
+    c.dot.replaceChildren(agent ? logo(agent) : who(t.author).initials.slice(0, 1), ...(t.replies.length ? [el('i', '', String(t.replies.length + 1))] : []));
     c.dot.setAttribute('aria-label', labelOf(t));
     c.dot.setAttribute('aria-expanded', String(active));
   }

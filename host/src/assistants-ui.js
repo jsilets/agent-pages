@@ -30,25 +30,31 @@ const Assistants = (() => {
   /** The label of the model that the assistant uses now, or ''. */
   const modelOf = (s) => (s.models.find((m) => m.id === (s.model || s.default_model)) || {}).label || '';
   /** The state of one assistant in words, for the list of the dialog. */
-  const words = (s) => !s.handled ? 'Not set up on this host'
+  const words = (s) => !s.handled ? 'Not set up here'
     : s.error ? 'Could not check the sign-in'
     : s.connected === true ? 'Connected' + (modelOf(s) ? ' · Model: ' + modelOf(s) : '')
     : s.connected === false ? 'Not connected' : 'Not available now';
   const stop = () => { clearTimeout(poll); poll = 0; };
+  /** A failure in plain words. The message of the host can name its parts and a status code, so the dialog never shows it. */
+  const plain = (err) => {
+    const m = String((err && err.message) || err || '');
+    return /\b409\b|sign-in is running/.test(m) ? 'Another sign-in is still open. Wait a minute, then try again.' : 'Pages could not reach the assistant. Try again in a minute.';
+  };
   const svgOpen = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8.5 8.5M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></svg>';
 
-  function frameOf(t) { title.textContent = t; }
+  /** The title of the dialog, with the logo of the assistant when the dialog is about one assistant. */
+  function frameOf(t, a) { title.replaceChildren(...(a ? [logo(a)] : []), t); }
   /** The list: each assistant with its state, Connect or Disconnect, and its models. */
   function list() {
     stop(); flow = null; back.hidden = true; frameOf('Assistants');
     const lede = el('p', 'a-lede', 'Ask an assistant in a comment with @claude or @chatgpt. Each one works with your own plan.');
     if (!data) { box.replaceChildren(lede, el('p', failed ? 'a-note' : '', failed ? 'Pages could not load the assistants. Try again in a minute.' : 'Loading…')); if (!failed) load(); return; }
     // With no runner, no assistant can work. One line says why, in place of a state on each row.
-    const note = data.runner ? null : el('p', 'a-note', data.error === 'no sandbox runner' ? 'Assistants are not set up on this host.' : 'Pages cannot reach the assistants right now. Try again in a minute.');
+    const note = data.runner ? null : el('p', 'a-note', data.error === 'no sandbox runner' ? 'Assistants are not set up here.' : 'Pages cannot reach the assistants right now. Try again in a minute.');
     const rows = Object.keys(PROVIDER).map((a) => {
       const s = state(a) || { handled: false, connected: null, models: [], default_model: null, model: null };
       const row = el('section', 'a-row ' + tone(a)), top = el('div', 'a-top'), whoEl = el('div', 'a-who');
-      const ava = el('span', 'cm-ava is-agent', a === 'chatgpt' ? 'G' : PROVIDER[a].name[0]); ava.setAttribute('aria-hidden', 'true');
+      const ava = logo(a, 'is-tile');
       const stEl = el('span', 'a-state' + (s.error ? ' is-warn' : s.connected === true ? ' is-on' : ''), words(s));
       whoEl.append(el('b', '', PROVIDER[a].name), stEl);
       top.append(ava, whoEl);
@@ -62,10 +68,10 @@ const Assistants = (() => {
         b.setAttribute('aria-label', 'Disconnect ' + PROVIDER[a].name);
         let armed = 0;
         b.addEventListener('click', async () => {
-          if (!armed) { b.classList.add('is-armed'); b.textContent = 'Disconnect ' + PROVIDER[a].name + '?'; armed = setTimeout(() => { armed = 0; b.classList.remove('is-armed'); b.textContent = 'Disconnect'; }, 4000); return; }
+          if (!armed) { b.classList.add('is-armed', 'c-red'); b.textContent = 'Disconnect ' + PROVIDER[a].name + '?'; armed = setTimeout(() => { armed = 0; b.classList.remove('is-armed', 'c-red'); b.textContent = 'Disconnect'; }, 4000); return; }
           clearTimeout(armed); b.disabled = true;
           try { await api('/api/assistants/' + a + '/connection', { method: 'DELETE' }); toast(PROVIDER[a].name + ' is disconnected'); }
-          catch (err) { toast('Could not disconnect: ' + err.message); }
+          catch (err) { toast('Could not disconnect. ' + plain(err)); }
           await load(true); list();
         });
         top.append(b);
@@ -81,7 +87,7 @@ const Assistants = (() => {
           lab.append(r, b, ...(m.note ? [el('span', '', m.note)] : []));
           r.addEventListener('change', async () => {
             try { await api('/api/assistants/' + a, { method: 'PUT', body: JSON.stringify({ model: m.id === s.default_model ? null : m.id }) }); s.model = m.id === s.default_model ? null : m.id; stEl.textContent = words(s); toast(PROVIDER[a].name + ' uses ' + m.label); }
-            catch (err) { toast('Could not save the model: ' + err.message); load(true); }
+            catch (err) { toast('Could not save the model. ' + plain(err)); load(true); }
           });
           set.append(lab);
         });
@@ -97,22 +103,26 @@ const Assistants = (() => {
     stop();
     const P = PROVIDER[a];
     if (!dlg.open) dlg.showModal();
-    back.hidden = false; frameOf('Connect ' + P.name);
+    back.hidden = false; frameOf('Connect ' + P.name, a);
+    // A sign-in that starts is the flow of the dialog: a load of the states that ends now does not draw the list over it.
+    flow = { a };
     const intro = el('p', 'a-lede', 'You sign in on ' + P.site + ', in a new tab. Pages never sees your password. ' + P.name + ' then works on your comments with your own ' + P.plan + ' plan.');
     const live = el('div', 'a-live'); live.setAttribute('role', 'status');
     const go = el('button', 'a-go'); go.type = 'button'; go.disabled = true; go.textContent = 'Getting ready…';
     // The runner starts a container for the person. That takes 5 to 15 seconds, so the dialog says so.
     const slow = setTimeout(() => { if (go.disabled) setLive('Starting your private workspace. This takes a few seconds.', 'is-wait'); }, 1200);
+    // A step shows only when it has its content, so a number never stands alone. The second step comes with the answer.
     const steps = el('ol', 'a-steps'), one = el('li'), two = el('li');
     one.append(el('h3', '', 'Sign in to ' + P.name), go);
-    steps.append(one, two);
+    steps.append(one);
     box.replaceChildren(intro, steps, live, el('p', 'a-fine', 'You can disconnect at any time in Assistants.'));
-    const setLive = (text, cls = '') => { live.className = 'a-live' + (cls ? ' ' + cls : ''); live.textContent = text; };
+    const setLive = (text, cls = '') => { live.className = 'a-live' + (cls ? ' ' + cls : '') + (cls === 'is-bad' ? ' c-red' : ''); live.textContent = text; };
+    const again = (text) => { setLive(text, 'is-bad'); go.replaceChildren('Try again'); go.disabled = false; go.onclick = () => connect(a); };
     let f;
     try { f = await api('/api/assistants/' + a + '/connect', { method: 'POST' }); }
-    catch (err) { clearTimeout(slow); setLive('Could not start the sign-in: ' + err.message, 'is-bad'); go.textContent = 'Try again'; go.disabled = false; go.onclick = () => connect(a); return; }
+    catch (err) { clearTimeout(slow); again('Could not start the sign-in. ' + plain(err)); return; }
     clearTimeout(slow); setLive('');
-    if (!/^https?:\/\//.test(f.url)) { setLive('The sign-in page is not valid.', 'is-bad'); return; }
+    if (!/^https?:\/\//.test(f.url)) { again('Could not open the sign-in. Try again in a minute.'); return; }
     flow = { a, id: f.id };
     go.disabled = false;
     go.innerHTML = svgOpen; go.append('Continue to ' + P.name);
@@ -122,6 +132,7 @@ const Assistants = (() => {
       stop();
       const shown = flow = { a, done: true };
       one.classList.add('is-done'); two.classList.add('is-done');
+      go.disabled = true;
       setLive(P.name + ' is connected', 'is-on');
       say(P.name + ' is connected.');
       await load(true);
@@ -130,11 +141,12 @@ const Assistants = (() => {
     };
     const ended = (s) => {
       stop(); flow = null;
-      setLive(s.status === 'expired' ? 'The sign-in ran out of time.' : 'The sign-in did not finish' + (s.detail ? ': ' + s.detail : '.'), 'is-bad');
+      setLive(s.status === 'expired' ? 'The sign-in ran out of time.' : 'The sign-in did not finish.', 'is-bad');
       go.onclick = () => connect(a); go.replaceChildren('Start again');
     };
     let input = null;
     if (f.needs_code) {
+      steps.append(two);
       two.append(el('h3', '', 'Paste the code from ' + P.name), el('p', '', 'After you approve, ' + P.name + ' shows a code. Copy it and paste it here.'));
       const field = el('div', 'a-field');
       input = el('input'); input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false; input.maxLength = 2048; input.setAttribute('aria-label', 'The code from ' + P.name); input.placeholder = 'Code';
@@ -152,22 +164,22 @@ const Assistants = (() => {
           if (s.status === 'pending') setLive('Waiting for ' + P.name + '…', 'is-wait');
           else if (s.status === 'failed') { setLive('That code did not work. Copy the code again from ' + P.site + '.', 'is-bad'); input.value = ''; }
           else return ended(s);
-        } catch (err) { setLive('Could not check the code: ' + err.message, 'is-bad'); }
+        } catch (err) { setLive('Could not check the code. ' + plain(err), 'is-bad'); }
         sending = false; input.disabled = false; input.focus();
       };
       // A pasted code goes at once. A typed code goes with Enter.
       input.addEventListener('paste', () => setTimeout(send));
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
     } else {
-      two.append(el('h3', '', 'Type this code on the ' + P.name + ' page'));
+      two.append(el('h3', '', 'Copy this code'));
       const code = el('div', 'a-code'), out = el('output', '', f.user_code || ''), copy = el('button', 'v-btn', 'Copy');
       out.setAttribute('aria-label', 'Your code: ' + String(f.user_code || '').split('').join(' '));
       copy.type = 'button';
       copy.addEventListener('click', () => navigator.clipboard.writeText(f.user_code || '').then(() => { copy.textContent = 'Copied'; setTimeout(() => (copy.textContent = 'Copy'), 1400); }, () => toast('Could not copy the code')));
       code.append(out, copy);
-      two.prepend(code);
+      two.append(code);
       steps.prepend(two);
-      one.querySelector('h3').textContent = 'Continue to ' + P.name + ' and type the code';
+      one.querySelector('h3').textContent = 'Type the code on the ' + P.name + ' page';
       setLive('');
     }
     // The state of the sign-in, every 2 seconds, until it ends.
@@ -210,7 +222,7 @@ const Assistants = (() => {
   const SHAPE = 'assistants-chip';
   let shown = null;
   const mark = (a, dot) => {
-    const m = el('span', 'a-mark ' + tone(a), a === 'chatgpt' ? 'G' : P[a].name[0]);
+    const m = logo(a, 'a-mark');
     if (dot) { m.dataset.state = dot; m.append(el('i', 'a-dot is-' + dot)); }
     return m;
   };
@@ -252,7 +264,7 @@ const Assistants = (() => {
     const offered = data && data.runner ? Object.keys(P).filter((a) => Assistants.state(a)?.handled) : [];
     if (!offered.length) {
       shown = null;
-      draw('off', {}, !data ? 'Assistants: Pages could not load them' : data.error === 'no sandbox runner' ? 'Assistants: not set up on this host' : 'Assistants: off now. Pages cannot reach them');
+      draw('off', {}, !data ? 'Assistants: Pages could not load them' : data.error === 'no sandbox runner' ? 'Assistants: not set up here' : 'Assistants: off now. Pages cannot reach them');
       try { localStorage.setItem(SHAPE, 'off'); } catch {}
       return;
     }

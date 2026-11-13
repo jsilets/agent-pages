@@ -56,14 +56,31 @@ export const ICON: Record<string, string> = {
   spark: '<path d="M12 3.5c.6 3.9 2.6 5.9 6.5 6.5-3.9.6-5.9 2.6-6.5 6.5-.6-3.9-2.6-5.9-6.5-6.5 3.9-.6 5.9-2.6 6.5-6.5Z"/><path d="M18.5 15.5c.2 1.4.9 2.1 2.3 2.3-1.4.2-2.1.9-2.3 2.3-.2-1.4-.9-2.1-2.3-2.3 1.4-.2 2.1-.9 2.3-2.3Z"/>',
   globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5Z"/>',
 };
+/**
+ * The marks of the assistants, from Simple Icons: the Claude mark and the OpenAI mark, each one path on a 24-unit grid.
+ * The marks belong to Anthropic and OpenAI. Use them only to show which assistant is which, at their own shape and color.
+ * They are our own constants, never text from the API. The CSS colors them (.a-logo).
+ */
+export const MARKS: Record<'claude' | 'chatgpt', string> = {
+  claude: 'm4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z',
+  chatgpt: 'M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z',
+};
+/** The mark of an assistant as HTML: the logo alone, or in a round tile. It is hidden from screen readers. */
+export const logoHtml = (a: 'claude' | 'chatgpt', cls = '') =>
+  `<span class="a-logo a-${a}${cls ? ' ' + cls : ''}" data-mark="${a}" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${MARKS[a]}"/></svg></span>`;
 export const icon = (name: string) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
 
 const HOST_CSS = `
 html, body { height: 100%; margin: 0; background: var(--bg); color: var(--p); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
 :focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
-:root { --press: #000; --ok: #3B9B54; --warn: #B87600; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --press: #fff; --warn: #EF9F27; } }
-:root[data-theme="dark"] { --press: #fff; --warn: #EF9F27; }
+:root { --ok: #3B9B54; --warn: #B87600; --hov-pct: 10%; --act-pct: 17%; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --warn: #EF9F27; --hov-pct: 13%; --act-pct: 21%; } }
+:root[data-theme="dark"] { --warn: #EF9F27; --hov-pct: 13%; --act-pct: 21%; }
+/* The states of a control. A quiet control gets a see-through layer of ink, so its hover shows on any surface: the bar, a
+   card, a dialog, a code box. --hover-solid is the same layer on the page color, for a ring that must match it.
+   A filled control moves toward the page color by a clear step, and a pressed one moves one step more. Its text keeps
+   at least 7:1. A disabled filled control is a soft tile with gray text, with no hover. */
+:root { --hover: color-mix(in srgb, var(--s) var(--hov-pct), transparent); --active: color-mix(in srgb, var(--s) var(--act-pct), transparent); --hover-solid: color-mix(in srgb, var(--s) var(--hov-pct), var(--bg)); --press: color-mix(in srgb, var(--p) 88%, var(--bg)); --press-2: color-mix(in srgb, var(--p) 78%, var(--bg)); --fill-off: color-mix(in srgb, var(--p) 9%, var(--bg)); }
 button { font-family: var(--sans); }
 
 /* ─── The bar ───────────────────────────────────────────── */
@@ -76,7 +93,8 @@ button { font-family: var(--sans); }
 .v-frame { flex: 1; display: block; width: 100%; border: 0; background: var(--bg); }
 
 .v-icon { position: relative; flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--s); cursor: pointer; text-decoration: none; }
-.v-icon:hover, .v-icon[aria-expanded="true"] { background: var(--bg2); color: var(--p); text-decoration: none; }
+.v-icon:hover, .v-icon[aria-expanded="true"] { background: var(--hover); color: var(--p); text-decoration: none; }
+.v-icon:active { background: var(--active); }
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .v-icon.is-done { color: var(--ink); }
 
@@ -101,6 +119,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 .v-share { flex: none; height: 30px; margin-left: 6px; padding: 0 14px; border: 0; border-radius: 999px; background: var(--p); color: var(--bg); font: 600 13px var(--sans); cursor: pointer; }
 .v-share:hover { background: var(--press); }
+.v-share:active { background: var(--press-2); }
 .v-share svg { display: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .v-present { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 30px; margin-left: 6px; padding: 0 12px 0 10px; border: 0.5px solid var(--b2); border-radius: 999px; background: transparent; color: var(--p); font: 600 13px var(--sans); cursor: pointer; }
 .v-present:hover { background: var(--bg2); }
@@ -124,7 +143,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 @keyframes v-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } }
 .v-label { padding: 8px 10px 6px; font: 500 11.5px var(--sans); color: var(--t); }
 .v-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 6px 10px; box-sizing: border-box; border: 0; border-radius: 8px; background: transparent; color: var(--p); font: 500 13px var(--sans); text-align: left; text-decoration: none; cursor: pointer; }
-.v-item:hover, .v-item:focus-visible { background: var(--bg2); outline: none; text-decoration: none; }
+.v-item:hover, .v-item:focus-visible { background: var(--hover); outline: none; text-decoration: none; }
+.v-item:active { background: var(--active); }
 .v-item > svg { color: var(--s); }
 .v-item .v-meta { margin-left: auto; font: 12px var(--mono); color: var(--t); white-space: nowrap; }
 .v-item.is-danger, .v-item.is-danger > svg { color: var(--line); }
@@ -150,7 +170,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-sharepop h2 { margin: 0; font: 600 14px var(--sans); }
 .v-create { width: 100%; height: 34px; border: 0; border-radius: 8px; background: var(--p); color: var(--bg); font: 600 13px var(--sans); cursor: pointer; }
 .v-create:hover:not(:disabled) { background: var(--press); }
-.v-create:disabled { opacity: 0.5; cursor: default; }
+.v-create:active:not(:disabled) { background: var(--press-2); }
+.v-create:disabled, .v-create:disabled:hover { background: var(--fill-off); color: var(--s); opacity: 1; cursor: default; }
 .v-links { list-style: none; margin: 0; padding: 0; }
 .v-links:empty { display: none; }
 .v-links li { display: flex; align-items: center; gap: 4px; height: 38px; }
@@ -210,7 +231,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* ─── Comments: cards in the margin, aligned with their text in the page ───
    wide: a column of cards beside the page. mid: a thin column of markers, and the open card floats beside its marker.
    narrow: a thin gutter of markers, and the open card in a sheet at the bottom. margin.js sets --y in page pixels. */
-.v-btn:disabled { opacity: 0.5; cursor: default; }
+.v-btn:disabled, .v-btn:disabled:hover { background: transparent; opacity: 0.5; cursor: default; }
 .cm-col { --cm-w: 316px; position: relative; z-index: 4; flex: none; width: var(--cm-w); box-sizing: border-box; }
 .cm-col[hidden] { display: none; }
 /* wide: the margin lies over the right part of the view, so the page keeps its place. margin.js sets --cm-x (placeMargin).
@@ -233,7 +254,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-rail > .cm-card { position: absolute; top: 0; left: 12px; right: 16px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.15s, box-shadow 0.15s; }
 .v-body[data-cm="wide"] .cm-rail > .cm-card { left: 0; right: 0; }
 .cm-rail > .is-in { transition: none !important; }
-.cm-card.is-hover:not(.is-active) { background: var(--bg2); box-shadow: 0 0 0 0.5px var(--b2); }
+.cm-card.is-hover:not(.is-active) { background: color-mix(in srgb, var(--s) 7%, var(--bg2)); box-shadow: 0 0 0 0.5px var(--b2), 0 1px 3px rgba(0, 0, 0, 0.06); }
 .cm-card.is-active { z-index: 2; cursor: default; background: var(--bg); box-shadow: 0 0 0 0.5px var(--b), 0 6px 20px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06); }
 .v-body[data-cm="wide"] .cm-rail > .cm-card.is-active { transform: translate3d(-14px, var(--y, 0), 0); }
 .cm-card.has-new:not(.is-active) { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--link) 55%, transparent); }
@@ -242,7 +263,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-c.is-new { animation: cm-in 0.16s cubic-bezier(0.2, 0, 0, 1); }
 @keyframes cm-in { from { opacity: 0; translate: 0 4px; } }
 .cm-ava { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--bg3); box-shadow: inset 0 0 0 0.5px var(--b); color: var(--s); font: 600 11px/1 var(--sans); letter-spacing: 0.02em; }
-.cm-ava.is-agent { background: var(--a); color: var(--a-on); box-shadow: none; }
+.cm-ava.a-logo.is-tile { background: var(--a-tile); }
+.cm-ava.a-logo.a-claude { box-shadow: none; }
 .cm-main { min-width: 0; }
 .cm-head { display: flex; align-items: flex-start; gap: 4px; min-height: 28px; }
 .cm-names { flex: 1; min-width: 0; display: flex; flex-direction: column; padding-top: 0; }
@@ -288,25 +310,28 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-card.is-compose .cm-quote:empty { display: none; }
 /* The assistants that "@" offers. */
 .cm-pick { position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 4px); padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); animation: v-pop 0.12s ease-out; }
-.cm-opt { display: grid; grid-template-columns: 22px auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
-.cm-opt .cm-ava { grid-row: span 2; width: 22px; height: 22px; background: var(--a); color: var(--a-on); box-shadow: none; }
+.cm-opt { display: grid; grid-template-columns: 24px auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; padding: 5px 8px; border-radius: 7px; cursor: pointer; }
+.cm-opt .cm-ava { grid-row: span 2; width: 24px; height: 24px; }
 .cm-opt b { font-size: 12.5px; }
 .cm-opt .cm-at { font: 500 11.5px var(--mono); color: var(--t); }
 .cm-opt .cm-state { grid-column: 2 / 4; font-size: 11px; color: var(--s); }
 .cm-opt .cm-state:empty { display: none; }
 .cm-opt .cm-state.is-off { color: var(--line, #993C1D); }
-.cm-opt.is-settings { grid-template-columns: 22px 1fr; margin-top: 2px; border-top: 0.5px solid var(--b); border-radius: 0 0 7px 7px; padding-top: 7px; }
+.cm-opt.is-settings { grid-template-columns: 24px 1fr; margin-top: 2px; border-top: 0.5px solid var(--b); border-radius: 0 0 7px 7px; padding-top: 7px; }
 .cm-opt.is-settings b { font-weight: 500; color: var(--s); }
-.cm-gear { width: 22px; height: 14px; }
-.cm-opt.is-on, .cm-opt:hover { background: var(--bg2); }
+.cm-gear { width: 24px; height: 14px; }
+.cm-opt.is-on, .cm-opt:hover { background: var(--hover); }
 /* The markers: a card in short form, for the narrow layouts. They sit in the margin, never over the page. */
 .cm-dot { display: none; place-items: center; position: relative; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50% 50% 50% 4px; background: #E5A823; color: #1a1a1a; font: 600 10.5px/1 var(--sans); cursor: pointer; box-shadow: 0 0 0 2px var(--bg), 0 1px 3px rgba(0, 0, 0, 0.2); transition: transform 0.15s; }
-.cm-dot.is-agent { background: var(--a); color: var(--a-on); }
+.cm-dot:hover { background: #E5A823; }
+.cm-dot.is-agent, .cm-dot.is-agent:hover { background: var(--a-tile); color: var(--a-on); }
+.cm-dot.is-agent .a-logo { width: 14px; height: 14px; }
+.cm-dot.is-agent.a-chatgpt { box-shadow: 0 0 0 2px var(--bg), inset 0 0 0 0.5px var(--b2), 0 1px 3px rgba(0, 0, 0, 0.2); }
 .cm-dot.is-hover, .cm-dot.is-active { transform: scale(1.12); }
 .cm-dot.is-active { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px #E5A823; }
 .cm-dot.has-new::after { content: ""; position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--link); box-shadow: 0 0 0 2px var(--bg); }
 .cm-dot i { position: absolute; right: -5px; bottom: -4px; min-width: 14px; height: 14px; padding: 0 3px; box-sizing: border-box; border-radius: 7px; background: var(--p); color: var(--bg); font: 600 9px/14px var(--sans); font-style: normal; }
-.cm-dot.is-draft { background: var(--p); color: var(--bg); font-size: 15px; }
+.cm-dot.is-draft, .cm-dot.is-draft:hover { background: var(--p); color: var(--bg); font-size: 15px; }
 .v-body:not([data-cm="wide"]) .cm-dot { display: grid; }
 .v-body:not([data-cm="wide"]) .cm-rail > .cm-dot { position: absolute; top: 0; left: 8px; transform: translate3d(0, var(--y, 0), 0); transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .v-body[data-cm="narrow"] .cm-rail > .cm-dot { left: 4px; width: 22px; height: 22px; }
@@ -329,12 +354,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-slot > .cm-card textarea { font-size: 16px; }
 /* The button at a selection in the page. The layer lies over the frame and takes no pointer events itself. */
 .cm-over { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; }
-.cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 9px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); transform-origin: 50% 100%; animation: cm-add 0.16s cubic-bezier(0.2, 0, 0, 1); }
+.cm-add { position: absolute; top: 0; left: 0; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 7px 0 10px; border: 0; border-radius: 9px; background: var(--p); color: var(--bg); font: 600 12.5px var(--sans); white-space: nowrap; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2), 0 1px 3px rgba(0, 0, 0, 0.12); transform-origin: 50% 100%; animation: cm-add 0.16s cubic-bezier(0.2, 0, 0, 1); }
 .cm-add[data-side="below"] { transform-origin: 50% 0; animation-name: cm-add-down; }
 .cm-add[hidden] { display: none; }
 .cm-add:hover { background: var(--press); }
+.cm-add:active { background: var(--press-2); }
 .cm-add svg { width: 15px; height: 15px; }
-.cm-add kbd { height: 17px; box-shadow: none; background: color-mix(in srgb, var(--bg) 16%, transparent); color: inherit; opacity: 0.8; font-size: 10.5px; }
+.cm-add kbd { display: inline-grid; place-items: center; height: 20px; margin-left: 2px; padding: 0 6px; box-sizing: border-box; border: 0; border-radius: 5px; box-shadow: none; background: color-mix(in srgb, var(--bg) 14%, transparent); color: inherit; opacity: 0.72; font: 500 11px/1 var(--sans); letter-spacing: 0.04em; }
 @keyframes cm-add { from { opacity: 0; transform: translateY(6px) scale(0.96); } }
 @keyframes cm-add-down { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
 .v-body.is-ro .cm-add, .v-body.is-ro .cm-done { display: none; }
@@ -346,7 +372,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-respop { width: 340px; max-height: min(440px, calc(100vh - var(--bar) - 16px)); overflow: auto; overscroll-behavior: contain; }
 .v-respop .v-label { display: flex; justify-content: space-between; }
 .v-resrow { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; padding: 8px 8px 9px 10px; border-radius: 8px; }
-.v-resrow:hover, .v-resrow:focus-within { background: var(--bg2); }
+.v-resrow:hover, .v-resrow:focus-within { background: var(--hover); }
 .v-resrow .cm-ava { width: 24px; height: 24px; margin-top: 1px; font-size: 10px; }
 .v-resmain { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; line-height: 1.45; }
 .v-reshead { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 18px; }
@@ -361,12 +387,21 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .cm-mpop { position: fixed; z-index: 45; min-width: 160px; padding: 4px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.06); animation: v-pop 0.12s ease-out; }
 .cm-mpop .v-item { min-height: 30px; padding: 5px 10px; }
 
-/* Assistants: one color each, for the reaction, the chip in the bar and the cursor in the page. The kit has the same colors. */
-.a-claude { --a: #C4541C; --a-on: #fff; }
-.a-chatgpt { --a: #0B7F63; --a-on: #fff; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .a-claude { --a: #F0997B; --a-on: #1a1a1a; } :root:not([data-theme="light"]) .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; } }
-:root[data-theme="dark"] .a-claude { --a: #F0997B; --a-on: #1a1a1a; }
-:root[data-theme="dark"] .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; }
+/* Assistants: one color each, for the reaction, the chip in the bar and the cursor in the page. The kit has the same colors.
+   --a is the text color: 4.5:1 or more on its own tint. --a-mark and --a-tile color the logo and the round tile behind it:
+   Claude's mark keeps Anthropic's clay on a soft clay tile, and the OpenAI mark is the text color on a neutral tile. */
+.a-claude { --a: #9E4119; --a-on: #fff; --a-mark: #D97757; --a-tile: color-mix(in srgb, #D97757 14%, var(--bg)); }
+.a-chatgpt { --a: #096B54; --a-on: #fff; --a-mark: var(--p); --a-tile: var(--bg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .a-claude { --a: #F0997B; --a-on: #1a1a1a; --a-tile: color-mix(in srgb, #D97757 16%, var(--bg)); } :root:not([data-theme="light"]) .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; --a-tile: color-mix(in srgb, var(--p) 9%, var(--bg)); } }
+:root[data-theme="dark"] .a-claude { --a: #F0997B; --a-on: #1a1a1a; --a-tile: color-mix(in srgb, #D97757 16%, var(--bg)); }
+:root[data-theme="dark"] .a-chatgpt { --a: #5DCAA5; --a-on: #1a1a1a; --a-tile: color-mix(in srgb, var(--p) 9%, var(--bg)); }
+/* The logo of an assistant: the mark alone, or in a round tile (is-tile) where a person has an avatar. The mark keeps its
+   own shape and color, and the tile keeps clear space around it. The mark is decoration: a text near it names the assistant. */
+.a-logo { position: relative; flex: none; display: inline-grid; place-items: center; box-sizing: border-box; color: var(--a-mark); }
+.a-logo > svg { width: 100%; height: 100%; fill: currentColor; stroke: none; }
+.a-logo.is-tile { border-radius: 50%; background: var(--a-tile); }
+.a-logo.is-tile > svg { width: 58%; height: 58%; }
+.a-logo.is-tile.a-chatgpt { box-shadow: inset 0 0 0 0.5px var(--b2); }
 
 /* The reaction: the assistant took the comment. The dot shows while the run goes on. */
 .v-react { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-top: 7px; padding: 0 9px 0 7px; box-sizing: border-box; border-radius: 999px; background: color-mix(in srgb, var(--a) 11%, transparent); box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--a) 42%, transparent); color: var(--a); font: 600 11.5px var(--sans); cursor: default; }
@@ -380,8 +415,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* A run that did not finish: one quiet line with one action. */
 .v-runfail { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 7px; font-size: 12px; color: var(--s); }
 .v-link { padding: 0; border: 0; border-radius: 3px; background: none; color: var(--link); font: 600 12px var(--sans); cursor: pointer; }
-.v-link:hover { text-decoration: underline; }
-.v-link:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+.v-link:hover { background: none; text-decoration: underline; text-underline-offset: 2px; }
+.v-link:disabled, .v-link:disabled:hover { background: none; opacity: 0.5; cursor: default; text-decoration: none; }
 
 /* The assistants that work on this page now, like the avatars of the people in a shared document. */
 .v-who { flex: none; display: flex; align-items: center; gap: 4px; margin-right: 8px; }
@@ -389,8 +424,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-whochip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 4px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--a) 11%, transparent); color: var(--p); font: 500 12px var(--sans); white-space: nowrap; cursor: pointer; animation: v-pop 0.18s ease-out; }
 .v-whochip:hover { background: color-mix(in srgb, var(--a) 18%, transparent); }
 .v-whochip b { font-weight: 600; color: var(--a); }
-.v-ava { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--a); color: var(--a-on); animation: v-ring 1.8s ease-out infinite; }
-.v-ava svg { width: 10px; height: 10px; fill: currentColor; stroke: none; }
+.v-ava { width: 20px; height: 20px; animation: v-ring 1.8s ease-out infinite; }
 @keyframes v-ring { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--a) 45%, transparent); } to { box-shadow: 0 0 0 6px transparent; } }
 .v-ver.is-bump { animation: v-bump 0.9s ease-out; }
 @keyframes v-bump { 0%, 30% { background: color-mix(in srgb, var(--link) 16%, transparent); border-color: var(--link); } }
@@ -404,13 +438,15 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .v-dlg-acts .v-btn, .v-dlg-acts .v-create { width: auto; height: 32px; padding: 0 14px; align-self: auto; }
 .v-sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .v-btn { flex: none; align-self: flex-start; height: 30px; padding: 0 10px; border: 0.5px solid var(--b2); border-radius: 8px; background: transparent; color: var(--p); font: 500 12.5px var(--sans); cursor: pointer; }
-.v-btn:hover { background: var(--bg2); }
+.v-btn:hover { background: var(--hover); }
+.v-btn:active:not(:disabled) { background: var(--active); }
 
 /* ─── Assistants: the sign-in and the model of each assistant ─── */
 .a-dlg { width: 440px; padding: 0; overflow: hidden; }
 .a-dlg[open] { display: flex; flex-direction: column; max-height: min(640px, calc(100vh - 32px)); }
 .a-head { flex: none; display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 10px 0 20px; }
-.a-head h2 { flex: 1; margin: 0; }
+.a-head h2 { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; }
+.a-head h2 .a-logo { width: 18px; height: 18px; }
 .v-icon[hidden] { display: none; }
 .a-back { margin-left: -10px; }
 .a-body { flex: 1; min-height: 0; overflow: auto; padding: 0 20px 20px; }
@@ -418,7 +454,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-row { padding: 16px 0; border-top: 0.5px solid var(--b); }
 .a-row:first-of-type { border-top: 0; padding-top: 8px; }
 .a-top { display: flex; align-items: center; gap: 10px; }
-.a-top .cm-ava { width: 30px; height: 30px; font-size: 12px; }
+.a-top .a-logo { width: 32px; height: 32px; }
 .a-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .a-who b { font: 600 14px/18px var(--sans); }
 .a-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; line-height: 18px; color: var(--s); }
@@ -426,11 +462,12 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-state.is-on { color: var(--p); }
 .a-state.is-on::before { background: #3B9B54; }
 .a-top .v-create, .a-top .v-btn { width: auto; height: 30px; padding: 0 14px; border-radius: 999px; align-self: center; }
-.v-btn.is-armed { background: var(--fill); color: var(--ink); border-color: transparent; }
+.v-btn.is-armed, .v-btn.is-armed:hover { background: var(--fill); color: var(--ink); border-color: transparent; }
 .a-models { display: grid; gap: 6px; margin: 12px 0 0 40px; border: 0; padding: 0; }
 .a-models legend { padding: 0; margin-bottom: 6px; font: 500 12px var(--sans); color: var(--s); }
 .a-model { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 9px 12px 9px 10px; border-radius: 10px; box-shadow: inset 0 0 0 0.5px var(--b2); cursor: pointer; }
-.a-model:hover { background: var(--bg2); }
+.a-model:hover { background: var(--hover); }
+.a-model:active { background: var(--active); }
 .a-model:has(input:checked) { box-shadow: inset 0 0 0 1.5px var(--p); }
 .a-model:has(input:focus-visible) { outline: 2px solid var(--link); outline-offset: 1px; }
 .a-model input { grid-row: span 2; width: 15px; height: 15px; margin: 2px 0 0; accent-color: var(--p); }
@@ -439,15 +476,17 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-model .v-tag { padding: 0 6px; font: 500 10.5px/16px var(--sans); }
 .a-none { margin: 12px 0 0 40px !important; font-size: 12.5px !important; }
 /* The steps of a sign-in: one main button, then the code. */
-.a-steps { display: grid; gap: 16px; margin: 14px 0 0; padding: 0; list-style: none; counter-reset: a-step; }
+.a-steps { display: grid; gap: 20px; margin: 16px 0 0; padding: 0; list-style: none; counter-reset: a-step; }
 .a-steps > li { position: relative; display: grid; gap: 8px; padding-left: 34px; counter-increment: a-step; }
 .a-steps > li::before { content: counter(a-step); position: absolute; left: 0; top: 0; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--bg2); font: 600 11.5px/1 var(--sans); color: var(--s); }
 .a-steps > li.is-done::before { content: "✓"; background: var(--p); color: var(--bg); }
+
 .a-steps h3 { margin: 1px 0 0; font: 600 13.5px/20px var(--sans); }
 .a-steps p { margin: 0 !important; }
 .a-go { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 40px; border: 0; border-radius: 10px; background: var(--p); color: var(--bg); font: 600 14px var(--sans); cursor: pointer; }
 .a-go:hover:not(:disabled) { background: var(--press); }
-.a-go:disabled { opacity: 0.5; cursor: default; }
+.a-go:active:not(:disabled) { background: var(--press-2); }
+.a-go:disabled, .a-go:disabled:hover { background: var(--fill-off); color: var(--s); opacity: 1; cursor: default; }
 .a-go svg { width: 15px; height: 15px; }
 .a-field { display: flex; gap: 6px; }
 .a-field input { flex: 1; min-width: 0; height: 40px; box-sizing: border-box; padding: 0 12px; border: 0.5px solid var(--b2); border-radius: 10px; background: var(--bg); color: var(--p); font: 500 14px var(--mono); }
@@ -456,14 +495,16 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-code { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 10px 10px 16px; border-radius: 12px; background: var(--bg2); }
 .a-code output { font: 600 26px/1.2 var(--mono); letter-spacing: 0.08em; color: var(--p); user-select: all; }
 .a-code .v-btn { height: 32px; align-self: auto; border-radius: 999px; padding: 0 14px; font-weight: 600; }
-.a-live { display: flex; align-items: center; gap: 8px; min-height: 22px; margin-top: 16px; font-size: 13px; color: var(--s); }
-.a-live:empty { display: none; }
-.a-live.is-wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--b2); border-top-color: var(--p); animation: a-spin 0.8s linear infinite; }
+/* The status line has one place: under the steps, in line with their text. It keeps its height when it is empty, so
+   nothing under it moves when a status comes or goes. */
+.a-live { display: flex; align-items: flex-start; gap: 8px; min-height: 20px; margin: 12px 0 0 34px; font-size: 13px; line-height: 20px; color: var(--s); }
+.a-live::before { flex: none; }
+.a-live.is-wait::before { content: ""; box-sizing: border-box; width: 14px; height: 14px; margin-top: 3px; border-radius: 50%; border: 2px solid var(--b); border-top-color: var(--s); animation: a-spin 0.8s linear infinite; }
 .a-live.is-on { color: var(--p); font-weight: 600; }
-.a-live.is-on::before { content: "✓"; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #3B9B54; color: #fff; font-size: 11px; }
-.a-live.is-bad { color: var(--line, #A32D2D); }
+.a-live.is-on::before { content: "✓"; display: grid; place-items: center; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 10px; line-height: 1; }
+.a-live.is-bad { color: var(--line); }
 @keyframes a-spin { to { transform: rotate(360deg); } }
-.a-fine { margin-top: 14px !important; font-size: 12px !important; color: var(--t) !important; }
+.a-fine { margin-top: 12px !important; font-size: 12px !important; color: var(--t) !important; }
 .v-create.is-danger { background: #A32D2D; color: #fff; }
 .v-create.is-danger:hover { background: #8A2424; }
 .a-state.is-warn::before { background: var(--warn); }
@@ -472,21 +513,23 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* The status chip in the bar of the library and of the viewer: a mark for each assistant, with a dot for its state.
    With no connection it says "Connect an assistant". The chip keeps its width until the first answer. */
 .v-icon.a-chip { display: inline-flex; align-items: center; gap: 7px; width: auto; min-width: 32px; padding: 0 7px; box-sizing: border-box; color: var(--p); font: 500 12.5px/1 var(--sans); white-space: nowrap; }
-.a-chip-marks { display: inline-flex; align-items: center; gap: 5px; }
+.a-chip-marks { display: inline-flex; align-items: center; gap: 7px; }
 .a-chip-lbl:empty { display: none; }
-.a-mark { position: relative; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--a); color: var(--a-on); font: 600 10px/1 var(--sans); }
-.a-mark[data-state="off"] { background: color-mix(in srgb, var(--a) 14%, transparent); color: var(--a); }
+.a-mark { position: relative; display: grid; place-items: center; width: 18px; height: 18px; }
+.a-mark.a-logo > svg { width: 15px; height: 15px; }
 .a-mark.is-icon { width: 16px; height: 16px; background: none; color: var(--s); }
-.a-dot { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
-.a-chip:hover .a-dot { box-shadow: 0 0 0 2px var(--bg2); }
+/* The dot sits on the corner of the mark, outside the round glyph, with a ring in the color of the surface. */
+.a-dot { position: absolute; right: -3px; bottom: -3px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg); }
+.a-chip:hover .a-dot { box-shadow: 0 0 0 1.5px var(--hover-solid); }
 .a-dot.is-on { background: var(--ok); }
 .a-dot.is-off { border: 1.5px solid var(--s); background: var(--bg); }
-.a-chip:hover .a-dot.is-off { background: var(--bg2); }
+.a-chip:hover .a-dot.is-off { background: var(--hover-solid); }
+.a-chip:active .a-dot { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--s) var(--act-pct), var(--bg)); }
+.a-chip:active .a-dot.is-off { background: color-mix(in srgb, var(--s) var(--act-pct), var(--bg)); }
 .a-dot.is-warn { background: var(--warn); }
 .a-dot.is-new { animation: a-dot 0.14s ease-out; }
 @keyframes a-dot { from { opacity: 0; } }
 .a-mark.is-icon .a-dot { right: -2px; bottom: -2px; }
-.a-chip.is-wait .a-mark:not(.is-icon) { background: var(--bg3); color: var(--t); }
 .a-chip.is-wait .a-dot { visibility: hidden; }
 .a-chip.is-wait, .a-chip.is-off { color: var(--t); }
 .a-chip.is-off .a-mark.is-icon { color: var(--t); }
@@ -494,7 +537,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .a-chip.is-none .a-dot { display: none; }
 .a-chip[data-tip]:hover::after, .a-chip[data-tip]:focus-visible::after { width: max-content; max-width: 240px; white-space: normal; text-align: left; line-height: 1.35; }
 
-.v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
+/* translate, not transform, centers the toast: the entrance animates transform, and it must not move the toast sideways. */
+.v-toast { position: fixed; left: 50%; bottom: 24px; z-index: 50; translate: -50% 0; padding: 8px 14px; border-radius: 999px; background: var(--p); color: var(--bg); font: 500 13px var(--sans); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); animation: v-pop 0.16s ease-out; }
 .v-toast[hidden] { display: none; }
 
 @media (max-width: 640px) {
@@ -507,6 +551,18 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .v-icon.v-count { padding: 0 9px 0 8px; gap: 5px; }
   .v-who { margin-right: 4px; }
   .v-whochip { padding: 0 4px; }
+}
+/* On a phone the Assistants dialog is a sheet at the bottom, with room for the home bar and 44 px targets. */
+@media (max-width: 640px) {
+  .v-dlg.a-dlg { width: 100%; max-width: 100%; margin: auto 0 0; border-width: 0.5px 0 0; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); animation: cm-up 0.22s cubic-bezier(0.2, 0, 0, 1); }
+  .a-dlg[open] { max-height: calc(100dvh - 24px); }
+  .a-head { height: 56px; padding: 0 6px 0 16px; }
+  .a-head .v-icon { width: 44px; height: 44px; }
+  .a-back { margin-left: -12px; }
+  .a-body { padding: 0 16px 20px; }
+  .a-top .v-create, .a-top .v-btn, .a-code .v-btn { height: 44px; padding: 0 18px; }
+  .a-go, .a-field input { height: 48px; }
+  .a-model { min-height: 44px; }
 }
 /* At the medium and narrow widths the chip shows its marks and dots only. With no connection: one icon with one dot. */
 @media (max-width: 999px) {
@@ -523,7 +579,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .a-dot.is-new { animation: none; }
   .v-pop, .v-toast, [data-tip]:hover::after, [data-tip]:focus-visible::after, .v-react, .v-react svg, .v-react i, .v-whochip, .v-ava, .v-ver.is-bump, .cm-c.is-new, .cm-more.is-new, .cm-pick, .cm-sheet, .cm-add, .cm-mpop { animation: none; }
   .v-stage > .v-frame.is-in.is-on, .cm-rail > .cm-card, .cm-rail > .cm-dot, .cm-dot, .cm-card { transition: none; }
-  .a-live.is-wait::before { animation: none; }
+  .a-live.is-wait::before, .v-dlg.a-dlg { animation: none; }
 }
 
 `;
@@ -578,14 +634,14 @@ export const assistDialog = () => `<div class="v-sr" id="live" role="status" ari
 
 /** The status chip of the assistants. It starts neutral, with the width of its usual form. assistants-ui.js draws its state. */
 export const assistChip = () =>
-  `<button type="button" class="v-icon a-chip is-wait" id="assist-chip" aria-label="Assistants: checking" data-tip="Assistants: checking" data-tip-end><span class="a-chip-marks" aria-hidden="true"><span class="a-mark a-claude">C</span><span class="a-mark a-chatgpt">C</span></span><span class="a-chip-lbl"></span></button>`;
+  `<button type="button" class="v-icon a-chip is-wait" id="assist-chip" aria-label="Assistants: checking" data-tip="Assistants: checking" data-tip-end><span class="a-chip-marks" aria-hidden="true">${logoHtml('claude', 'a-mark')}${logoHtml('chatgpt', 'a-mark')}</span><span class="a-chip-lbl"></span></button>`;
 
 /**
  * The row of the assistants at the bottom of the library sidebar: the same state as the chip, in the form of a sidebar row.
  * assistants-ui.js draws both forms. The tooltip opens above the row, so the bottom of the window does not cut it.
  */
 export const assistSide = () =>
-  `<button type="button" class="l-nav a-side is-wait" id="assist-side" aria-label="Assistants: checking" data-tip="Assistants: checking">${icon('spark')}<span class="a-chip-lbl">Assistants</span><span class="a-chip-marks" aria-hidden="true"><span class="a-mark a-claude">C</span><span class="a-mark a-chatgpt">C</span></span></button>`;
+  `<button type="button" class="l-nav a-side is-wait" id="assist-side" aria-label="Assistants: checking" data-tip="Assistants: checking">${icon('spark')}<span class="a-chip-lbl">Assistants</span><span class="a-chip-marks" aria-hidden="true">${logoHtml('claude', 'a-mark')}${logoHtml('chatgpt', 'a-mark')}</span></button>`;
 
 /** The helpers that the Assistants dialog needs, in the library and in the viewer. Every text goes in with textContent. */
 export const UI_HELPERS = `
@@ -593,6 +649,10 @@ const api = (path, init = {}) => fetch(path, { ...init, headers: { 'content-type
   .then(async (r) => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); return r.status === 204 ? null : r.json(); });
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const tone = (a) => 'a-' + (a === 'chatgpt' ? 'chatgpt' : 'claude');
+// The marks are constants of the host, not text from the API, so innerHTML is safe here.
+const MARKS = ${JSON.stringify(MARKS)};
+/** The logo of an assistant: the mark alone, or with 'is-tile' in a round tile. The name next to it says who it is. */
+const logo = (a, cls = '') => { const k = a === 'chatgpt' ? 'chatgpt' : 'claude', s = el('span', 'a-logo a-' + k + (cls ? ' ' + cls : '')); s.dataset.mark = k; s.setAttribute('aria-hidden', 'true'); s.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + MARKS[k] + '"/></svg>'; return s; };
 const say = (text) => { $('#live').textContent = text; };
 `;
 
@@ -999,8 +1059,9 @@ function reaction(r) {
   if (r.status === 'failed') {
     const off = (r.detail || '').startsWith('not_signed_in');
     const row = el('div', 'v-runfail'), b = el('button', 'v-link', off ? 'Connect' : 'Try again');
-    row.append(el('span', '', off ? who + ': not connected' : who + ' did not finish'), b);
-    if (!off) row.title = r.detail || '';
+    row.append(el('span', '', off ? who + ' is not connected' : who + ' did not finish'), b);
+    // The host keeps the technical detail. The person sees why in plain words.
+    if (!off) row.title = whyFailed(r.detail, who);
     b.type = 'button';
     b.onclick = () => (off ? Assistants.connect(r.agent, () => retry(r.comment_id)) : retry(r.comment_id, b));
     return [row];
@@ -1014,10 +1075,18 @@ function reaction(r) {
   if (!reacted.has(key)) { reacted.add(key); chip.classList.add('is-new'); }
   return [chip];
 }
+/** Why a run did not finish, in plain words, from the detail that the host stored. */
+function whyFailed(detail, who) {
+  const d = String(detail || '');
+  if (d.startsWith('timeout')) return who + ' took too long, so it stopped.';
+  if (/\b409\b|sign-in is running/.test(d)) return 'A sign-in was still open, so ' + who + ' could not start. Try again in a moment.';
+  if (/^runner:|did not answer|answered \d{3}/.test(d)) return 'Pages could not reach ' + who + '. Try again in a moment.';
+  return 'Something stopped ' + who + ' before it finished.';
+}
 async function retry(id, b) {
   if (b) b.disabled = true;
   try { await api('/api/comments/' + id + '/run', { method: 'POST' }); boost(); }
-  catch (err) { toast('Could not start the run: ' + err.message); if (b) b.disabled = false; }
+  catch { toast('The assistant could not start. Try again in a minute.'); if (b) b.disabled = false; }
 }
 
 ` +
@@ -1031,7 +1100,6 @@ async function retry(id, b) {
 // so a version that an agent publishes shows within about 2 seconds. An idle poll is one indexed query. A hidden tab does not poll.
 // It shows each run three times: as the reaction on the comment, as a chip in the bar, and as a cursor in the page.
 const VERBS = { starting: 'is starting', reading: 'is reading', editing: 'is editing', replying: 'is replying' };
-const POINTER = '<span class="v-ava"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 1.8 13.6 6.6 8.9 8.4 7 13.4z"/></svg></span>';
 const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
 const stage = $('.v-stage');
 // runs: the runs that are running, by public id. landed: the new text of each edit, to mark it in the next version.
@@ -1081,8 +1149,7 @@ function drawWho() {
     let b = chips.get(r.id);
     if (!b) {
       b = el('button', 'v-whochip ' + tone(r.agent)); b.type = 'button';
-      b.innerHTML = POINTER;
-      b.append(el('span', 'v-lbl'));
+      b.append(logo(r.agent, 'is-tile v-ava'), el('span', 'v-lbl'));
       b.onclick = () => toFrame({ type: 'reveal', id: r.id });
       chips.set(r.id, b); who.append(b);
     }

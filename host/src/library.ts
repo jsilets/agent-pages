@@ -299,11 +299,17 @@ mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--
 .l-foot { position: sticky; bottom: -8px; z-index: 1; flex: none; margin: auto -8px -8px; padding: 6px 8px 8px; border-top: 0.5px solid var(--b); background: var(--side); }
 .l-nav.a-side { width: 100%; text-align: left; }
 .a-side .a-chip-lbl { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.a-side .a-chip-marks { flex: none; gap: 4px; }
-.a-side .a-mark { width: 18px; height: 18px; font-size: 9.5px; }
-.a-side .a-dot { box-shadow: 0 0 0 2px var(--side); }
+.a-side .a-chip-marks { flex: none; gap: 8px; margin-right: 2px; }
+/* .l-nav svg sets the size and the gray of the icons in a row. The logos keep their own size and color. */
+.a-side .a-mark > svg { width: 15px; height: 15px; color: inherit; }
+.a-side .a-dot { box-shadow: 0 0 0 1.5px var(--side); }
 .a-side .a-dot.is-off { background: var(--side); }
-.a-side.is-wait .a-mark { background: var(--bg3); color: var(--t); }
+/* The ring of a dot takes the color of the row under it: the row on hover (study.css, --tint) and pressed (--tint2). */
+.l .a-side:hover .a-dot { box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--p) 5%, var(--side)); }
+.l .a-side:hover .a-dot.is-off { background: color-mix(in oklab, var(--p) 5%, var(--side)); }
+.l.is-study .l-nav.a-side:active { background: var(--tint2); }
+.l .a-side:active .a-dot { box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--p) 9%, var(--side)); }
+.l .a-side:active .a-dot.is-off { background: color-mix(in oklab, var(--p) 9%, var(--side)); }
 .a-side.is-wait .a-dot { visibility: hidden; }
 .a-side.is-none { color: var(--p); }
 .a-side.is-none > svg { color: var(--link); }

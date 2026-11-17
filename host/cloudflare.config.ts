@@ -11,7 +11,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bindings, defineConfig } from 'cf/config';
+import { bindings, defineConfig, exports } from 'cf/config';
 import type { ConfigContext } from 'cf/config';
 
 const NAME = 'agent-pages';
@@ -50,6 +50,13 @@ export default defineConfig(({ mode }: ConfigContext) => {
       // so the Worker has no workers.dev origin and serves only the custom domain.
       workersDev: false,
       ...(production ? { domains: [profile.hostname] } : {}),
+      // Empty classes that keep the data of the Sunday Workspace deploy (src/retained-objects.ts).
+      exports: {
+        PageRoom: exports.durableObject({ storage: 'sqlite' }),
+        SheetRoom: exports.durableObject({ storage: 'sqlite' }),
+        ConnectionDO: exports.durableObject({ storage: 'sqlite' }),
+        DatasetDO: exports.durableObject({ storage: 'sqlite' }),
+      },
       env: {
         DB: bindings.d1(production ? { name } : { name: `${NAME}-development`, id: LOCAL_D1_ID }),
         PAGES: bindings.r2({ name: production ? name : `${NAME}-development` }),

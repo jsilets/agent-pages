@@ -884,3 +884,5 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+
+export { ConnectionDO, DatasetDO, PageRoom, SheetRoom } from './retained-objects';
